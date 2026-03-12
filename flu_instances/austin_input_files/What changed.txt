@@ -1,0 +1,24 @@
+﻿Updated mobility to current values from Jose, but dwell time is not weighted, and population size used was 18+ not 16+.
+
+Updated calendars, separate for each subpop
+
+Updated vaccination, now age specific
+
+Updated Mv(0) [now age specific] and M(0) [M(0) is still a work in progress]
+
+Updated humidity
+
+Updated initial E in West (works better given code changes)
+
+Using hospitalization data based on NSSP as calibration standards
+
+Updated start date based on hospitalization data from NSSP
+
+Updated vax induced risk reduction for infec. & hosp  
+
+Had wrong Hr to R rate, so updated this
+
+Updated mobility modifier to exclude trips > 30 miles.  Now day of week specific.
+
+Code changes since last update:  Remy made vacc AxR.  Added the switch for PySoft and turned it off.  Made mobility modifer a schedule, so can vary by day of week.  
+

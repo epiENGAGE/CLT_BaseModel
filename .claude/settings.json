@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc -l /Users/rfp437/Work/CityLevelTransmission/CLT_BaseModel/flu_core/flu_*.py)"
+    ]
+  }
+}
