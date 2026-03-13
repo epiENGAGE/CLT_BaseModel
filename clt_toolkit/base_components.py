@@ -1066,8 +1066,7 @@ class Schedule(StateVariable, ABC):
     
     def postprocess_data_input(self) -> None:
         """
-        Subpop classes must provide a concrete implementation of
-        updating `current_val` in-place.
+        Subpop classes must provide a concrete implementation.
         
         Used to modify timeseries_df format, if necessary.
         """
@@ -1196,6 +1195,51 @@ class MetapopModel(ABC):
 
         for subpop_model in self.subpop_models.values():
             subpop_model.modify_simulation_settings(updates_dict)
+
+    def replace_schedule(self,
+                         schedule_name: str,
+                         new_df,
+                         subpop_name: str = None) -> None:
+        """
+        Replaces the underlying DataFrame for a named schedule on one or all
+        subpopulations and re-indexes it for O(1) lookup via
+        `postprocess_data_input`.
+
+        Parameters:
+            schedule_name (str):
+                Name of the schedule to replace (must match a key in each
+                SubpopModel's `schedules` dict).
+            new_df:
+                New DataFrame for the schedule. Must have the same column
+                structure as the original schedule's `timeseries_df`.
+            subpop_name (Optional[str]):
+                If given, only replaces the schedule on that subpopulation.
+                If None (default), replaces the schedule on every subpopulation.
+        """
+
+        if subpop_name is not None:
+            if subpop_name not in self.subpop_models:
+                raise MetapopModelError(f"No subpopulation named '{subpop_name}'.")
+            self.subpop_models[subpop_name].replace_schedule(schedule_name, new_df)
+        else:
+            for subpop_model in self.subpop_models.values():
+                subpop_model.replace_schedule(schedule_name, new_df)
+
+    def modify_random_seed(self, seed: int) -> None:
+        """
+        Re-seeds every SubpopModel's RNG.  SubpopModel *i* (0-indexed in
+        insertion order) receives a child seed derived from `seed` via
+        numpy's SeedSequence so that subpopulations are seeded differently
+        but reproducibly from a single root seed.
+
+        Parameters:
+            seed (int):
+                Root seed used to derive per-subpopulation seeds.
+        """
+
+        child_seeds = np.random.SeedSequence(seed).spawn(len(self.subpop_models))
+        for subpop_model, child_seq in zip(self.subpop_models.values(), child_seeds):
+            subpop_model.RNG = np.random.Generator(np.random.MT19937(child_seq))
 
     def simulate_until_day(self,
                            simulation_end_day: int) -> None:
@@ -1482,6 +1526,43 @@ class SubpopModel(ABC):
 
         self.simulation_settings = \
             updated_dataclass(self.simulation_settings, updates_dict)
+
+    def replace_schedule(self,
+                         schedule_name: str,
+                         new_df) -> None:
+        """
+        Replaces the underlying DataFrame for a named schedule and
+        re-indexes it for O(1) lookup by calling `postprocess_data_input`.
+
+        This is the primitive needed by `ScenarioRunner` to swap in
+        alternative time-varying inputs (e.g. a higher-coverage vaccine
+        schedule) without rebuilding the model from scratch.
+
+        Parameters:
+            schedule_name (str):
+                Name of the schedule to replace (must match a key in
+                `self.schedules`).
+            new_df:
+                New DataFrame for the schedule. Must have the same column
+                structure as the original schedule's `timeseries_df`.
+
+        Raises:
+            SubpopModelError: if `schedule_name` is not a valid schedule on
+                this model.
+        """
+
+        if schedule_name not in self.schedules:
+            raise SubpopModelError(
+                f"No schedule named '{schedule_name}' on SubpopModel "
+                f"'{self.name}'. Valid schedules: {list(self.schedules.keys())}"
+            )
+
+        schedule = self.schedules[schedule_name]
+        # Copy so that postprocess_data_input does not mutate the caller's
+        # DataFrame (important when the same new_df is passed to multiple
+        # subpopulations, e.g. via MetapopModel.replace_schedule).
+        schedule.timeseries_df = new_df.copy()
+        schedule.postprocess_data_input()
 
     def compute_total_pop_age_risk(self) -> np.ndarray:
         """

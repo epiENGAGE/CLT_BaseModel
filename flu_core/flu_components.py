@@ -1353,6 +1353,36 @@ class FluSubpopModel(clt.SubpopModel):
             #   with the reflected updates
             self.params = clt.updated_dataclass(self.params, updates_dict)
 
+    def reset_simulation(self) -> None:
+        """
+        Extends the base `reset_simulation` to recompute `MV.init_val`
+        from the currently loaded vaccine schedule before resetting.
+
+        This ensures that if the `daily_vaccines` schedule has been replaced
+        (e.g. via `replace_schedule`), the model resets to an initial
+        vaccine-induced immunity that is consistent with the new schedule,
+        rather than the value computed at construction time from the original
+        schedule.
+
+        The recomputation uses `VaxInducedImmunity.adjust_initial_value()`
+        with `MV.original_init_val` as the base — the unmodified value
+        from the state JSON — so adjustments do not compound across calls.
+        """
+
+        MV = self.epi_metrics["MV"]
+        new_init_val = MV.adjust_initial_value(
+            MV.original_init_val,
+            self.start_real_date,
+            self.params,
+            self.schedules,
+            self.simulation_settings.timesteps_per_day,
+        )
+        # Use the init_val setter so current_val is also updated immediately,
+        # before super()'s reset loop overwrites it again (harmlessly).
+        MV.init_val = new_init_val
+
+        super().reset_simulation()
+
 
 class FluMetapopModel(clt.MetapopModel, ABC):
     """
