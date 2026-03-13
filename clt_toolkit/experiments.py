@@ -1,3 +1,47 @@
+"""
+Experiment
+==========
+
+Runs a ``SubpopModel`` or ``MetapopModel`` for multiple independent
+replications and writes state-variable trajectories to a SQLite database.
+
+Typical use
+-----------
+::
+
+    experiment = Experiment(
+        model=metapop_model,
+        state_variables_to_record=["S", "E", "D"],
+        database_filename="results/experiment.db",
+    )
+
+    experiment.run_static_inputs(
+        num_reps=100,
+        simulation_end_day=200,
+        days_between_save_history=1,
+        seeds=list(range(100)),   # optional — makes replicates reproducible
+    )
+
+    # Retrieve results as a (rep × timepoint) DataFrame,
+    # summed across all subpopulations and age/risk groups by default:
+    df = experiment.get_state_var_df("S")
+
+    # Or restrict to a specific subpopulation / age / risk group:
+    df = experiment.get_state_var_df("S", subpop_name="city1", age_group=2)
+
+Results database schema
+-----------------------
+The ``results`` table contains one row per
+(subpop, state variable, age group, risk group, replicate, timepoint):
+
+    subpop_name TEXT, state_var_name TEXT,
+    age_group INT, risk_group INT,
+    rep INT, timepoint INT, value FLOAT
+
+For multi-scenario comparisons (baseline vs. counterfactuals) use
+``ScenarioRunner`` in ``scenario_runner.py`` instead.
+"""
+
 import numpy as np
 import pandas as pd
 from dataclasses import fields
@@ -225,7 +269,8 @@ class Experiment:
                           num_reps: int,
                           simulation_end_day: int,
                           days_between_save_history: int = 1,
-                          results_filename: str = None):
+                          results_filename: str = None,
+                          seeds: Optional[list] = None):
         """
         Runs the associated `SubpopModel` or `MetapopModel` for a
         given number of independent replications until `simulation_end_day`.
@@ -245,6 +290,13 @@ class Experiment:
             results_filename (str):
                 if specified, must be valid filename with suffix ".csv" --
                 experiment results are saved to this CSV file.
+            seeds (Optional[list]):
+                if provided, must have length >= num_reps. Before
+                replicate i the model's RNG(s) are re-seeded from
+                seeds[i], giving reproducible and paired replicates
+                when the same seed list is used across scenarios.
+                For a MetapopModel, each SubpopModel receives a distinct
+                child seed derived from seeds[i] via numpy SeedSequence.
         """
 
         if self.has_been_run:
@@ -252,16 +304,21 @@ class Experiment:
                                   "Create a new Experiment instance to simulate "
                                   "more replications.")
 
-        else:
-            self.has_been_run = True
+        if seeds is not None and len(seeds) < num_reps:
+            raise ExperimentError(
+                f"seeds list has {len(seeds)} entries but num_reps is {num_reps}."
+            )
 
-            self.create_results_sql_table()
+        self.has_been_run = True
 
-            self.simulate_reps_and_save_results(reps=num_reps,
-                                                end_day=simulation_end_day,
-                                                days_per_save=days_between_save_history,
-                                                inputs_are_static=True,
-                                                filename=results_filename)
+        self.create_results_sql_table()
+
+        self.simulate_reps_and_save_results(reps=num_reps,
+                                            end_day=simulation_end_day,
+                                            days_per_save=days_between_save_history,
+                                            inputs_are_static=True,
+                                            filename=results_filename,
+                                            seeds=seeds)
 
     def get_state_var_df(self,
                          state_var_name: str,
@@ -424,7 +481,8 @@ class Experiment:
                                        end_day: int,
                                        days_per_save: int,
                                        inputs_are_static: bool,
-                                       filename: str = None):
+                                       filename: str = None,
+                                       seeds: Optional[list] = None):
         """
         Helper function that executes main loop over
         replications in `Experiment` and saves results.
@@ -443,6 +501,11 @@ class Experiment:
             filename (str):
                 if specified, must be valid filename with suffix ".csv" --
                 experiment results are saved to this CSV file.
+            seeds (Optional[list]):
+                if provided, seeds[rep] is used to re-seed the model's
+                RNG before replicate `rep`. For a MetapopModel, calls
+                `modify_random_seed`; for a SubpopModel, calls
+                `modify_random_seed` directly.
         """
 
         # Override each subpop simulation_settings's save_daily_history attribute --
@@ -461,6 +524,10 @@ class Experiment:
 
         # Loop through replications
         for rep in range(reps):
+
+            # Re-seed before this replicate if a seed list was provided
+            if seeds is not None:
+                model.modify_random_seed(seeds[rep])
 
             # Reset model and clear its history
             model.reset_simulation()

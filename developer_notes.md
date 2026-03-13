@@ -1,5 +1,30 @@
 # Journal
 
+## 2026 03 13
+
+### Scenario configuration infrastructure (`clt_toolkit/`)
+
+**`replace_schedule` on `SubpopModel` and `MetapopModel`** (`base_components.py`)
+- Added `SubpopModel.replace_schedule(schedule_name, new_df)`: swaps a named schedule's `timeseries_df` and re-runs `postprocess_data_input()` so the processed index is consistent with the new data. Copies `new_df` before assigning to avoid mutating the caller's DataFrame.
+- Added `MetapopModel.replace_schedule(schedule_name, new_df, subpop_name=None)`: fans out to all subpopulations when `subpop_name` is omitted, or targets a single subpopulation when specified.
+- Added `MetapopModel.modify_random_seed(seed)`: re-seeds all subpopulation RNGs from a single integer using `numpy.random.SeedSequence.spawn`, giving each subpop a distinct but reproducible child seed.
+
+**`ScenarioRunner`** (`scenario_runner.py`, new file)
+- Runs a baseline `MetapopModel` (or `SubpopModel`) and one or more named counterfactual scenarios as paired multi-replicate experiments, writing all results to a single SQLite database with a `scenario_name` column.
+- Scenario definitions support three optional keys: `"schedules"` (apply same DataFrame to all subpops), `"subpop_schedules"` (per-subpop DataFrame overrides), and `"params"` (per-subpop parameter updates via `updated_dataclass`).
+- Uses a save/restore pattern (`_save_overrideable_state` / `_restore_overrideable_state`) instead of `deepcopy` to avoid infinite recursion triggered by `SubpopModel.__getattr__` during pickling.
+- `seeds` parameter enables paired replicates: `seeds[i]` is used to re-seed the model before replicate `i` in every scenario, isolating the effect of each intervention.
+- SQL writes are batched: all rows for a replicate are accumulated in a Python list and flushed with a single `executemany` + `conn.commit()` per replicate, instead of one `executemany` call per (subpop × state variable × timepoint).
+- Exported from `clt_toolkit/__init__.py` as `ScenarioRunner` and `ScenarioRunnerError`.
+
+**`seeds` parameter in `Experiment.run_static_inputs`** (`experiments.py`)
+- Added optional `seeds` list to `run_static_inputs` and `simulate_reps_and_save_results`: before replicate `i`, `model.modify_random_seed(seeds[i])` is called, giving reproducible and cross-scenario-paired replicates.
+- Added module-level docstring to `experiments.py` with typical usage and database schema.
+
+**`FluSubpopModel.reset_simulation()` override** (`flu_core/flu_components.py`)
+- Overrides `SubpopModel.reset_simulation()` to recompute `VaxInducedImmunity.adjust_initial_value()` from the current vaccine schedule before restoring compartment values. Uses `MV.original_init_val` (the unmodified JSON baseline) to prevent adjustments from compounding across multiple resets.
+- Ensures `MV.init_val` (and `current_val`) are consistent with whatever `daily_vaccines` schedule is loaded at the time of reset, so `replace_schedule + reset_simulation` produces the same trajectory as a freshly constructed model using the same schedule.
+
 ## 2026 02 19
 - Pre-indexed schedule DataFrames by date (or day-of-week) in all 4 schedule classes in `flu_components.py` to eliminate O(n) boolean scans during `prepare_daily_state`. Changes:
   - `DailyVaccines`, `MobilityModifier`, `AbsoluteHumidity`, `FluContactMatrix`: added/updated `postprocess_data_input()` to call `set_index('date')` (or `set_index('day_of_week')` for the day-of-week mobility variant) at the end of setup, after all other DataFrame processing is complete.

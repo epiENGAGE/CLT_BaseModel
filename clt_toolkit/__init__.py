@@ -8,4 +8,5 @@ from .input_parsers import *
 from .plotting import *
 from .sampling import *
 from .utils import *
+from .scenario_runner import ScenarioRunner, ScenarioRunnerError
 
