@@ -329,14 +329,15 @@ class Experiment:
         #   (for example, if user specifies subpop_name, return subset of
         #   DataFrame where subpop_name matches)
         conditions = [(df[col] == value) for col, value in filters.items() if value is not None]
-        df_filtered = df if not conditions else df[np.logical_and.reduce(conditions)]
+        df_filtered = df if not conditions else df[np.logical_and.reduce(conditions)] # TODO check what reduce does here
 
         # Group DataFrame based on unique combinations of "rep" and "timepoint" columns
         # Then sum (numeric values only), return the "value" column, and reset the index
         #   so that "rep" and "timepoint" become regular columns and are not the index
         df_aggregated = \
             df_filtered.groupby(["rep",
-                                 "timepoint"]).sum(numeric_only=True)["value"].reset_index()
+                                 "timepoint"]).sum(numeric_only=True)["value"].reset_index() 
+            # TODO check whether we want to sum all variables, or some should be sampled once a day
 
         # Use pivot() function to reshape the DataFrame for its final form
         # The "timepoint" values are spread across new columns
