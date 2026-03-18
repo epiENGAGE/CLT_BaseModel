@@ -6,6 +6,7 @@ Interactive marimo notebook for exploring flu model parameters and visualizing
 simulation output.  Run with::
 
     marimo run flu_sensitivity.py
+    marimo run flu_instances/examples/flu_sensitivity.py
 
 or open in edit mode::
 
@@ -111,7 +112,30 @@ def _load_files(clt, flu, pd):
 
 
 @app.cell
-def _param_catalog():
+def _param_catalog(flu, params_baseline):
+    import dataclasses as _dc
+    import numpy as _np
+
+    _SKIP = {
+        "num_age_groups", "num_risk_groups", "start_real_date",
+        "vax_immunity_reset_date_mm_dd", "vax_protection_delay_days",
+        "total_pop_age_risk",
+    }
+    _CONTACT_MATRICES = {"total_contact_matrix", "school_contact_matrix", "work_contact_matrix"}
+
+    # Array-valued params (excludes contact matrices, strings, None, and scalars)
+    ARRAY_PARAMS = [
+        f.name for f in _dc.fields(flu.FluSubpopParams)
+        if f.name not in (_SKIP | _CONTACT_MATRICES)
+        and not isinstance(getattr(params_baseline, f.name), (int, float, str))
+        and getattr(params_baseline, f.name) is not None
+    ]
+
+    def _fmt(val):
+        return "[" + ", ".join(f"{x:.4g}" for x in _np.asarray(val).flatten()) + "]"
+
+    ARRAY_BASELINES = [_fmt(getattr(params_baseline, p)) for p in ARRAY_PARAMS]
+
     # Map parameter name → (label, default_value, min, max, step)
     # Only scalar / non-matrix parameters are included.
     SCALAR_PARAMS = {
@@ -135,7 +159,7 @@ def _param_catalog():
         "IP_relative_inf":             ("IP relative infectiousness", 1.0,  0.0,   2.0,   0.1),
         "IA_relative_inf":             ("IA relative infectiousness", 0.5,  0.0,   2.0,   0.1),
     }
-    return (SCALAR_PARAMS,)
+    return (SCALAR_PARAMS, ARRAY_PARAMS, ARRAY_BASELINES)
 
 
 @app.cell
@@ -150,11 +174,18 @@ def _controls(SCALAR_PARAMS, mo, params_baseline):
         start=1, stop=50, step=1, value=1, label="Replicates (stochastic)"
     )
 
-    # Parameter selector
+    # Parameter type selector
+    param_type = mo.ui.radio(
+        options=["Scalar", "Array (scale factor)"],
+        value="Scalar",
+        label="Parameter type",
+    )
+
+    # Parameter selector (scalar)
     param_selector = mo.ui.dropdown(
         options=list(SCALAR_PARAMS.keys()),
         value="beta_baseline",
-        label="Parameter to vary",
+        label="Scalar parameter to vary",
     )
 
     # Number of parameter values to compare
@@ -187,23 +218,44 @@ def _controls(SCALAR_PARAMS, mo, params_baseline):
         start=50, stop=365, step=10, value=200, label="Simulation days"
     )
 
-    controls_form = mo.vstack([
-        mo.md("## Controls"),
-        mo.hstack([sim_mode, num_reps_input]),
-        mo.hstack([param_selector, num_values_input, vax_multiplier]),
-        mo.hstack([subpop_selector, age_group_selector, sim_length]),
-    ])
     return (
         age_group_selector,
-        controls_form,
         num_reps_input,
         num_values_input,
         param_selector,
+        param_type,
         sim_length,
         sim_mode,
         subpop_selector,
         vax_multiplier,
     )
+
+
+@app.cell
+def _controls_form(
+    age_group_selector,
+    mo,
+    num_reps_input,
+    num_values_input,
+    param_selector,
+    param_type,
+    sim_length,
+    sim_mode,
+    subpop_selector,
+    vax_multiplier,
+):
+    _scalar_row = (
+        mo.hstack([param_selector, num_values_input, vax_multiplier])
+        if param_type.value == "Scalar"
+        else mo.hstack([num_values_input, vax_multiplier])
+    )
+    controls_form = mo.vstack([
+        mo.md("## Controls"),
+        mo.hstack([sim_mode, num_reps_input, param_type]),
+        _scalar_row,
+        mo.hstack([subpop_selector, age_group_selector, sim_length]),
+    ])
+    return (controls_form,)
 
 
 @app.cell
@@ -230,7 +282,49 @@ def _param_sliders(SCALAR_PARAMS, mo, num_values_input, param_selector):
 
 
 @app.cell
+def _array_param_selector(ARRAY_PARAMS, mo):
+    array_param_selector = mo.ui.dropdown(
+        options=ARRAY_PARAMS,
+        value=ARRAY_PARAMS[0] if ARRAY_PARAMS else None,
+        label="Array parameter to scale",
+    )
+    return (array_param_selector,)
+
+
+@app.cell
+def _array_param_sliders(
+    ARRAY_BASELINES, ARRAY_PARAMS, array_param_selector, mo, num_values_input
+):
+    _n = num_values_input.value
+
+    array_sliders = mo.ui.array(
+        [
+            mo.ui.slider(
+                start=0.1, stop=3.0, step=0.05, value=1.0,
+                label=f"scale factor {i + 1}",
+            )
+            for i in range(_n)
+        ]
+    )
+
+    _base_str = ""
+    if ARRAY_PARAMS and array_param_selector.value in ARRAY_PARAMS:
+        _base_str = ARRAY_BASELINES[ARRAY_PARAMS.index(array_param_selector.value)]
+
+    array_sliders_ui = mo.vstack([
+        mo.md(f"### Array parameter: `{array_param_selector.value}`"),
+        mo.md(f"Baseline values: {_base_str}"),
+        array_param_selector,
+        mo.md("Each entry in the array is multiplied by the chosen scale factor:"),
+        array_sliders,
+    ])
+    return array_sliders, array_sliders_ui
+
+
+@app.cell
 def _run_simulation(
+    array_param_selector,
+    array_sliders,
     clt,
     east_calendar_df,
     east_state,
@@ -243,6 +337,7 @@ def _run_simulation(
     np,
     num_reps_input,
     param_selector,
+    param_type,
     params_baseline,
     pd,
     sim_length,
@@ -278,16 +373,30 @@ def _run_simulation(
     east_vax = scale_vaccines(east_vaccines_df, vax_scale)
     west_vax = scale_vaccines(west_vaccines_df, vax_scale)
 
-    # Parameter values to overlay (deduplicated, preserving order)
-    param_name = param_selector.value
-    param_values = list(dict.fromkeys(sliders.value))
+    # Parameter values/scale factors to overlay (deduplicated, preserving order)
+    _is_array_mode = param_type.value == "Array (scale factor)"
+
+    if _is_array_mode:
+        _array_pname = array_param_selector.value
+        param_name = f"{_array_pname} ×scale"
+        param_values = list(dict.fromkeys(array_sliders.value))
+
+        def _make_params(val):
+            _base = np.asarray(getattr(params_baseline, _array_pname))
+            return clt.updated_dataclass(
+                params_baseline, {_array_pname: _base * val}
+            )
+    else:
+        param_name = param_selector.value
+        param_values = list(dict.fromkeys(sliders.value))
+
+        def _make_params(val):
+            return clt.updated_dataclass(params_baseline, {param_name: val})
 
     tvar_to_save = ["ISH_to_HR", "ISH_to_HD", "S_to_E", "HD_to_D"]
 
     def build_and_run(param_val):
-        updated_params = clt.updated_dataclass(
-            params_baseline, {param_name: param_val}
-        )
+        updated_params = _make_params(param_val)
 
         east_schedules = flu.FluSubpopSchedules(
             absolute_humidity=humidity_df,
@@ -347,8 +456,9 @@ def _run_simulation(
 
 
 @app.cell
-def _show_controls(controls_form, mo, sliders_ui):
-    mo.vstack([controls_form, sliders_ui])
+def _show_controls(array_sliders_ui, controls_form, mo, param_type, sliders_ui):
+    _param_controls = array_sliders_ui if param_type.value == "Array (scale factor)" else sliders_ui
+    mo.vstack([controls_form, _param_controls])
     return
 
 

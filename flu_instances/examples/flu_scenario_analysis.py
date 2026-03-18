@@ -8,6 +8,7 @@ vaccination analysis using ``ScenarioRunner``.
 Run with::
 
     marimo run flu_scenario_analysis.py
+    marimo run flu_instances/examples/flu_scenario_analysis.py
 
 or open in edit mode::
 
