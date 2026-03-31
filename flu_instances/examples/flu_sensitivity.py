@@ -77,46 +77,12 @@ def _filename(mo, sys):
 
 @app.cell
 def _load_files(clt, flu, pd):
-    from pathlib import Path
-
-    base_path = clt.utils.PROJECT_ROOT / "flu_instances" / "austin_input_files_2024_2025"
-
-    east_state = clt.make_dataclass_from_json(
-        base_path / "init_vals_east.json", flu.FluSubpopState
-    )
-    west_state = clt.make_dataclass_from_json(
-        base_path / "init_vals_west.json", flu.FluSubpopState
-    )
-
-    params_baseline = clt.make_dataclass_from_json(
-        base_path / "common_subpop_params.json", flu.FluSubpopParams
-    )
-    mixing_params = clt.make_dataclass_from_json(
-        base_path / "mixing_params.json", flu.FluMixingParams
-    )
-    settings_base = clt.make_dataclass_from_json(
-        base_path / "simulation_settings.json", flu.SimulationSettings
-    )
-
-    east_vaccines_df = pd.read_csv(base_path / "daily_vaccines_East.csv", index_col=0)
-    west_vaccines_df = pd.read_csv(base_path / "daily_vaccines_West.csv", index_col=0)
-    east_calendar_df = pd.read_csv(base_path / "school_work_calendar_austin_East.csv", index_col=0)
-    west_calendar_df = pd.read_csv(base_path / "school_work_calendar_austin_West.csv", index_col=0)
-    humidity_df = pd.read_csv(base_path / "absolute_humidity_austin.csv", index_col=0)
-    mobility_df = pd.read_csv(base_path / "mobility_modifier.csv", index_col=0)
-    return (
-        east_calendar_df,
-        east_state,
-        east_vaccines_df,
-        humidity_df,
-        mixing_params,
-        mobility_df,
-        params_baseline,
-        settings_base,
-        west_calendar_df,
-        west_state,
-        west_vaccines_df,
-    )
+    from flu_example_utils import load_flu_inputs, SUBPOP_CONFIG as _SC, SHARED_FILES_CONFIG
+    inputs = load_flu_inputs(_SC, SHARED_FILES_CONFIG, clt, flu, pd)
+    params_baseline = inputs["params_baseline"]
+    mixing_params = inputs["mixing_params"]
+    settings_base = inputs["settings_base"]
+    return inputs, mixing_params, params_baseline, settings_base
 
 
 @app.cell
@@ -232,8 +198,9 @@ def _controls(SCALAR_PARAMS, mo, params_baseline):
     )
 
     # Subpopulation multi-selector
+    from flu_example_utils import subpop_dropdown_options, SUBPOP_CONFIG as _SC
     subpop_selector = mo.ui.multiselect(
-        options=["combined", "east", "west"],
+        options=subpop_dropdown_options(_SC, aggregate_label="combined"),
         value=["combined"],
         label="Subpopulation(s)",
     )
@@ -381,30 +348,28 @@ def _run_simulation(
     array_param_selector,
     array_sliders,
     clt,
-    east_calendar_df,
-    east_state,
-    east_vaccines_df,
     flu,
-    humidity_df,
-    mixing_params,
+    inputs,
     mo,
-    mobility_df,
     np,
     num_reps_input,
     param_selector,
     param_type,
     params_baseline,
-    pd,
+    settings_base,
     sim_length,
     sim_mode,
-    settings_base,
     sliders,
     start_date_inputs,
     vax_multiplier,
-    west_calendar_df,
-    west_state,
-    west_vaccines_df,
 ):
+    from flu_example_utils import (
+        SUBPOP_CONFIG as _SC,
+        scale_vaccines_df,
+        make_rng_generators,
+        build_flu_metapop_model,
+    )
+
     transition_type = (
         "binom_deterministic_no_round"
         if sim_mode.value == "Deterministic"
@@ -413,22 +378,11 @@ def _run_simulation(
     num_reps = num_reps_input.value if sim_mode.value == "Stochastic" else 1
     end_day = sim_length.value
 
-    # Scale vaccine schedules by the multiplier.
-    # daily_vaccines values are JSON-encoded 2D arrays (not plain floats),
-    # so we must round-trip through JSON to scale them correctly.
-    import json
-
-    def scale_vaccines(df, scale):
-        scaled = df.copy()
-        scaled["daily_vaccines"] = scaled["daily_vaccines"].apply(
-            lambda s: json.dumps((np.array(json.loads(s)) * scale).tolist())
-        )
-        scaled["date"] = pd.to_datetime(scaled["date"], format="%Y-%m-%d").dt.date
-        return scaled
-
     vax_scale = vax_multiplier.value
-    east_vax = scale_vaccines(east_vaccines_df, vax_scale)
-    west_vax = scale_vaccines(west_vaccines_df, vax_scale)
+    scaled_vax = {
+        sp["name"]: scale_vaccines_df(inputs["vaccines_df"][sp["name"]], vax_scale, np)
+        for sp in _SC
+    }
 
     # Parameter values/scale factors to overlay (deduplicated, preserving order)
     _is_array_mode = param_type.value == "Array (scale factor)"
@@ -464,60 +418,22 @@ def _run_simulation(
         scenario_start_dates = {str(v): _default_start for v in param_values}
 
     tvar_to_save = ["ISH_to_HR", "ISH_to_HD", "S_to_E", "HD_to_D"]
+    updated_settings = clt.updated_dataclass(settings_base, {
+        "transition_type": transition_type,
+        "transition_variables_to_save": tvar_to_save,
+    })
 
     def build_and_run(param_val):
         updated_params = _make_params(param_val)
-
-        east_schedules = flu.FluSubpopSchedules(
-            absolute_humidity=humidity_df,
-            flu_contact_matrix=east_calendar_df,
-            daily_vaccines=east_vax,
-            mobility_modifier=mobility_df,
-        )
-        west_schedules = flu.FluSubpopSchedules(
-            absolute_humidity=humidity_df,
-            flu_contact_matrix=west_calendar_df,
-            daily_vaccines=west_vax,
-            mobility_modifier=mobility_df,
-        )
-
         rng_results = []
         for rep in range(num_reps):
-            bit_gen = np.random.MT19937(88888 + rep)
-            jumped = bit_gen.jumped(1)
-
-            east_model = flu.FluSubpopModel(
-                east_state, updated_params,
-                clt.updated_dataclass(
-                    clt.make_dataclass_from_json(
-                        clt.utils.PROJECT_ROOT / "flu_instances"
-                        / "austin_input_files_2024_2025"
-                        / "simulation_settings.json",
-                        flu.SimulationSettings,
-                    ),
-                    {
-                        "transition_type": transition_type,
-                        "transition_variables_to_save": tvar_to_save,
-                    },
-                ),
-                np.random.Generator(bit_gen),
-                east_schedules,
-                name="east",
+            rngs = make_rng_generators(88888 + rep, _SC, np)
+            model = build_flu_metapop_model(
+                _SC, inputs, updated_params, updated_settings,
+                rngs, scaled_vax, flu,
             )
-            west_model = flu.FluSubpopModel(
-                west_state, updated_params,
-                clt.updated_dataclass(
-                    east_model.simulation_settings,
-                    {},
-                ),
-                np.random.Generator(jumped),
-                west_schedules,
-                name="west",
-            )
-            model = flu.FluMetapopModel([east_model, west_model], mixing_params)
             model.simulate_until_day(end_day)
             rng_results.append(model)
-
         return rng_results
 
     with mo.status.spinner("Running simulation..."):
@@ -545,39 +461,25 @@ def _show_controls(
 
 
 @app.cell
-def _cumulative_vax_display(east_vaccines_df, mo, np, vax_multiplier, west_vaccines_df):
-    import json as _json
-
-    def _compute_rolling_sum(df, scale):
-        daily_arrs = np.stack(
-            [np.array(_json.loads(s)) * scale for s in df["daily_vaccines"]]
-        )  # (n_days, n_age_groups, n_risk_groups)
-        window_size_days = min(365, len(df))
-        data_windows = np.lib.stride_tricks.sliding_window_view(
-            daily_arrs, window_size_days, axis=0
-        )  # (n_windows, n_age_groups, n_risk_groups, window_size)
-        return np.sum(data_windows, axis=-1)[-1]  # (n_age_groups, n_risk_groups)
-
-    def _arr_to_md(arr, title):
-        n_age, n_risk = arr.shape
-        header = "| Age group | " + " | ".join(f"Risk {rg}" for rg in range(n_risk)) + " |"
-        sep = "|-----------|" + "--------|" * n_risk
-        rows = [
-            f"| {ag} | " + " | ".join(f"{arr[ag, rg]:.4f}" for rg in range(n_risk)) + " |"
-            for ag in range(n_age)
-        ]
-        return f"**{title}**\n\n" + "\n".join([header, sep] + rows)
+def _cumulative_vax_display(inputs, mo, np, vax_multiplier):
+    from flu_example_utils import (
+        SUBPOP_CONFIG as _SC,
+        compute_cumulative_vax,
+        make_cumvax_markdown_table,
+    )
 
     _scale = vax_multiplier.value
-    _east = _compute_rolling_sum(east_vaccines_df, _scale)
-    _west = _compute_rolling_sum(west_vaccines_df, _scale)
+    _cum_vax = {
+        sp["name"]: compute_cumulative_vax(inputs["vaccines_df"][sp["name"]], _scale, np)
+        for sp in _SC
+    }
 
-    _warn = " ⚠️" if (_east.max() > 1 or _west.max() > 1) else ""
+    _warn = " ⚠️" if any(v.max() > 1 for v in _cum_vax.values()) else ""
     _title = f"Cumulative vaccination rates (multiplier ×{_scale:.2f}){_warn}"
     mo.accordion({
         _title: mo.hstack([
-            mo.md(_arr_to_md(_east, "East")),
-            mo.md(_arr_to_md(_west, "West")),
+            mo.md(make_cumvax_markdown_table(_cum_vax[sp["name"]], sp["name"].capitalize()))
+            for sp in _SC
         ]),
     })
     return

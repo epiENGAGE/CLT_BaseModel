@@ -176,7 +176,9 @@ def _show_controls(
     _tab1 = mo.vstack([
         mo.md("### Vaccine coverage scenarios"),
         mo.md(
-            "*Use the scale factor as a quick uniform multiplier — changing it resets the table below. "
+            "*The tables below show cumulative vaccination rates per age group and risk group over "
+            "the simulation (or 1st year if longer). "
+            "Use the scale factor as a quick uniform multiplier — changing it resets the table below. "
             "Edit individual cells for per-(subpopulation, age group, risk group) control.*"
         ),
         num_scenarios_input,
@@ -211,12 +213,13 @@ def _show_controls(
         )
         for _k, (_pname, _base) in enumerate(zip(ARRAY_PARAMS, ARRAY_BASELINES))
     ]
+    from flu_example_utils import SUBPOP_CONFIG as _SC_ER
     _e_rows = [
         mo.hstack(
-            [mo.md(f"`{_lbl}`")] + [e_init_inputs[_ei][j] for j in range(_n)],
+            [mo.md(f"`{sp['name']}_E[2,0]`")] + [e_init_inputs[_ei][j] for j in range(_n)],
             widths="equal",
         )
-        for _ei, _lbl in enumerate(["east_E[2,0]", "west_E[2,0]"])
+        for _ei, sp in enumerate(_SC_ER)
     ]
     _start_date_row = mo.hstack(
         [mo.md("`start_real_date`")] + [start_date_sc_inputs[j] for j in range(_n)],
@@ -224,7 +227,9 @@ def _show_controls(
     )
     _vax_editors_section = mo.vstack([
         mo.md(
-            "*Use the scale factor as a quick uniform multiplier — changing it resets the table below. "
+            "*The tables below show cumulative vaccination rates per age group and risk group over "
+            "the simulation (or 1st year if longer). "
+            "Use the scale factor as a quick uniform multiplier — changing it resets the table below. "
             "Edit individual cells for per-(subpopulation, age group, risk group) control.*"
         ),
         mo.vstack([
@@ -279,77 +284,40 @@ def _cumulative_vax_display(mo, num_scenarios_input, vax_editors):
 
 @app.cell
 def _load_files(clt, flu, pd):
-    base_path = clt.utils.PROJECT_ROOT / "flu_instances" / "austin_input_files_2024_2025"
-
-    east_state = clt.make_dataclass_from_json(
-        base_path / "init_vals_east.json", flu.FluSubpopState
-    )
-    west_state = clt.make_dataclass_from_json(
-        base_path / "init_vals_west.json", flu.FluSubpopState
-    )
-    params = clt.make_dataclass_from_json(
-        base_path / "common_subpop_params.json", flu.FluSubpopParams
-    )
-    mixing_params = clt.make_dataclass_from_json(
-        base_path / "mixing_params.json", flu.FluMixingParams
-    )
-    settings_base = clt.make_dataclass_from_json(
-        base_path / "simulation_settings.json", flu.SimulationSettings
-    )
-
-    east_vax_df   = pd.read_csv(base_path / "daily_vaccines_East.csv", index_col=0)
-    west_vax_df   = pd.read_csv(base_path / "daily_vaccines_West.csv", index_col=0)
-    east_cal_df   = pd.read_csv(base_path / "school_work_calendar_austin_East.csv", index_col=0)
-    west_cal_df   = pd.read_csv(base_path / "school_work_calendar_austin_West.csv", index_col=0)
-    humidity_df   = pd.read_csv(base_path / "absolute_humidity_austin.csv", index_col=0)
-    mobility_df   = pd.read_csv(base_path / "mobility_modifier.csv", index_col=0)
-    return (
-        east_cal_df,
-        east_state,
-        east_vax_df,
-        humidity_df,
-        mixing_params,
-        mobility_df,
-        params,
-        settings_base,
-        west_cal_df,
-        west_state,
-        west_vax_df,
-    )
+    from flu_example_utils import load_flu_inputs, SUBPOP_CONFIG as _SC, SHARED_FILES_CONFIG
+    inputs = load_flu_inputs(_SC, SHARED_FILES_CONFIG, clt, flu, pd)
+    params = inputs["params_baseline"]
+    mixing_params = inputs["mixing_params"]
+    settings_base = inputs["settings_base"]
+    return inputs, mixing_params, params, settings_base
 
 
 @app.cell
-def _compute_baseline_vax(east_vax_df, np, west_vax_df):
-    import json as _json_bv
-
-    def _cumulative_at_scale1(df):
-        daily_arrs = np.stack(
-            [np.array(_json_bv.loads(s)) for s in df["daily_vaccines"]]
-        )
-        window_size = min(365, len(df))
-        windows = np.lib.stride_tricks.sliding_window_view(
-            daily_arrs, window_size, axis=0
-        )
-        return np.sum(windows, axis=-1)[-1]  # (n_age, n_risk)
-
-    baseline_east = _cumulative_at_scale1(east_vax_df)
-    baseline_west = _cumulative_at_scale1(west_vax_df)
-    return baseline_east, baseline_west
+def _compute_baseline_vax(inputs, np):
+    from flu_example_utils import compute_cumulative_vax, SUBPOP_CONFIG as _SC
+    baseline_vax = {
+        sp["name"]: compute_cumulative_vax(inputs["vaccines_df"][sp["name"]], 1.0, np)
+        for sp in _SC
+    }
+    return (baseline_vax,)
 
 
 @app.cell
-def _vax_editor_inputs(baseline_east, baseline_west, mo, np, scale_inputs):
+def _vax_editor_inputs(baseline_vax, mo, scale_inputs):
+    from flu_example_utils import SUBPOP_CONFIG as _SC
     _MAX_SC = 5
-    _n_age, _n_risk = baseline_east.shape
+    _first_sp = _SC[0]["name"]
+    _n_age, _n_risk = baseline_vax[_first_sp].shape
 
     def _make_editor_rows(scale):
         rows = []
-        for _subpop, _bl in [("east", baseline_east), ("west", baseline_west)]:
+        for sp in _SC:
+            _bl = baseline_vax[sp["name"]]
             _vals = _bl * scale
             for _age in range(_n_age):
-                row = {"subpopulation": _subpop, "age_group": _age}
+                row = {"subpopulation": sp["name"], "age_group": _age}
                 for _risk in range(_n_risk):
-                    row[f"risk_{_risk}"] = float(_vals[_age, _risk])
+                    row[f"risk_{_risk}"] = round(float(_vals[_age, _risk]), 3)
                 rows.append(row)
         return rows
 
@@ -364,7 +332,7 @@ def _vax_editor_inputs(baseline_east, baseline_west, mo, np, scale_inputs):
 
 
 @app.cell
-def _param_tab_controls(east_state, flu, mo, params, west_state):
+def _param_tab_controls(flu, inputs, mo, params):
     import dataclasses as _dc
     import numpy as _np
 
@@ -424,18 +392,17 @@ def _param_tab_controls(east_state, flu, mo, params, west_state):
         for _ in ARRAY_PARAMS
     ])
 
-    # Initial E(2,0) inputs: [east=0, west=1][scenario_idx]
-    _east_e_base = float(east_state.E[2][0])
-    _west_e_base = float(west_state.E[2][0])
+    # Initial E(2,0) inputs: [subpop_idx][scenario_idx]
+    from flu_example_utils import SUBPOP_CONFIG as _SPCONF
     e_init_inputs = mo.ui.array([
         mo.ui.array([
-            mo.ui.number(start=0, stop=10000, step=1, value=_east_e_base)
+            mo.ui.number(
+                start=0, stop=10000, step=1,
+                value=float(inputs["states"][sp["name"]].E[2][0]),
+            )
             for _ in range(_MAX_SC)
-        ]),
-        mo.ui.array([
-            mo.ui.number(start=0, stop=10000, step=1, value=_west_e_base)
-            for _ in range(_MAX_SC)
-        ]),
+        ])
+        for sp in _SPCONF
     ])
 
     # Per-scenario simulation start date
@@ -474,37 +441,23 @@ def _define_scenarios(
     ARRAY_PARAMS,
     SCALAR_PARAMS,
     array_scale_inputs,
-    baseline_east,
-    baseline_west,
+    baseline_vax,
     e_init_inputs,
-    east_vax_df,
+    inputs,
     np,
     num_scenarios_input,
     param_inputs,
-    pd,
     scale_inputs,
     scenario_name_inputs,
     scenario_tab,
     start_date_sc_inputs,
     vax_editors,
-    west_vax_df,
 ):
-    import json
     import pandas as _pd_ds
+    from flu_example_utils import SUBPOP_CONFIG as _SC, scale_vaccines_df
 
     _n = int(num_scenarios_input.value)
     _active_tab = scenario_tab.value
-
-    # daily_vaccines values are JSON-encoded 2D arrays (not plain floats),
-    # so we must round-trip through JSON to scale them correctly.
-    # factor may be a scalar or a (n_age, n_risk) array — numpy handles both.
-    def scale_vaccines(df, factor):
-        scaled = df.copy()
-        scaled["daily_vaccines"] = scaled["daily_vaccines"].apply(
-            lambda s: json.dumps((np.array(json.loads(s)) * factor).tolist())
-        )
-        scaled["date"] = pd.to_datetime(scaled["date"], format="%Y-%m-%d").dt.date
-        return scaled
 
     def _editor_to_scale_mat(editor_val, subpop, baseline):
         df = editor_val if isinstance(editor_val, _pd_ds.DataFrame) else _pd_ds.DataFrame(editor_val)
@@ -526,12 +479,16 @@ def _define_scenarios(
             _scale = scale_inputs[_i].value
             _sc_name = f"vax_sc{_i + 1}"
             _editor_val = vax_editors[_i].value
-            _east_scale = _editor_to_scale_mat(_editor_val, "east", baseline_east)
-            _west_scale = _editor_to_scale_mat(_editor_val, "west", baseline_west)
             scenarios[_sc_name] = {
                 "subpop_schedules": {
-                    "east": {"daily_vaccines": scale_vaccines(east_vax_df, _east_scale)},
-                    "west": {"daily_vaccines": scale_vaccines(west_vax_df, _west_scale)},
+                    sp["name"]: {
+                        "daily_vaccines": scale_vaccines_df(
+                            inputs["vaccines_df"][sp["name"]],
+                            _editor_to_scale_mat(_editor_val, sp["name"], baseline_vax[sp["name"]]),
+                            np,
+                        )
+                    }
+                    for sp in _SC
                 }
             }
             scenario_labels[_sc_name] = f"Scenario {_i + 1} (\u00d7{_scale:.2f} base)"
@@ -551,16 +508,22 @@ def _define_scenarios(
                     for k, pname in enumerate(ARRAY_PARAMS)
                 },
                 "init_overrides": {
-                    "east_E_2_0": e_init_inputs.value[0][j],
-                    "west_E_2_0": e_init_inputs.value[1][j],
+                    f"{sp['name']}_E_2_0": e_init_inputs.value[_ei][j]
+                    for _ei, sp in enumerate(_SC)
                 },
                 "start_date": start_date_sc_inputs[j].value,
             }
-            if _scale != 1.0:
-                _sc_def["subpop_schedules"] = {
-                    "east": {"daily_vaccines": scale_vaccines(east_vax_df, _scale)},
-                    "west": {"daily_vaccines": scale_vaccines(west_vax_df, _scale)},
+            _editor_val_j = vax_editors[j].value
+            _sc_def["subpop_schedules"] = {
+                sp["name"]: {
+                    "daily_vaccines": scale_vaccines_df(
+                        inputs["vaccines_df"][sp["name"]],
+                        _editor_to_scale_mat(_editor_val_j, sp["name"], baseline_vax[sp["name"]]),
+                        np,
+                    )
                 }
+                for sp in _SC
+            }
             scenarios[_sc_name] = _sc_def
             scenario_labels[_sc_name] = _sc_display
 
@@ -571,15 +534,10 @@ def _define_scenarios(
 def _run_scenarios(
     clt,
     daily_sum_over_timesteps,
-    east_cal_df,
-    east_state,
-    east_vax_df,
     flu,
-    humidity_df,
+    inputs,
     io,
-    mixing_params,
     mo,
-    mobility_df,
     np,
     num_reps_input,
     params,
@@ -589,9 +547,6 @@ def _run_scenarios(
     settings,
     sim_days_input,
     sim_mode,
-    west_cal_df,
-    west_state,
-    west_vax_df,
 ):
     mo.stop(not run_button.value, mo.md("Press **Run scenario analysis** to start."))
 
@@ -644,12 +599,14 @@ def _run_scenarios(
     # ------------------------------------------------------------------
     # Helper: build one model for a given seed and scenario definition.
     # ------------------------------------------------------------------
+    from flu_example_utils import (
+        SUBPOP_CONFIG as _SC,
+        make_rng_generators,
+        build_flu_metapop_model,
+        apply_init_overrides,
+    )
+
     def _build_model(seed, scenario_def):
-        import copy as _copy
-
-        bit_gen = np.random.MT19937(88888)
-        jumped  = np.random.MT19937(88888).jumped(1)
-
         # Per-scenario start date override
         _start_date = scenario_def.get("start_date")
         _settings = clt.updated_dataclass(settings, {"start_real_date": _start_date}) if _start_date else settings
@@ -671,41 +628,20 @@ def _run_scenarios(
 
         # Initial condition overrides for E(2,0)
         _init_ovr = scenario_def.get("init_overrides", {})
-        if _init_ovr:
-            _east_state = _copy.deepcopy(east_state)
-            _west_state = _copy.deepcopy(west_state)
-            _east_state.E[2][0] = _init_ovr.get("east_E_2_0", east_state.E[2][0])
-            _west_state.E[2][0] = _init_ovr.get("west_E_2_0", west_state.E[2][0])
-        else:
-            _east_state = east_state
-            _west_state = west_state
+        _states = apply_init_overrides(inputs["states"], _init_ovr, _SC) if _init_ovr else inputs["states"]
 
-        east = flu.FluSubpopModel(
-            _east_state, _params, _settings,
-            np.random.Generator(bit_gen),
-            flu.FluSubpopSchedules(
-                absolute_humidity=humidity_df,
-                flu_contact_matrix=east_cal_df,
-                daily_vaccines=east_vax_df,
-                mobility_modifier=mobility_df,
-            ),
-            name="east",
-        )
-        west = flu.FluSubpopModel(
-            _west_state, _params, _settings,
-            np.random.Generator(jumped),
-            flu.FluSubpopSchedules(
-                absolute_humidity=humidity_df,
-                flu_contact_matrix=west_cal_df,
-                daily_vaccines=west_vax_df,
-                mobility_modifier=mobility_df,
-            ),
-            name="west",
-        )
-        model = flu.FluMetapopModel([east, west], mixing_params)
-        for _sp, _sched_map in scenario_def.get("subpop_schedules", {}).items():
-            for _sname, _new_df in _sched_map.items():
-                model.replace_schedule(_sname, _new_df, subpop_name=_sp)
+        # Per-scenario vaccine schedules (fall back to base inputs if not overridden)
+        _subpop_schedules = scenario_def.get("subpop_schedules", {})
+        _vax_dfs = {
+            sp["name"]: _subpop_schedules.get(sp["name"], {}).get(
+                "daily_vaccines", inputs["vaccines_df"][sp["name"]]
+            )
+            for sp in _SC
+        }
+
+        _inputs_for_build = {**inputs, "states": _states}
+        rngs = make_rng_generators(88888, _SC, np)
+        model = build_flu_metapop_model(_SC, _inputs_for_build, _params, _settings, rngs, _vax_dfs, flu)
         model.modify_random_seed(seed)
         model.simulate_until_day(end_day)
         return model
@@ -818,8 +754,9 @@ def _daily_admissions_controls(mo):
         value="Daily hospital admissions",
         label="Metric",
     )
+    from flu_example_utils import subpop_dropdown_options as _subpop_dd_opts, SUBPOP_CONFIG as _SC
     adm_subpop_dd = mo.ui.multiselect(
-        options=["all subpops", "east", "west"],
+        options=_subpop_dd_opts(_SC, aggregate_label="all subpops"),
         value=["all subpops"],
         label="Subpopulation(s)",
     )
@@ -1009,8 +946,9 @@ def _vph_controls(mo):
         value="Total hospitalizations",
         label="Metric",
     )
+    from flu_example_utils import subpop_dropdown_options as _subpop_dd_opts, SUBPOP_CONFIG as _SC
     vph_subpop_dd = mo.ui.multiselect(
-        options=["all subpops", "east", "west"],
+        options=_subpop_dd_opts(_SC, aggregate_label="all subpops"),
         value=["all subpops"],
         label="Subpopulation(s)",
     )
@@ -1153,8 +1091,9 @@ def _age_ar_controls(mo):
         value="Attack rate",
         label="Metric",
     )
+    from flu_example_utils import subpop_dropdown_options as _subpop_dd_opts, SUBPOP_CONFIG as _SC
     ar_subpop_dd = mo.ui.multiselect(
-        options=["all subpops", "east", "west"],
+        options=_subpop_dd_opts(_SC, aggregate_label="all subpops"),
         value=["all subpops"],
         label="Subpopulation(s)",
     )
@@ -1241,51 +1180,86 @@ def _plot_age_attack_rates(
 # ---------------------------------------------------------------------------
 
 @app.cell
+def _summary_selectors(mo, num_age_groups):
+    from flu_example_utils import subpop_dropdown_options as _sdo, SUBPOP_CONFIG as _SC2
+    summary_subpop_selector = mo.ui.multiselect(
+        options=_sdo(_SC2, aggregate_label="combined"),
+        value=["combined"],
+        label="Subpopulation(s)",
+    )
+    summary_age_group_selector = mo.ui.multiselect(
+        options=["all"] + [str(i) for i in range(num_age_groups)],
+        value=["all"],
+        label="Age group(s) ('all' = sum)",
+    )
+    mo.vstack([summary_subpop_selector, summary_age_group_selector])
+    return summary_age_group_selector, summary_subpop_selector
+
+
+@app.cell
 def _summary_table(
     attack_rate,
+    cumulative_deaths,
+    cumulative_hospitalizations,
     daily_hospital_admissions,
-    deaths,
-    hosp,
     mo,
     np,
     pd,
     scenario_labels,
     scenario_models,
     summarize_outcomes,
+    summary_age_group_selector,
+    summary_subpop_selector,
     vda,
     vph,
 ):
-    def ci_str(vals):
+    def fmt(vals):
         s = summarize_outcomes(vals)
+        if len(vals) == 1:
+            return f"{vals[0]:.1f}"
         return f"{s['mean']:.1f} [{s['lower_ci']:.1f}–{s['upper_ci']:.1f}]"
 
+    _combos = [
+        (sp, ag)
+        for sp in (summary_subpop_selector.value or ["combined"])
+        for ag in (summary_age_group_selector.value or ["all"])
+    ]
+
     rows = []
-    for _sc_name, _sc_label in scenario_labels.items():
-        _models = scenario_models[_sc_name]
+    for _sp, _ag in _combos:
+        _subpop = None if _sp == "combined" else _sp
+        _age_group = None if _ag == "all" else int(_ag)
 
-        _ar_vals = [attack_rate(m) for m in _models]
+        for _sc_name, _sc_label in scenario_labels.items():
+            _models = scenario_models[_sc_name]
 
-        _daily_adm = np.stack(
-            [daily_hospital_admissions(m) for m in _models], axis=0
-        )
-        _peak_vals = _daily_adm.max(axis=1).tolist()
-        _days_to_peak_vals = np.argmax(_daily_adm, axis=1).tolist()
+            _hosp_vals  = [cumulative_hospitalizations(m, _subpop, _age_group) for m in _models]
+            _death_vals = [cumulative_deaths(m, _subpop, _age_group) for m in _models]
+            _ar_vals    = [attack_rate(m, _subpop, _age_group) for m in _models]
 
-        _row = {
-            "Scenario":                  _sc_label,
-            "Attack rate (mean)":        f"{np.mean(_ar_vals):.3f}",
-            "Hosp. (mean [95% CI])":     ci_str(hosp[_sc_name]),
-            "Deaths (mean [95% CI])":    ci_str(deaths[_sc_name]),
-            "Peak daily admissions":     ci_str(_peak_vals),
-            "Days to peak admissions":   ci_str(_days_to_peak_vals),
-        }
-        if _sc_name in vph:
-            _row["VPH (mean [95% CI])"]     = ci_str(vph[_sc_name])
-            _row["Deaths averted [95% CI]"] = ci_str(vda[_sc_name])
-        else:
-            _row["VPH (mean [95% CI])"]     = "—"
-            _row["Deaths averted [95% CI]"] = "—"
-        rows.append(_row)
+            _daily_adm = np.stack(
+                [daily_hospital_admissions(m, _subpop, _age_group) for m in _models], axis=0
+            )
+            _peak_vals         = _daily_adm.max(axis=1).tolist()
+            _days_to_peak_vals = np.argmax(_daily_adm, axis=1).tolist()
+
+            _row = {
+                "Subpopulation":             _sp,
+                "Age group":                 _ag,
+                "Scenario":                  _sc_label,
+                "Attack rate (mean)":        f"{np.mean(_ar_vals):.3f}",
+                "Hosp. (mean [95% CI])":     fmt(_hosp_vals),
+                "Deaths (mean [95% CI])":    fmt(_death_vals),
+                "Peak daily admissions":     fmt(_peak_vals),
+                "Days to peak admissions":   fmt(_days_to_peak_vals),
+            }
+            if _sc_name in vph:
+                _row["VPH (mean [95% CI])"]     = fmt(vph[_sc_name])
+                _row["Deaths averted [95% CI]"] = fmt(vda[_sc_name])
+            else:
+                _row["VPH (mean [95% CI])"]     = "—"
+                _row["Deaths averted [95% CI]"] = "—"
+            rows.append(_row)
     mo.vstack([mo.md("### Summary"), mo.ui.table(pd.DataFrame(rows))])
     return
 

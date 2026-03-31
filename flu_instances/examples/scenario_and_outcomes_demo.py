@@ -28,7 +28,6 @@ This script shows both steps clearly.
 """
 
 import datetime
-import json
 import os
 import sys
 
@@ -42,6 +41,15 @@ import pandas as pd
 import clt_toolkit as clt
 import flu_core as flu
 import flu_core.flu_outcomes as outcomes
+
+from flu_example_utils import (
+    SUBPOP_CONFIG,
+    SHARED_FILES_CONFIG,
+    load_flu_inputs,
+    scale_vaccines_df,
+    make_rng_generators,
+    build_flu_metapop_model,
+)
 
 
 class _Tee:
@@ -67,7 +75,6 @@ class _Tee:
 # Configuration
 # ---------------------------------------------------------------------------
 
-BASE_PATH = clt.utils.PROJECT_ROOT / "flu_instances" / "austin_input_files_2024_2025"
 SIMULATION_DAYS = 200
 NUM_REPS        = 5      # keep small so the demo runs quickly
 SEEDS           = list(range(NUM_REPS))
@@ -76,36 +83,10 @@ TVAR_SAVE = ("ISH_to_HR", "ISH_to_HD", "S_to_E", "HD_to_D")
 
 
 # ---------------------------------------------------------------------------
-# Helper: scale a daily_vaccines DataFrame
+# Load all input files once at module level
 # ---------------------------------------------------------------------------
 
-def scale_vaccines_df(df: pd.DataFrame, scale: float) -> pd.DataFrame:
-    """
-    Return a scaled copy of a raw daily_vaccines DataFrame.
-
-    The ``daily_vaccines`` column holds JSON-encoded 2-D arrays (one entry
-    per age×risk group), so scaling requires JSON round-tripping rather than
-    simple arithmetic.  Dates are also converted to ``datetime.date`` objects
-    to match the format expected by ``DailyVaccines.postprocess_data_input``
-    when called via ``replace_schedule``.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Raw vaccines DataFrame as loaded from CSV.
-    scale : float
-        Multiplicative factor to apply to every daily_vaccines value.
-
-    Returns
-    -------
-    pd.DataFrame
-    """
-    scaled = df.copy()
-    scaled["daily_vaccines"] = scaled["daily_vaccines"].apply(
-        lambda s: json.dumps((np.array(json.loads(s)) * scale).tolist())
-    )
-    scaled["date"] = pd.to_datetime(scaled["date"], format="%Y-%m-%d").dt.date
-    return scaled
+FLU_INPUTS = load_flu_inputs(SUBPOP_CONFIG, SHARED_FILES_CONFIG, clt, flu, pd)
 
 
 # ---------------------------------------------------------------------------
@@ -113,19 +94,19 @@ def scale_vaccines_df(df: pd.DataFrame, scale: float) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 def build_model(
-    east_vax_df: pd.DataFrame,
-    west_vax_df: pd.DataFrame,
+    per_subpop_vaccines_df: dict,
     transition_type: str = "binom_deterministic_no_round",
     save_tvars: bool = True,
     seed: int = 88888,
 ) -> flu.FluMetapopModel:
     """
-    Build a fresh FluMetapopModel from the Austin 2024-2025 inputs.
+    Build a fresh FluMetapopModel from the loaded inputs.
 
     Parameters
     ----------
-    east_vax_df, west_vax_df : pd.DataFrame
-        Vaccine schedules (raw CSV format, possibly scaled).
+    per_subpop_vaccines_df : dict
+        ``{subpop_name: DataFrame}`` mapping each subpopulation name to its
+        vaccine schedule (raw CSV format, possibly scaled).
     transition_type : str
         ``"binom_deterministic_no_round"`` for deterministic runs,
         ``"binom"`` for stochastic.
@@ -133,78 +114,33 @@ def build_model(
         Whether to populate ``transition_variables_to_save`` so that
         ``flu_outcomes`` functions can access histories afterwards.
     seed : int
-        RNG seed for the east subpopulation; west uses ``seed + 1``.
+        Base RNG seed; subpopulation i uses ``MT19937(seed).jumped(i)``.
     """
-    east_state = clt.make_dataclass_from_json(
-        BASE_PATH / "init_vals_east.json", flu.FluSubpopState
-    )
-    west_state = clt.make_dataclass_from_json(
-        BASE_PATH / "init_vals_west.json", flu.FluSubpopState
-    )
-    params = clt.make_dataclass_from_json(
-        BASE_PATH / "common_subpop_params.json", flu.FluSubpopParams
-    )
-    mixing_params = clt.make_dataclass_from_json(
-        BASE_PATH / "mixing_params.json", flu.FluMixingParams
-    )
-    settings_raw = clt.make_dataclass_from_json(
-        BASE_PATH / "simulation_settings.json", flu.SimulationSettings
-    )
-
     tvar_save = TVAR_SAVE if save_tvars else ()
     settings = clt.updated_dataclass(
-        settings_raw,
+        FLU_INPUTS["settings_base"],
         {
             "transition_type": transition_type,
             "transition_variables_to_save": tvar_save,
         },
     )
-
-    east_cal_df  = pd.read_csv(BASE_PATH / "school_work_calendar_austin_East.csv", index_col=0)
-    west_cal_df  = pd.read_csv(BASE_PATH / "school_work_calendar_austin_West.csv", index_col=0)
-    humidity_df  = pd.read_csv(BASE_PATH / "absolute_humidity_austin.csv", index_col=0)
-    mobility_df  = pd.read_csv(BASE_PATH / "mobility_modifier.csv", index_col=0)
-
-    bg  = np.random.MT19937(seed)
-    bg2 = np.random.MT19937(seed + 1)
-
-    east = flu.FluSubpopModel(
-        east_state, params, settings,
-        np.random.Generator(bg),
-        flu.FluSubpopSchedules(
-            absolute_humidity=humidity_df,
-            flu_contact_matrix=east_cal_df,
-            daily_vaccines=east_vax_df,
-            mobility_modifier=mobility_df,
-        ),
-        name="east",
+    rngs = make_rng_generators(seed, SUBPOP_CONFIG, np)
+    return build_flu_metapop_model(
+        SUBPOP_CONFIG, FLU_INPUTS, FLU_INPUTS["params_baseline"],
+        settings, rngs, per_subpop_vaccines_df, flu,
     )
-    west = flu.FluSubpopModel(
-        west_state, params, settings,
-        np.random.Generator(bg2),
-        flu.FluSubpopSchedules(
-            absolute_humidity=humidity_df,
-            flu_contact_matrix=west_cal_df,
-            daily_vaccines=west_vax_df,
-            mobility_modifier=mobility_df,
-        ),
-        name="west",
-    )
-    return flu.FluMetapopModel([east, west], mixing_params)
 
 
 # ---------------------------------------------------------------------------
-# Load raw vaccine schedules (needed for ScenarioRunner and scale_vaccines_df)
+# Vaccine schedule dictionaries
 # ---------------------------------------------------------------------------
 
-east_vax_raw = pd.read_csv(BASE_PATH / "daily_vaccines_East.csv", index_col=0)
-west_vax_raw = pd.read_csv(BASE_PATH / "daily_vaccines_West.csv", index_col=0)
+# Raw (unscaled) schedules for the baseline
+vax_raw = FLU_INPUTS["vaccines_df"]  # {name: DataFrame}
 
 # Scaled schedules for counterfactual scenarios
-east_vax_10 = scale_vaccines_df(east_vax_raw, 1.10)
-west_vax_10 = scale_vaccines_df(west_vax_raw, 1.10)
-east_vax_20 = scale_vaccines_df(east_vax_raw, 1.20)
-west_vax_20 = scale_vaccines_df(west_vax_raw, 1.20)
+vax_10 = {sp["name"]: scale_vaccines_df(vax_raw[sp["name"]], 1.10, np) for sp in SUBPOP_CONFIG}
+vax_20 = {sp["name"]: scale_vaccines_df(vax_raw[sp["name"]], 1.20, np) for sp in SUBPOP_CONFIG}
 
 
 # ===========================================================================
@@ -227,7 +163,7 @@ print("=" * 60)
 print("Part 1: single deterministic run")
 print("=" * 60)
 
-baseline_model = build_model(east_vax_raw, west_vax_raw, save_tvars=True)
+baseline_model = build_model(vax_raw, save_tvars=True)
 baseline_model.simulate_until_day(SIMULATION_DAYS)
 
 subpop_names   = list(baseline_model.subpop_models.keys())
@@ -283,7 +219,7 @@ print(f"  mean={summary['mean']:.1f}, median={summary['median']:.1f}, "
       f"95% CI=[{summary['lower_ci']:.1f}, {summary['upper_ci']:.1f}]")
 
 # Run a counterfactual for vaccine_preventable_events
-counterfactual_model = build_model(east_vax_20, west_vax_20, save_tvars=True)
+counterfactual_model = build_model(vax_20, save_tvars=True)
 counterfactual_model.simulate_until_day(SIMULATION_DAYS)
 
 print("\n--- vaccine_preventable_events (+20% coverage vs baseline) ---")
@@ -522,20 +458,20 @@ print("=" * 60)
 # restoring overrides), so we build a fresh model here with save_tvars=False.
 # Transition variable histories are not used by ScenarioRunner itself —
 # they are collected in Part 3 below.
-runner_model = build_model(east_vax_raw, west_vax_raw, save_tvars=False)
+runner_model = build_model(vax_raw, save_tvars=False)
 
 scenarios = {
     "baseline": {},
     "vax_plus_10pct": {
         "subpop_schedules": {
-            "east": {"daily_vaccines": east_vax_10},
-            "west": {"daily_vaccines": west_vax_10},
+            sp["name"]: {"daily_vaccines": vax_10[sp["name"]]}
+            for sp in SUBPOP_CONFIG
         }
     },
     "vax_plus_20pct": {
         "subpop_schedules": {
-            "east": {"daily_vaccines": east_vax_20},
-            "west": {"daily_vaccines": west_vax_20},
+            sp["name"]: {"daily_vaccines": vax_20[sp["name"]]}
+            for sp in SUBPOP_CONFIG
         }
     },
 }
@@ -612,18 +548,14 @@ print("=" * 60)
 
 scenario_models = {}
 
-raw_vax = {"east": east_vax_raw, "west": west_vax_raw}
-scaled_10 = {"east": east_vax_10, "west": west_vax_10}
-scaled_20 = {"east": east_vax_20, "west": west_vax_20}
-
 vax_by_scenario = {
-    "baseline":      raw_vax,
-    "vax_plus_10pct": scaled_10,
-    "vax_plus_20pct": scaled_20,
+    "baseline":       vax_raw,
+    "vax_plus_10pct": vax_10,
+    "vax_plus_20pct": vax_20,
 }
 
 for sc_name, vax_dfs in vax_by_scenario.items():
-    model = build_model(vax_dfs["east"], vax_dfs["west"], save_tvars=True)
+    model = build_model(vax_dfs, save_tvars=True)
     model.simulate_until_day(SIMULATION_DAYS)
     scenario_models[sc_name] = model
     print(f"  {sc_name}: simulated {SIMULATION_DAYS} days")
