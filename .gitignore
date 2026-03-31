@@ -10,3 +10,4 @@ flu_instances/examples/profiling_findings.md
 *.db
 flu_instances/examples/__marimo__/
 flu_instances/examples/__pycache__/
+flu_instances/examples/outputs/
