@@ -169,6 +169,23 @@ def cumulative_hospitalizations(
     )
 
 
+def daily_deaths(
+    metapop_model: MetapopModel,
+    subpop_name: Optional[str] = None,
+    age_group: Optional[int] = None,
+    risk_group: Optional[int] = None,
+) -> np.ndarray:
+    """
+    Daily deaths = HD→D transition flows, aggregated to daily totals.
+
+    Returns
+    -------
+    np.ndarray, shape (days,)
+    """
+    arr = _tvar_daily(metapop_model, ["HD_to_D"], subpop_name)
+    return _apply_ar_filter(arr, age_group, risk_group)
+
+
 def cumulative_deaths(
     metapop_model: MetapopModel,
     subpop_name: Optional[str] = None,

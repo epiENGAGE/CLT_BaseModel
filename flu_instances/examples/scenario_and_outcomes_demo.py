@@ -27,10 +27,10 @@ histories.  The standard pattern is therefore:
 This script shows both steps clearly.
 """
 
+import datetime
 import json
 import os
 import sys
-import tempfile
 
 import matplotlib
 matplotlib.use("Agg")   # headless — swap to "TkAgg" / remove for interactive
@@ -211,7 +211,11 @@ west_vax_20 = scale_vaccines_df(west_vax_raw, 1.20)
 # Output directory + stdout tee (captures all prints to a log file)
 # ===========================================================================
 
-out_dir = tempfile.mkdtemp(prefix="flu_outcomes_demo_")
+out_dir = os.path.join(
+    os.path.dirname(__file__), "outputs",
+    datetime.datetime.now().strftime("%Y_%m_%d_%H%M")
+)
+os.makedirs(out_dir, exist_ok=True)
 _tee = _Tee(open(os.path.join(out_dir, "output.txt"), "w"))
 print(f"Output directory: {out_dir}")
 

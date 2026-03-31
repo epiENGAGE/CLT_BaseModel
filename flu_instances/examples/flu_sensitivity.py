@@ -39,6 +39,7 @@ def _imports():
     from flu_core.flu_outcomes import (
         daily_hospital_admissions,
         daily_new_infections,
+        daily_deaths,
         cumulative_hospitalizations,
         cumulative_deaths,
         attack_rate,
@@ -50,6 +51,7 @@ def _imports():
         clt,
         cumulative_deaths,
         cumulative_hospitalizations,
+        daily_deaths,
         daily_hospital_admissions,
         daily_new_infections,
         flu,
@@ -58,16 +60,18 @@ def _imports():
         pd,
         plt,
         summarize_outcomes,
+        sys,
     )
-    
+
+
 @app.cell
-def _filename(sys, mo):
+def _filename(mo, sys):
     if len(sys.argv) > 0:
         notebook_filename = sys.argv[0]
         # mo.md(f"**Current Notebook Filename:** `{notebook_filename}`")
         mo.md(f"`{notebook_filename}`")
-    else:
-        mo.md(f"`Flu Sensitivity Analysis`")
+    
+    mo.md(f"`Flu Sensitivity Analysis`")
     return
 
 
@@ -90,6 +94,9 @@ def _load_files(clt, flu, pd):
     mixing_params = clt.make_dataclass_from_json(
         base_path / "mixing_params.json", flu.FluMixingParams
     )
+    settings_base = clt.make_dataclass_from_json(
+        base_path / "simulation_settings.json", flu.SimulationSettings
+    )
 
     east_vaccines_df = pd.read_csv(base_path / "daily_vaccines_East.csv", index_col=0)
     west_vaccines_df = pd.read_csv(base_path / "daily_vaccines_West.csv", index_col=0)
@@ -105,6 +112,7 @@ def _load_files(clt, flu, pd):
         mixing_params,
         mobility_df,
         params_baseline,
+        settings_base,
         west_calendar_df,
         west_state,
         west_vaccines_df,
@@ -136,30 +144,54 @@ def _param_catalog(flu, params_baseline):
 
     ARRAY_BASELINES = [_fmt(getattr(params_baseline, p)) for p in ARRAY_PARAMS]
 
-    # Map parameter name → (label, default_value, min, max, step)
-    # Only scalar / non-matrix parameters are included.
-    SCALAR_PARAMS = {
-        "beta_baseline":               ("β baseline (transmission)", 0.042, 0.001, 0.1,   0.001),
-        "humidity_impact":             ("Humidity impact",           1.0,   0.0,   5.0,   0.1),
-        "inf_induced_saturation":      ("Inf. induced saturation",   1.0,   0.0,   5.0,   0.1),
-        "inf_induced_immune_wane":     ("Inf. immunity wane rate",   0.01,  0.0,   0.1,   0.001),
-        "vax_induced_saturation":      ("Vax. induced saturation",   1.0,   0.0,   5.0,   0.1),
-        "vax_induced_immune_wane":     ("Vax. immunity wane rate",   0.01,  0.0,   0.1,   0.001),
-        "inf_induced_inf_risk_reduce": ("Inf. → inf. risk reduction",  0.5, 0.0,   1.0,   0.01),
-        "inf_induced_hosp_risk_reduce":("Inf. → hosp. risk reduction", 0.5, 0.0,   1.0,   0.01),
-        "vax_induced_inf_risk_reduce": ("Vax. → inf. risk reduction",  0.5, 0.0,   1.0,   0.01),
-        "vax_induced_hosp_risk_reduce":("Vax. → hosp. risk reduction", 0.5, 0.0,   1.0,   0.01),
-        "vax_induced_death_risk_reduce":("Vax. → death risk reduction",0.5, 0.0,   1.0,   0.01),
-        "E_to_I_rate":                 ("E → I rate",                0.33,  0.1,   1.0,   0.01),
-        "IP_to_IS_rate":               ("IP → IS rate",              0.5,   0.1,   1.0,   0.01),
-        "ISR_to_R_rate":               ("ISR → R rate",              0.2,   0.05,  1.0,   0.01),
-        "ISH_to_H_rate":               ("ISH → H rate",              0.2,   0.05,  1.0,   0.01),
-        "HR_to_R_rate":                ("HR → R rate",               0.1,   0.01,  0.5,   0.01),
-        "HD_to_D_rate":                ("HD → D rate",               0.1,   0.01,  0.5,   0.01),
-        "IP_relative_inf":             ("IP relative infectiousness", 1.0,  0.0,   2.0,   0.1),
-        "IA_relative_inf":             ("IA relative infectiousness", 0.5,  0.0,   2.0,   0.1),
+    # Known descriptions for scalar parameters (first element of each value tuple).
+    # Add entries here when new descriptively-named parameters are introduced.
+    _DESCRIPTIONS = {
+        "beta_baseline":                "β baseline (transmission)",
+        "humidity_impact":              "Humidity impact",
+        "inf_induced_saturation":       "Inf. induced saturation",
+        "inf_induced_immune_wane":      "Inf. immunity wane rate",
+        "vax_induced_saturation":       "Vax. induced saturation",
+        "inf_induced_inf_risk_reduce":  "Inf. → inf. risk reduction",
+        "inf_induced_hosp_risk_reduce": "Inf. → hosp. risk reduction",
+        "vax_induced_inf_risk_reduce":  "Vax. → inf. risk reduction",
+        "vax_induced_hosp_risk_reduce": "Vax. → hosp. risk reduction",
+        "vax_induced_death_risk_reduce":"Vax. → death risk reduction",
+        "E_to_I_rate":                  "E → I rate",
+        "IP_to_IS_rate":                "IP → IS rate",
+        "ISR_to_R_rate":                "ISR → R rate",
+        "ISH_to_H_rate":                "ISH → H rate",
+        "HD_to_D_rate":                 "HD → D rate",
+        "IP_relative_inf":              "IP relative infectiousness",
+        "IA_relative_inf":              "IA relative infectiousness",
     }
-    return (SCALAR_PARAMS, ARRAY_PARAMS, ARRAY_BASELINES)
+
+    def _slider_range(val):
+        """Derive (min, max, step) from a baseline value."""
+        val = float(val)
+        if val == 0.0:
+            return 0.0, 10.0, 0.1
+        magnitude = 10 ** _np.floor(_np.log10(abs(val)))
+        step = round(magnitude / 10, 10)
+        lo = 0.0
+        hi = round(max(val * 5, magnitude * 10), 10)
+        return lo, hi, step
+
+    # Auto-generate SCALAR_PARAMS as name → (label, default, min, max, step)
+    # from all scalar (int/float) fields not in _SKIP.
+    SCALAR_PARAMS = {}
+    for _f in _dc.fields(flu.FluSubpopParams):
+        _name = _f.name
+        if _name in _SKIP:
+            continue
+        _val = getattr(params_baseline, _name)
+        if not isinstance(_val, (int, float)):
+            continue
+        _label = _DESCRIPTIONS.get(_name, _name)
+        _lo, _hi, _step = _slider_range(_val)
+        SCALAR_PARAMS[_name] = (_label, float(_val), _lo, _hi, _step)
+
+    return ARRAY_BASELINES, ARRAY_PARAMS, SCALAR_PARAMS
 
 
 @app.cell
@@ -176,7 +208,7 @@ def _controls(SCALAR_PARAMS, mo, params_baseline):
 
     # Parameter type selector
     param_type = mo.ui.radio(
-        options=["Scalar", "Array (scale factor)"],
+        options=["Scalar", "Array (scale factor)", "Other"],
         value="Scalar",
         label="Parameter type",
     )
@@ -195,7 +227,7 @@ def _controls(SCALAR_PARAMS, mo, params_baseline):
 
     # Vaccine coverage multiplier
     vax_multiplier = mo.ui.slider(
-        start=0.5, stop=3.0, step=0.05, value=1.0,
+        start=0.0, stop=3.0, step=0.05, value=1.0,
         label="Vaccine coverage multiplier",
     )
 
@@ -217,7 +249,6 @@ def _controls(SCALAR_PARAMS, mo, params_baseline):
     sim_length = mo.ui.number(
         start=50, stop=365, step=10, value=200, label="Simulation days"
     )
-
     return (
         age_group_selector,
         num_reps_input,
@@ -293,7 +324,11 @@ def _array_param_selector(ARRAY_PARAMS, mo):
 
 @app.cell
 def _array_param_sliders(
-    ARRAY_BASELINES, ARRAY_PARAMS, array_param_selector, mo, num_values_input
+    ARRAY_BASELINES,
+    ARRAY_PARAMS,
+    array_param_selector,
+    mo,
+    num_values_input,
 ):
     _n = num_values_input.value
 
@@ -322,6 +357,26 @@ def _array_param_sliders(
 
 
 @app.cell
+def _other_param_controls(mo, num_values_input, settings_base):
+    _n = num_values_input.value
+    _default_date = str(settings_base.start_real_date)
+
+    start_date_inputs = mo.ui.array(
+        [
+            mo.ui.date(value=_default_date, label=f"Start date {i + 1}")
+            for i in range(_n)
+        ]
+    )
+
+    other_controls_ui = mo.vstack([
+        mo.md("### Other parameter: `start_real_date`"),
+        mo.md("Set start date values to overlay (identical values collapse to one curve):"),
+        start_date_inputs,
+    ])
+    return other_controls_ui, start_date_inputs
+
+
+@app.cell
 def _run_simulation(
     array_param_selector,
     array_sliders,
@@ -342,7 +397,9 @@ def _run_simulation(
     pd,
     sim_length,
     sim_mode,
+    settings_base,
     sliders,
+    start_date_inputs,
     vax_multiplier,
     west_calendar_df,
     west_state,
@@ -375,6 +432,7 @@ def _run_simulation(
 
     # Parameter values/scale factors to overlay (deduplicated, preserving order)
     _is_array_mode = param_type.value == "Array (scale factor)"
+    _is_other_mode = param_type.value == "Other"
 
     if _is_array_mode:
         _array_pname = array_param_selector.value
@@ -386,12 +444,24 @@ def _run_simulation(
             return clt.updated_dataclass(
                 params_baseline, {_array_pname: _base * val}
             )
+    elif _is_other_mode:
+        param_name = "start_real_date"
+        param_values = list(dict.fromkeys(start_date_inputs.value))
+
+        def _make_params(val):
+            return params_baseline
     else:
         param_name = param_selector.value
         param_values = list(dict.fromkeys(sliders.value))
 
         def _make_params(val):
             return clt.updated_dataclass(params_baseline, {param_name: val})
+
+    _default_start = str(settings_base.start_real_date)
+    if _is_other_mode:
+        scenario_start_dates = {str(v): str(v) for v in param_values}
+    else:
+        scenario_start_dates = {str(v): _default_start for v in param_values}
 
     tvar_to_save = ["ISH_to_HR", "ISH_to_HD", "S_to_E", "HD_to_D"]
 
@@ -452,13 +522,64 @@ def _run_simulation(
 
     with mo.status.spinner("Running simulation..."):
         results = {str(v): build_and_run(v) for v in param_values}
-    return num_reps, param_name, results
+    return num_reps, param_name, results, scenario_start_dates
 
 
 @app.cell
-def _show_controls(array_sliders_ui, controls_form, mo, param_type, sliders_ui):
-    _param_controls = array_sliders_ui if param_type.value == "Array (scale factor)" else sliders_ui
+def _show_controls(
+    array_sliders_ui,
+    controls_form,
+    mo,
+    other_controls_ui,
+    param_type,
+    sliders_ui,
+):
+    if param_type.value == "Array (scale factor)":
+        _param_controls = array_sliders_ui
+    elif param_type.value == "Other":
+        _param_controls = other_controls_ui
+    else:
+        _param_controls = sliders_ui
     mo.vstack([controls_form, _param_controls])
+    return
+
+
+@app.cell
+def _cumulative_vax_display(east_vaccines_df, mo, np, vax_multiplier, west_vaccines_df):
+    import json as _json
+
+    def _compute_rolling_sum(df, scale):
+        daily_arrs = np.stack(
+            [np.array(_json.loads(s)) * scale for s in df["daily_vaccines"]]
+        )  # (n_days, n_age_groups, n_risk_groups)
+        window_size_days = min(365, len(df))
+        data_windows = np.lib.stride_tricks.sliding_window_view(
+            daily_arrs, window_size_days, axis=0
+        )  # (n_windows, n_age_groups, n_risk_groups, window_size)
+        return np.sum(data_windows, axis=-1)[-1]  # (n_age_groups, n_risk_groups)
+
+    def _arr_to_md(arr, title):
+        n_age, n_risk = arr.shape
+        header = "| Age group | " + " | ".join(f"Risk {rg}" for rg in range(n_risk)) + " |"
+        sep = "|-----------|" + "--------|" * n_risk
+        rows = [
+            f"| {ag} | " + " | ".join(f"{arr[ag, rg]:.4f}" for rg in range(n_risk)) + " |"
+            for ag in range(n_age)
+        ]
+        return f"**{title}**\n\n" + "\n".join([header, sep] + rows)
+
+    _scale = vax_multiplier.value
+    _east = _compute_rolling_sum(east_vaccines_df, _scale)
+    _west = _compute_rolling_sum(west_vaccines_df, _scale)
+
+    _warn = " ⚠️" if (_east.max() > 1 or _west.max() > 1) else ""
+    _title = f"Cumulative vaccination rates (multiplier ×{_scale:.2f}){_warn}"
+    mo.accordion({
+        _title: mo.hstack([
+            mo.md(_arr_to_md(_east, "East")),
+            mo.md(_arr_to_md(_west, "West")),
+        ]),
+    })
     return
 
 
@@ -481,15 +602,18 @@ def _plot_compartments(
     age_group_selector,
     compartment_checkboxes,
     mo,
+    np,
+    pd,
     param_name,
     plt,
     results,
+    scenario_start_dates,
+    settings_base,
     subpop_selector,
 ):
-    from flu_core.flu_outcomes import plot_compartment_history
-
     _ALL_COMPARTMENTS = ["S", "E", "IP", "ISR", "ISH", "IA", "HR", "HD", "R", "D"]
     _LINE_STYLES = ["-", "--", ":", "-."]
+    _colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
 
     _selected = [c for c, v in zip(_ALL_COMPARTMENTS, compartment_checkboxes.value) if v] or _ALL_COMPARTMENTS
 
@@ -502,32 +626,59 @@ def _plot_compartments(
 
     _fig, _axes = plt.subplots(_n_combos, 1, figsize=(10, 5 * _n_combos), squeeze=False)
 
+    def _extract_comp(model, comp_name, subpop_name, age_group):
+        _subpops = (
+            [model.subpop_models[subpop_name]]
+            if subpop_name is not None
+            else list(model.subpop_models.values())
+        )
+        _arrays = [np.asarray(sp.compartments[comp_name].history_vals_list) for sp in _subpops]
+        _total = np.sum(np.stack(_arrays, axis=0), axis=0)  # (T, A, R)
+        if age_group is not None:
+            return _total[:, age_group, :].sum(axis=1)
+        return _total.sum(axis=(1, 2))
+
     for _c_idx, (_sp, _ag) in enumerate(_combos):
         _ax = _axes[_c_idx, 0]
         _subpop = None if _sp == "combined" else _sp
         _age_group = None if _ag == "all" else int(_ag)
         _combo_label = f"{_sp} / age {_ag}"
 
+        _date_extents = []
         for _s_idx, (_scenario_label, _model_list) in enumerate(results.items()):
             _ls = _LINE_STYLES[_s_idx % len(_LINE_STYLES)]
-            plot_compartment_history(
-                _model_list[0],
-                compartment_names=_selected,
-                ax=_ax,
-                subpop_name=_subpop,
-                age_group=_age_group,
-                title=f"Compartment histories — {_combo_label}",
-                linestyle=_ls,
-                label_suffix=f" [{param_name}={_scenario_label}]",
-            )
+            _label_sfx = f" [{param_name}={_scenario_label}]"
+            _start = scenario_start_dates.get(_scenario_label, str(settings_base.start_real_date))
+
+            for _comp_idx, _comp_name in enumerate(_selected):
+                _color = _colors[_comp_idx % len(_colors)]
+                _all_vals = np.stack(
+                    [_extract_comp(m, _comp_name, _subpop, _age_group) for m in _model_list],
+                    axis=0,
+                )  # (reps, T) — T is days (save_daily_history=True)
+                _dates  = pd.date_range(start=_start, periods=_all_vals.shape[1], freq='D')
+                if _comp_idx == 0:
+                    _date_extents.append((_dates[0], _dates[-1]))
+                _median = np.median(_all_vals, axis=0)
+                _lo     = np.percentile(_all_vals, 2.5,  axis=0)
+                _hi     = np.percentile(_all_vals, 97.5, axis=0)
+                _ax.plot(_dates, _median, label=f"{_comp_name}{_label_sfx}",
+                         linestyle=_ls, color=_color, alpha=0.7)
+                _ax.fill_between(_dates, _lo, _hi, color=_color, alpha=0.15)
+
+        if _date_extents:
+            _ax.set_xlim(min(d[0] for d in _date_extents), max(d[1] for d in _date_extents))
+        _ax.set_xlabel("Date")
+        _ax.set_ylabel("Number of individuals")
+        _ax.set_title(f"Compartment histories (median + 95% CI) — {_combo_label}")
         _handles, _labels = _ax.get_legend_handles_labels()
         if _handles:
             _ax.legend(_handles, _labels, fontsize=7, loc="center left",
                        bbox_to_anchor=(1.01, 0.5), borderaxespad=0)
 
+    _fig.autofmt_xdate()
     _fig.tight_layout()
     _fig.subplots_adjust(right=0.92)
-    # mo.hstack([_fig, mo.vstack([mo.md("### Compartments to show"), compartment_checkboxes])])
     mo.vstack([mo.md("### Compartments to show"), mo.hstack(compartment_checkboxes.elements, justify="start"), _fig])
     return
 
@@ -537,15 +688,18 @@ def _plot_epi_metrics(
     age_group_selector,
     epi_metric_checkboxes,
     mo,
+    np,
+    pd,
     param_name,
     plt,
     results,
+    scenario_start_dates,
+    settings_base,
     subpop_selector,
 ):
-    from flu_core.flu_outcomes import plot_epi_metrics
-
     _ALL_METRICS = ["M", "MV"]
     _LINE_STYLES = ["-", "--", ":", "-."]
+    _colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
     _selected_metrics = [m for m, v in zip(_ALL_METRICS, epi_metric_checkboxes.value) if v] or _ALL_METRICS
 
     _combos = [
@@ -557,33 +711,61 @@ def _plot_epi_metrics(
 
     _fig, _axes = plt.subplots(_n_combos, 1, figsize=(10, 4 * _n_combos), squeeze=False)
 
+    def _extract_metric(model, metric_name, subpop_name, age_group):
+        _subpops = (
+            [model.subpop_models[subpop_name]]
+            if subpop_name is not None
+            else list(model.subpop_models.values())
+        )
+        _arrays = [np.asarray(sp.epi_metrics[metric_name].history_vals_list) for sp in _subpops]
+        _total = np.mean(np.stack(_arrays, axis=0), axis=0)  # (T, A, R)
+        if age_group is not None:
+            return _total[:, age_group, :].mean(axis=1)
+        return _total.mean(axis=(1, 2))
+
     for _c_idx, (_sp, _ag) in enumerate(_combos):
         _ax = _axes[_c_idx, 0]
         _subpop = None if _sp == "combined" else _sp
         _age_group = None if _ag == "all" else int(_ag)
         _combo_label = f"{_sp} / age {_ag}"
 
+        _date_extents = []
         for _s_idx, (_scenario_label, _model_list) in enumerate(results.items()):
             _ls = _LINE_STYLES[_s_idx % len(_LINE_STYLES)]
-            plot_epi_metrics(
-                _model_list[0],
-                metric_names=_selected_metrics,
-                ax=_ax,
-                subpop_name=_subpop,
-                age_group=_age_group,
-                title=f"{', '.join(_selected_metrics)} — {_combo_label}",
-                linestyle=_ls,
-                label_suffix=f" [{param_name}={_scenario_label}]",
-            )
+            _label_sfx = f" [{param_name}={_scenario_label}]"
+            _start = scenario_start_dates.get(_scenario_label, str(settings_base.start_real_date))
+
+            for _metric_idx, _metric_name in enumerate(_selected_metrics):
+                _color = _colors[_metric_idx % len(_colors)]
+                _all_vals = np.stack(
+                    [_extract_metric(m, _metric_name, _subpop, _age_group) for m in _model_list],
+                    axis=0,
+                )  # (reps, T) — T is days (save_daily_history=True)
+                _dates  = pd.date_range(start=_start, periods=_all_vals.shape[1], freq='D')
+                if _metric_idx == 0:
+                    _date_extents.append((_dates[0], _dates[-1]))
+                _median = np.median(_all_vals, axis=0)
+                _lo     = np.percentile(_all_vals, 2.5,  axis=0)
+                _hi     = np.percentile(_all_vals, 97.5, axis=0)
+                _ax.plot(_dates, _median, label=f"{_metric_name}{_label_sfx}",
+                         linestyle=_ls, color=_color, alpha=0.7)
+                _ax.fill_between(_dates, _lo, _hi, color=_color, alpha=0.15)
+
+        if _date_extents:
+            _ax.set_xlim(min(d[0] for d in _date_extents), max(d[1] for d in _date_extents))
+        _ax.set_xlabel("Date")
+        _ax.set_ylabel("Immunity level")
+        _ax.set_title(f"{', '.join(_selected_metrics)} (median + 95% CI) — {_combo_label}")
         _handles, _labels = _ax.get_legend_handles_labels()
         if _handles:
             _ax.legend(_handles, _labels, loc="center left",
                        bbox_to_anchor=(1.01, 0.5), borderaxespad=0)
 
+    _fig.autofmt_xdate()
     _fig.tight_layout()
     _fig.subplots_adjust(right=0.92)
     mo.vstack([mo.md("### Epi metrics to show"), mo.hstack(epi_metric_checkboxes.elements, justify="start"), _fig])
-    
+
     return
 
 
@@ -593,9 +775,12 @@ def _plot_infections(
     daily_new_infections,
     np,
     num_reps,
+    pd,
     param_name,
     plt,
     results,
+    scenario_start_dates,
+    settings_base,
     subpop_selector,
 ):
     _LINE_STYLES = ["-", "--", ":", "-."]
@@ -608,6 +793,7 @@ def _plot_infections(
     _colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
 
     _fig, _ax = plt.subplots(figsize=(10, 4))
+    _date_extents = []
 
     for _c_idx, (_sp, _ag) in enumerate(_combos):
         _color = _colors[_c_idx % len(_colors)]
@@ -618,25 +804,32 @@ def _plot_infections(
         for _s_idx, (_scenario_label, _model_list) in enumerate(results.items()):
             _ls = _LINE_STYLES[_s_idx % len(_LINE_STYLES)]
             _label = f"{_combo_label} | {param_name}={_scenario_label}"
+            _start = scenario_start_dates.get(_scenario_label, str(settings_base.start_real_date))
 
             if num_reps > 1:
                 _all_vals = np.stack(
                     [daily_new_infections(m, _subpop, _age_group) for m in _model_list], axis=0
                 )
-                _days = np.arange(_all_vals.shape[1])
+                _dates = pd.date_range(start=_start, periods=_all_vals.shape[1], freq='D')
+                _date_extents.append((_dates[0], _dates[-1]))
                 _median = np.median(_all_vals, axis=0)
                 _lo = np.percentile(_all_vals, 2.5, axis=0)
                 _hi = np.percentile(_all_vals, 97.5, axis=0)
-                _ax.plot(_days, _median, label=_label, color=_color, linestyle=_ls)
-                _ax.fill_between(_days, _lo, _hi, color=_color, alpha=0.2)
+                _ax.plot(_dates, _median, label=_label, color=_color, linestyle=_ls)
+                _ax.fill_between(_dates, _lo, _hi, color=_color, alpha=0.2)
             else:
                 _vals = daily_new_infections(_model_list[0], _subpop, _age_group)
-                _ax.plot(_vals, label=_label, color=_color, linestyle=_ls)
+                _dates = pd.date_range(start=_start, periods=len(_vals), freq='D')
+                _date_extents.append((_dates[0], _dates[-1]))
+                _ax.plot(_dates, _vals, label=_label, color=_color, linestyle=_ls)
 
-    _ax.set_xlabel("Day")
+    if _date_extents:
+        _ax.set_xlim(min(d[0] for d in _date_extents), max(d[1] for d in _date_extents))
+    _ax.set_xlabel("Date")
     _ax.set_ylabel("Daily new infections")
     _ax.set_title(f"Daily new infections — {param_name}")
     _ax.legend()
+    _fig.autofmt_xdate()
     plt.tight_layout()
     _fig
     return
@@ -648,9 +841,12 @@ def _plot_admissions(
     daily_hospital_admissions,
     np,
     num_reps,
+    pd,
     param_name,
     plt,
     results,
+    scenario_start_dates,
+    settings_base,
     subpop_selector,
 ):
     _LINE_STYLES = ["-", "--", ":", "-."]
@@ -663,6 +859,7 @@ def _plot_admissions(
     _colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
 
     _fig, _ax = plt.subplots(figsize=(10, 4))
+    _date_extents = []
 
     for _c_idx, (_sp, _ag) in enumerate(_combos):
         _color = _colors[_c_idx % len(_colors)]
@@ -673,25 +870,98 @@ def _plot_admissions(
         for _s_idx, (_scenario_label, _model_list) in enumerate(results.items()):
             _ls = _LINE_STYLES[_s_idx % len(_LINE_STYLES)]
             _label = f"{_combo_label} | {param_name}={_scenario_label}"
+            _start = scenario_start_dates.get(_scenario_label, str(settings_base.start_real_date))
 
             if num_reps > 1:
                 _all_vals = np.stack(
                     [daily_hospital_admissions(m, _subpop, _age_group) for m in _model_list], axis=0
                 )
-                _days = np.arange(_all_vals.shape[1])
+                _dates = pd.date_range(start=_start, periods=_all_vals.shape[1], freq='D')
+                _date_extents.append((_dates[0], _dates[-1]))
                 _median = np.median(_all_vals, axis=0)
                 _lo = np.percentile(_all_vals, 2.5, axis=0)
                 _hi = np.percentile(_all_vals, 97.5, axis=0)
-                _ax.plot(_days, _median, label=_label, color=_color, linestyle=_ls)
-                _ax.fill_between(_days, _lo, _hi, color=_color, alpha=0.2)
+                _ax.plot(_dates, _median, label=_label, color=_color, linestyle=_ls)
+                _ax.fill_between(_dates, _lo, _hi, color=_color, alpha=0.2)
             else:
                 _vals = daily_hospital_admissions(_model_list[0], _subpop, _age_group)
-                _ax.plot(_vals, label=_label, color=_color, linestyle=_ls)
+                _dates = pd.date_range(start=_start, periods=len(_vals), freq='D')
+                _date_extents.append((_dates[0], _dates[-1]))
+                _ax.plot(_dates, _vals, label=_label, color=_color, linestyle=_ls)
 
-    _ax.set_xlabel("Day")
+    if _date_extents:
+        _ax.set_xlim(min(d[0] for d in _date_extents), max(d[1] for d in _date_extents))
+    _ax.set_xlabel("Date")
     _ax.set_ylabel("Daily hospital admissions")
     _ax.set_title(f"Daily hospital admissions — {param_name}")
     _ax.legend()
+    _fig.autofmt_xdate()
+    plt.tight_layout()
+    _fig
+    return
+
+
+@app.cell
+def _plot_deaths(
+    age_group_selector,
+    daily_deaths,
+    np,
+    num_reps,
+    pd,
+    param_name,
+    plt,
+    results,
+    scenario_start_dates,
+    settings_base,
+    subpop_selector,
+):
+    _LINE_STYLES = ["-", "--", ":", "-."]
+
+    _combos = [
+        (sp, ag)
+        for sp in (subpop_selector.value or ["combined"])
+        for ag in (age_group_selector.value or ["all"])
+    ]
+    _colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+
+    _fig, _ax = plt.subplots(figsize=(10, 4))
+    _date_extents = []
+
+    for _c_idx, (_sp, _ag) in enumerate(_combos):
+        _color = _colors[_c_idx % len(_colors)]
+        _subpop = None if _sp == "combined" else _sp
+        _age_group = None if _ag == "all" else int(_ag)
+        _combo_label = f"{_sp}/age {_ag}"
+
+        for _s_idx, (_scenario_label, _model_list) in enumerate(results.items()):
+            _ls = _LINE_STYLES[_s_idx % len(_LINE_STYLES)]
+            _label = f"{_combo_label} | {param_name}={_scenario_label}"
+            _start = scenario_start_dates.get(_scenario_label, str(settings_base.start_real_date))
+
+            if num_reps > 1:
+                _all_vals = np.stack(
+                    [daily_deaths(m, _subpop, _age_group) for m in _model_list], axis=0
+                )
+                _dates = pd.date_range(start=_start, periods=_all_vals.shape[1], freq='D')
+                _date_extents.append((_dates[0], _dates[-1]))
+                _median = np.median(_all_vals, axis=0)
+                _lo = np.percentile(_all_vals, 2.5, axis=0)
+                _hi = np.percentile(_all_vals, 97.5, axis=0)
+                _ax.plot(_dates, _median, label=_label, color=_color, linestyle=_ls)
+                _ax.fill_between(_dates, _lo, _hi, color=_color, alpha=0.2)
+            else:
+                _vals = daily_deaths(_model_list[0], _subpop, _age_group)
+                _dates = pd.date_range(start=_start, periods=len(_vals), freq='D')
+                _date_extents.append((_dates[0], _dates[-1]))
+                _ax.plot(_dates, _vals, label=_label, color=_color, linestyle=_ls)
+
+    if _date_extents:
+        _ax.set_xlim(min(d[0] for d in _date_extents), max(d[1] for d in _date_extents))
+    _ax.set_xlabel("Date")
+    _ax.set_ylabel("Daily deaths")
+    _ax.set_title(f"Daily deaths — {param_name}")
+    _ax.legend()
+    _fig.autofmt_xdate()
     plt.tight_layout()
     _fig
     return
@@ -704,9 +974,12 @@ def _plot_cumulative_tvars(
     daily_new_infections,
     np,
     num_reps,
+    pd,
     param_name,
     plt,
     results,
+    scenario_start_dates,
+    settings_base,
     subpop_selector,
 ):
     _LINE_STYLES = ["-", "--", ":", "-."]
@@ -731,10 +1004,12 @@ def _plot_cumulative_tvars(
         _ax_hosp = _axes[_c_idx, 1]
         _ax_dth  = _axes[_c_idx, 2]
 
+        _date_extents = []
         for _s_idx, (_scenario_label, _model_list) in enumerate(results.items()):
             _color = _colors[_s_idx % len(_colors)]
             _ls    = _LINE_STYLES[_s_idx % len(_LINE_STYLES)]
             _label = f"{param_name}={_scenario_label}"
+            _start = scenario_start_dates.get(_scenario_label, str(settings_base.start_real_date))
 
             # Daily deaths from HD_to_D tvar (same pattern as daily_new_infections)
             def _daily_deaths(m, subpop_name=_subpop, age_group=_age_group):
@@ -754,9 +1029,10 @@ def _plot_cumulative_tvars(
                     _med   = np.median(_cum, axis=0)
                     _lo    = np.percentile(_cum, 2.5,  axis=0)
                     _hi    = np.percentile(_cum, 97.5, axis=0)
-                    _days  = np.arange(_med.shape[0])
-                    _ax.plot(_days, _med, label=_label, color=_color, linestyle=_ls)
-                    _ax.fill_between(_days, _lo, _hi, color=_color, alpha=0.2)
+                    _dates = pd.date_range(start=_start, periods=_med.shape[0], freq='D')
+                    _date_extents.append((_dates[0], _dates[-1]))
+                    _ax.plot(_dates, _med, label=_label, color=_color, linestyle=_ls)
+                    _ax.fill_between(_dates, _lo, _hi, color=_color, alpha=0.2)
                     _ax.set_ylabel(_ylabel)
             else:
                 for _ax, _fn, _ylabel in [
@@ -765,18 +1041,25 @@ def _plot_cumulative_tvars(
                     (_ax_dth,  _daily_deaths,            "Cumulative deaths"),
                 ]:
                     _cum = np.cumsum(_fn(_model_list[0], _subpop, _age_group))
-                    _ax.plot(_cum, label=_label, color=_color, linestyle=_ls)
+                    _dates = pd.date_range(start=_start, periods=len(_cum), freq='D')
+                    _date_extents.append((_dates[0], _dates[-1]))
+                    _ax.plot(_dates, _cum, label=_label, color=_color, linestyle=_ls)
                     _ax.set_ylabel(_ylabel)
+
+        if _date_extents:
+            for _ax in [_ax_inf, _ax_hosp, _ax_dth]:
+                _ax.set_xlim(min(d[0] for d in _date_extents), max(d[1] for d in _date_extents))
 
         for _ax, _title in [
             (_ax_inf,  f"Cumulative infections — {_combo_label}"),
             (_ax_hosp, f"Cumulative hospitalizations — {_combo_label}"),
             (_ax_dth,  f"Cumulative deaths — {_combo_label}"),
         ]:
-            _ax.set_xlabel("Day")
+            _ax.set_xlabel("Date")
             _ax.set_title(_title)
             _ax.legend(fontsize=7)
 
+    _fig.autofmt_xdate()
     plt.tight_layout()
     _fig
     return
@@ -818,6 +1101,7 @@ def _summary_table(
                 axis=0,
             )
             peak_vals = daily_adm.max(axis=1).tolist()
+            days_to_peak_vals = np.argmax(daily_adm, axis=1).tolist()
 
             def fmt(vals):
                 s = summarize_outcomes(vals)
@@ -833,6 +1117,7 @@ def _summary_table(
                 "Total deaths": fmt(death_vals),
                 "Attack rate": f"{np.mean(ar_vals):.3f}",
                 "Peak daily admissions": fmt(peak_vals),
+                "Days to peak admissions": fmt(days_to_peak_vals),
             })
     mo.vstack([mo.md("## Summary"), mo.ui.table(pd.DataFrame(rows))])
     return
