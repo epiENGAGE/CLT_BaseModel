@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(wc -l /Users/rfp437/Work/CityLevelTransmission/CLT_BaseModel/flu_core/flu_*.py)"
+      "Bash(wc -l /Users/rfp437/Work/CityLevelTransmission/CLT_BaseModel/flu_core/flu_*.py)",
+      "Bash(grep -n \"make_dataclass_from_dict\\\\|updated_dataclass\" /Users/rfp437/Work/CityLevelTransmission/CLT_BaseModel/clt_toolkit/*.py)"
     ]
   }
 }
