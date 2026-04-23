@@ -1,0 +1,8 @@
+{
+	"timesteps_per_day":7,
+	"transition_type":"binom_deterministic_no_round",
+	"use_deterministic_softplus": false,
+	"start_real_date": "2024-09-15",
+	"save_daily_history": true,
+    "transition_variables_to_save": ["ISH_to_HR", "ISH_to_HD", "S_to_E", "E_to_IP", "R_to_S","IA_to_R", "ISR_to_R","HR_to_R", "HD_to_D"]
+}
