@@ -1,0 +1,76 @@
+4/22/2026
+Experiments code:
+texas_input_files/simulation_settings.json “transition_type”:”binom”
+examples/flu_demo_experiments_only.ipynb
+
+Austin 2 subpop (applied to both 2024_2025 and 2023_2024)
+examples/flu_demo_2popAustin
+extra code at end to look at transition variables
+extra code in beginning to set the waiting rate and subpopulation specific IHR values
+was updating east beta when thought was updating west beta
+
+Common_subpop_parameters:
+update int_immune_wane
+beta
+calendar start date
+updated HDR values
+updated hospital waiting times 
+updated IHR waiting times 
+Updated inf induced saturation for 2024-2025 since both H1 and H3 were common
+
+Vaccination schedule:  
+Completed update to 2024 season now that new data is available. 
+
+M(0) in init_vals: 
+Updated reflecting current idea of Anass to calculate M(start_date) based previous estimated number of infections
+over time plus waning 
+
+School&work calendars:
+Updated Work calendar to reflect Bureau of Labor Statistics data on how many people get paid holidays and when, and 
+how many people work during week vs weekend.
+
+Added parameters for Austin 3 subpop model (both 2023-2024 and 2024-2025)
+
+Expanded all four Austin input files so two risk groups: 
+1) Update vaccination schedule so two risk groups
+2) Update common_subpop_params so two risk groups, including all parameters that are AxR
+   Only IP_to_ISH prop varies by risk group
+3) Update init_vals with AxR values, only S and E varies by risk group
+
+Flu_demo_Austin code:
+Since only difference between 2023-2024 and 2024-2025 is location of input files, just added the
+    two possibilities as lines to be commented in and out to reduce the proliferation of code
+Added code for a three subpopulation model of Austin 
+
+Notes on parameters:
+Assume %HR is the same 2024-2025 and 2023-2024
+Assume Subpop Ratios of vaccination rate for Austin3 (but not Austin2) is the same 2024-2025 and 2023-2024 
+Assume VE is the same 2024-2025 and 2023-2024, since don't have viable estimates for 2023-2024
+Mobility estimates are still dummy values
+
+
+2/19/2026
+Updated mobility to current values from Jose, but dwell time is not weighted, and population size used was 18+ not 16+.
+
+Updated calendars, separate for each subpop
+
+Updated vaccination, now age specific
+
+Updated Mv(0) [now age specific] and M(0) [M(0) is still a work in progress]
+
+Updated humidity
+
+Updated initial E in West (works better given code changes)
+
+Using hospitalization data based on NSSP as calibration standards
+
+Updated start date based on hospitalization data from NSSP
+
+Updated vax induced risk reduction for infec. & hosp  
+
+Had wrong Hr to R rate, so updated this
+
+Updated mobility modifier to exclude trips > 30 miles.  Now day of week specific.
+
+Code changes since last update:  Remy made vacc AxR.  Added the switch for PySoft and turned it off.  Made mobility modifer a schedule, so can vary by day of week.  
+
