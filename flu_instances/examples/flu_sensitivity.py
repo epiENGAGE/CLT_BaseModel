@@ -86,7 +86,7 @@ def _load_files(clt, flu, pd):
 
 
 @app.cell
-def _param_catalog(flu, params_baseline):
+def _param_catalog(flu, inputs, params_baseline):
     import dataclasses as _dc
     import numpy as _np
 
@@ -106,7 +106,12 @@ def _param_catalog(flu, params_baseline):
     ]
 
     def _fmt(val):
-        return "[" + ", ".join(f"{x:.4g}" for x in _np.asarray(val).flatten()) + "]"
+        arr = _np.asarray(val)
+        if arr.ndim == 2:
+            return "[" + ", ".join(
+                "[" + ", ".join(f"{x:.4g}" for x in row) + "]" for row in arr
+            ) + "]"
+        return "[" + ", ".join(f"{x:.4g}" for x in arr.flatten()) + "]"
 
     ARRAY_BASELINES = [_fmt(getattr(params_baseline, p)) for p in ARRAY_PARAMS]
 
@@ -127,7 +132,6 @@ def _param_catalog(flu, params_baseline):
         "IP_to_IS_rate":                "IP → IS rate",
         "ISR_to_R_rate":                "ISR → R rate",
         "ISH_to_H_rate":                "ISH → H rate",
-        "HD_to_D_rate":                 "HD → D rate",
         "IP_relative_inf":              "IP relative infectiousness",
         "IA_relative_inf":              "IA relative infectiousness",
     }
@@ -156,6 +160,43 @@ def _param_catalog(flu, params_baseline):
         _label = _DESCRIPTIONS.get(_name, _name)
         _lo, _hi, _step = _slider_range(_val)
         SCALAR_PARAMS[_name] = (_label, float(_val), _lo, _hi, _step)
+
+    # Add non-zero init condition scalars from loaded states (excludes S, M, MV)
+    from flu_example_utils import SUBPOP_CONFIG as _SC_IC
+    _INIT_COMPS = ["E", "IP", "ISR", "ISH", "IA", "HR", "HD", "R", "D"]
+    for _sp_cfg in _SC_IC:
+        _sp_name = _sp_cfg["name"]
+        _state = inputs["states"][_sp_name]
+        for _comp in _INIT_COMPS:
+            _field = getattr(_state, _comp, None)
+            if _field is None:
+                continue
+            _arr = _np.asarray(_field)
+            for _idx in _np.argwhere(_arr != 0):
+                _i, _j = int(_idx[0]), int(_idx[1])
+                _val = float(_arr[_i, _j])
+                _key = f"init:{_sp_name}:{_comp}:{_i}:{_j}"
+                _lo_ic, _hi_ic, _step_ic = _slider_range(_val)
+                SCALAR_PARAMS[_key] = (
+                    f"{_sp_name} {_comp}[{_i}][{_j}]",
+                    _val, _lo_ic, _hi_ic, _step_ic,
+                )
+
+    # Add M arrays: one per subpop plus one aggregate entry
+    _M_PARAM_KEYS = [f"M:{sp['name']}" for sp in _SC_IC] + ["M:all"]
+    _M_BASELINES_LIST = []
+    for _mk in _M_PARAM_KEYS:
+        if _mk == "M:all":
+            _parts = [
+                f"{sp['name']}: " + _fmt(getattr(inputs["states"][sp["name"]], "M"))
+                for sp in _SC_IC
+            ]
+            _M_BASELINES_LIST.append(" | ".join(_parts))
+        else:
+            _sp_nm = _mk.split(":")[1]
+            _M_BASELINES_LIST.append(_fmt(getattr(inputs["states"][_sp_nm], "M")))
+    ARRAY_PARAMS = ARRAY_PARAMS + _M_PARAM_KEYS
+    ARRAY_BASELINES = ARRAY_BASELINES + _M_BASELINES_LIST
 
     return ARRAY_BASELINES, ARRAY_PARAMS, SCALAR_PARAMS
 
@@ -216,12 +257,16 @@ def _controls(SCALAR_PARAMS, mo, params_baseline):
     sim_length = mo.ui.number(
         start=50, stop=365, step=10, value=200, label="Simulation days"
     )
+
+    run_button = mo.ui.run_button(label="Run simulation")
+
     return (
         age_group_selector,
         num_reps_input,
         num_values_input,
         param_selector,
         param_type,
+        run_button,
         sim_length,
         sim_mode,
         subpop_selector,
@@ -302,7 +347,7 @@ def _array_param_sliders(
     array_sliders = mo.ui.array(
         [
             mo.ui.slider(
-                start=0.1, stop=3.0, step=0.05, value=1.0,
+                start=0.0, stop=5.0, step=0.05, value=1.0,
                 label=f"scale factor {i + 1}",
             )
             for i in range(_n)
@@ -356,6 +401,7 @@ def _run_simulation(
     param_selector,
     param_type,
     params_baseline,
+    run_button,
     settings_base,
     sim_length,
     sim_mode,
@@ -363,11 +409,14 @@ def _run_simulation(
     start_date_inputs,
     vax_multiplier,
 ):
+    mo.stop(not run_button.value, mo.md("Press **Run simulation** to start."))
+
     from flu_example_utils import (
         SUBPOP_CONFIG as _SC,
         scale_vaccines_df,
         make_rng_generators,
         build_flu_metapop_model,
+        apply_general_init_overrides,
     )
 
     transition_type = (
@@ -389,27 +438,42 @@ def _run_simulation(
     _is_other_mode = param_type.value == "Other"
 
     if _is_array_mode:
-        _array_pname = array_param_selector.value
-        param_name = f"{_array_pname} ×scale"
+        _apn = array_param_selector.value
         param_values = list(dict.fromkeys(array_sliders.value))
 
-        def _make_params(val):
-            _base = np.asarray(getattr(params_baseline, _array_pname))
-            return clt.updated_dataclass(
-                params_baseline, {_array_pname: _base * val}
-            )
+        if str(_apn).startswith("M:"):
+            _sp_part = _apn.split(":")[1]
+            param_name = f"M ({'all subpops' if _sp_part == 'all' else _sp_part}) ×scale"
+            _make_params = lambda _: params_baseline
+            _make_states = lambda val, _k=_apn: apply_general_init_overrides(
+                inputs["states"], {_k: val}, _SC, np)
+        else:
+            param_name = f"{_apn} ×scale"
+            _make_params = lambda val, _a=_apn: clt.updated_dataclass(
+                params_baseline, {_a: np.asarray(getattr(params_baseline, _a)) * val})
+            _make_states = lambda _: inputs["states"]
+
     elif _is_other_mode:
         param_name = "start_real_date"
         param_values = list(dict.fromkeys(start_date_inputs.value))
+        _make_params = lambda _: params_baseline
+        _make_states = lambda _: inputs["states"]
 
-        def _make_params(val):
-            return params_baseline
     else:
-        param_name = param_selector.value
+        _raw_pname = param_selector.value
         param_values = list(dict.fromkeys(sliders.value))
 
-        def _make_params(val):
-            return clt.updated_dataclass(params_baseline, {param_name: val})
+        if str(_raw_pname).startswith("init:"):
+            _, _sp_nm, _comp, _ii, _jj = _raw_pname.split(":")
+            param_name = f"{_sp_nm} {_comp}[{_ii}][{_jj}]"
+            _make_params = lambda _: params_baseline
+            _make_states = lambda val, _k=_raw_pname: apply_general_init_overrides(
+                inputs["states"], {_k: val}, _SC, np)
+        else:
+            param_name = _raw_pname
+            _make_params = lambda val, _pn=_raw_pname: clt.updated_dataclass(
+                params_baseline, {_pn: val})
+            _make_states = lambda _: inputs["states"]
 
     _default_start = str(settings_base.start_real_date)
     if _is_other_mode:
@@ -425,11 +489,13 @@ def _run_simulation(
 
     def build_and_run(param_val):
         updated_params = _make_params(param_val)
+        updated_states = _make_states(param_val)
+        _run_inputs = {**inputs, "states": updated_states}
         rng_results = []
         for rep in range(num_reps):
             rngs = make_rng_generators(88888 + rep, _SC, np)
             model = build_flu_metapop_model(
-                _SC, inputs, updated_params, updated_settings,
+                _SC, _run_inputs, updated_params, updated_settings,
                 rngs, scaled_vax, flu,
             )
             model.simulate_until_day(end_day)
@@ -448,6 +514,7 @@ def _show_controls(
     mo,
     other_controls_ui,
     param_type,
+    run_button,
     sliders_ui,
 ):
     if param_type.value == "Array (scale factor)":
@@ -456,7 +523,7 @@ def _show_controls(
         _param_controls = other_controls_ui
     else:
         _param_controls = sliders_ui
-    mo.vstack([controls_form, _param_controls])
+    mo.vstack([controls_form, _param_controls, run_button])
     return
 
 
