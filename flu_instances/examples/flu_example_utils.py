@@ -245,6 +245,36 @@ def apply_init_overrides(states, overrides, subpop_config):
     return new_states
 
 
+def apply_general_init_overrides(states, overrides, subpop_config, np_module):
+    """Apply initial condition overrides to states.
+
+    Keys in ``overrides`` follow two patterns:
+
+    - ``"init:{sp_name}:{comp}:{i}:{j}"`` → set ``state.{comp}[i][j] = value``
+    - ``"M:{sp_name}"`` or ``"M:all"`` → multiply ``state.M`` element-wise by
+      ``value`` (treated as a scale factor)
+
+    Returns a new dict of deepcopied, modified states for all subpopulations.
+    """
+    import copy
+    modified = {sp["name"]: copy.deepcopy(states[sp["name"]]) for sp in subpop_config}
+
+    for key, val in overrides.items():
+        parts = key.split(":")
+        if parts[0] == "init":
+            _, sp_name, comp, i_str, j_str = parts
+            getattr(modified[sp_name], comp)[int(i_str)][int(j_str)] = val
+        elif parts[0] == "M":
+            sp_target = parts[1]
+            scale = float(val)
+            for sp in subpop_config:
+                if sp_target == "all" or sp["name"] == sp_target:
+                    s = modified[sp["name"]]
+                    s.M = np_module.asarray(s.M) * scale
+
+    return modified
+
+
 # ---------------------------------------------------------------------------
 # UI helpers
 # ---------------------------------------------------------------------------
