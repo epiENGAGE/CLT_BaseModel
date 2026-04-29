@@ -1,0 +1,36 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+authors:
+  - family-names: Pasco
+    given-names: Remy
+    orcid: https://orcid.org/0000-0002-9321-6876
+  - family-names: Pei
+    given-names: Linda
+    orcid: https://orcid.org/0000-0002-4282-6930
+  - family-names: Ptak
+    given-names: Susan
+    orcid: https://orcid.org/0009-0002-1206-4557
+  - family-names: Bi
+    given-names: Kaiming
+    orcid: https://orcid.org/0000-0001-6234-6232
+  - family-names: Bandekar
+    given-names: Shraddha
+    orcid: https://orcid.org/0000-0001-5063-2290
+  - family-names: Kim
+    given-names: Dongah
+    orcid: https://orcid.org/0000-0003-4638-7514
+  - family-names: Ibrahim
+    given-names: Oluwasegun
+    orcid: https://orcid.org/0000-0002-2971-4301
+  - family-names: Bouchnita
+    given-names: Anass
+    orcid: https://orcid.org/0000-0002-2729-6484
+  - family-names: Morton
+    given-names: David
+    orcid: https://orcid.org/0000-0001-6001-9078
+  - family-names: Meyers
+    given-names: Lauren
+    orcid: https://orcid.org/0000-0002-5828-8874
+title: "EpiENGAGE's City-Level Transmission framework"
+version: 2.0.4
+date-released: 2026-04-29
