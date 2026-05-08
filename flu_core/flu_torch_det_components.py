@@ -102,14 +102,18 @@ def compute_flu_contact_matrix(params: FluFullMetapopParamsTensors,
 def compute_S_to_E(state: FluFullMetapopStateTensors,
                    params: FluFullMetapopParamsTensors,
                    precomputed: FluPrecomputedTensors,
-                   dt: float) -> torch.Tensor:
+                   dt: float,
+                   total_mixing_exposure: torch.Tensor = None) -> torch.Tensor:
     """
     Returns:
         (torch.Tensor of size (L, A, R))
+
+    If total_mixing_exposure is provided, use it directly (for daily-update mode
+    matching the numpy metapop model). Otherwise compute it from current state.
     """
 
-    # Needs flu_contact_matrix to be in state for this
-    total_mixing_exposure = compute_total_mixing_exposure(state, params, precomputed)
+    if total_mixing_exposure is None:
+        total_mixing_exposure = compute_total_mixing_exposure(state, params, precomputed)
 
     if total_mixing_exposure.size() != torch.Size([precomputed.L,
                                                    precomputed.A,
@@ -432,7 +436,8 @@ def advance_timestep(state: FluFullMetapopStateTensors,
                      precomputed: FluPrecomputedTensors,
                      dt: float,
                      save_calibration_targets: bool=False,
-                     save_tvar_history: bool=False) -> Tuple[FluFullMetapopStateTensors, dict, dict]:
+                     save_tvar_history: bool=False,
+                     total_mixing_exposure: torch.Tensor = None) -> Tuple[FluFullMetapopStateTensors, dict, dict]:
     """
     Advance the simulation one timestep, with length `dt`.
     Updates state corresponding to compartments and
@@ -466,7 +471,8 @@ def advance_timestep(state: FluFullMetapopStateTensors,
             `save_tvar_history`.
     """ 
     
-    S_to_E = compute_S_to_E(state, params, precomputed, dt)
+    S_to_E = compute_S_to_E(state, params, precomputed, dt,
+                            total_mixing_exposure=total_mixing_exposure)
 
     # Deterministic multinomial implementation to match
     #   object-oriented version
@@ -598,6 +604,8 @@ def torch_simulate_full_history(state: FluFullMetapopStateTensors,
 
     for day in range(num_days):
         state = update_state_with_schedules(state, params, schedules, day)
+        # Compute mixing exposure once per day (matching numpy metapop model)
+        daily_mixing_exposure = compute_total_mixing_exposure(state, params, precomputed)
 
         for timestep in range(timesteps_per_day):
             # TODO double check whether this split makes sense
@@ -606,12 +614,14 @@ def torch_simulate_full_history(state: FluFullMetapopStateTensors,
             #   (these variables may not be used anywhere right now)
             if timestep == timesteps_per_day-1:
                 state, _, tvar_history = \
-                    advance_timestep(state, params, precomputed, dt, save_tvar_history=True)
+                    advance_timestep(state, params, precomputed, dt, save_tvar_history=True,
+                                     total_mixing_exposure=daily_mixing_exposure)
                 for key in tvar_history:
                     tvar_history_dict[key].append(tvar_history[key])
             else:
                 state, _, _ = \
-                    advance_timestep(state, params, precomputed, dt, save_tvar_history=False)
+                    advance_timestep(state, params, precomputed, dt, save_tvar_history=False,
+                                     total_mixing_exposure=daily_mixing_exposure)
 
         for field in fields(state):
             if field.name == "init_vals":
@@ -644,9 +654,17 @@ def torch_simulate_hospital_admits(state: FluFullMetapopStateTensors,
 
     for day in range(num_days):
         state = update_state_with_schedules(state, params, schedules, day)
+        # Compute mixing exposure once per day (matching numpy metapop model)
+        daily_mixing_exposure = compute_total_mixing_exposure(state, params, precomputed)
+        daily_admits = None
         for timestep in range(timesteps_per_day):
             state, calibration_targets, _ = \
-                advance_timestep(state, params, precomputed, dt, save_calibration_targets=True)
-        hospital_admits_history.append(calibration_targets["ISH_to_H"].clone())
+                advance_timestep(state, params, precomputed, dt, save_calibration_targets=True,
+                                 total_mixing_exposure=daily_mixing_exposure)
+            if daily_admits is None:
+                daily_admits = calibration_targets["ISH_to_H"].clone()
+            else:
+                daily_admits = daily_admits + calibration_targets["ISH_to_H"]
+        hospital_admits_history.append(daily_admits)
 
     return torch.stack(hospital_admits_history)
