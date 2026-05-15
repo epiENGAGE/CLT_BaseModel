@@ -165,6 +165,7 @@ def _show_controls(
     e_init_inputs,
     m_scale_inputs,
     start_date_sc_inputs,
+    travel_matrix_editors,
     vax_editors,
 ):
     _n = int(num_scenarios_input.value)
@@ -246,6 +247,12 @@ def _show_controls(
             for _j in range(_n)
         ]),
     ])
+    _travel_accordion = mo.accordion(
+        {"Mobility matrix (travel proportions)": mo.vstack([
+            mo.vstack([mo.md(f"**Scenario {_j + 1}**"), travel_matrix_editors[_j]])
+            for _j in range(_n)
+        ])}
+    )
     _tab2 = mo.vstack(
         [mo.md("### Parameter overrides"), num_scenarios_input,
          _header_row, _vax_row,
@@ -253,7 +260,7 @@ def _show_controls(
          mo.md("**Scalar parameters**")] + _scalar_rows +
         [mo.md("**Array parameters** *(scale factor applied to all entries)*")] + _array_rows +
         [mo.md("**Initial conditions**")] + _e_rows + _m_rows +
-        [mo.md("**Other**"), _start_date_row]
+        [mo.md("**Other**"), _start_date_row, _travel_accordion]
     )
 
     _content = _tab1 if scenario_tab.value == "Vaccination coverage" else _tab2
@@ -449,11 +456,29 @@ def _param_tab_controls(flu, inputs, mo, params):
         for j in range(_MAX_SC)
     ])
 
+    # Travel matrix editors (one per possible scenario), seeded from mixing_params
+    _travel_mat = inputs["mixing_params"].travel_proportions
+
+    def _make_travel_rows(mat):
+        return [
+            {"from \\ to": f"Location {_i}",
+             **{f"to_{_j}": round(float(mat[_i][_j]), 4) for _j in range(len(mat[_i]))}}
+            for _i in range(len(mat))
+        ]
+
+    travel_matrix_editors = mo.ui.array([
+        mo.ui.data_editor(
+            _make_travel_rows(_travel_mat),
+            label=f"Scenario {_j + 1} travel proportions",
+        )
+        for _j in range(_MAX_SC)
+    ])
+
     return (
         ARRAY_BASELINES, ARRAY_PARAMS, SCALAR_PARAMS,
         E_NONZERO_ENTRIES,
         array_scale_inputs, e_init_inputs, m_scale_inputs, param_inputs,
-        scenario_name_inputs, start_date_sc_inputs,
+        scenario_name_inputs, start_date_sc_inputs, travel_matrix_editors,
     )
 
 
@@ -492,6 +517,7 @@ def _define_scenarios(
     scenario_name_inputs,
     scenario_tab,
     start_date_sc_inputs,
+    travel_matrix_editors,
     vax_editors,
 ):
     import pandas as _pd_ds
@@ -512,6 +538,11 @@ def _define_scenarios(
                 scale_mat[_age, _risk] = float(row[f"risk_{_risk}"]) / _b if _b > 0 else 1.0
         return scale_mat
 
+    def _editor_to_travel_mat(editor_val):
+        df = editor_val if isinstance(editor_val, _pd_ds.DataFrame) else _pd_ds.DataFrame(editor_val)
+        n_loc = len(df)
+        return [[float(df.iloc[_i][f"to_{_j}"]) for _j in range(n_loc)] for _i in range(n_loc)]
+
     scenarios = {"baseline": {}}
     scenario_labels = {"baseline": "Baseline"}
 
@@ -530,7 +561,8 @@ def _define_scenarios(
                         )
                     }
                     for sp in _SC
-                }
+                },
+                "travel_proportions": _editor_to_travel_mat(travel_matrix_editors[_i].value),
             }
             scenario_labels[_sc_name] = f"Scenario {_i + 1} (\u00d7{_scale:.2f} base)"
 
@@ -557,6 +589,7 @@ def _define_scenarios(
                     for _mi, sp in enumerate(_SC)
                 },
                 "start_date": start_date_sc_inputs[j].value,
+                "travel_proportions": _editor_to_travel_mat(travel_matrix_editors[j].value),
             }
             _editor_val_j = vax_editors[j].value
             _sc_def["subpop_schedules"] = {
@@ -694,7 +727,15 @@ def _run_scenarios(
             for sp in _SC
         }
 
-        _inputs_for_build = {**inputs, "states": _states}
+        # Travel proportions override
+        _travel_ovr = scenario_def.get("travel_proportions")
+        _mixing_for_build = (
+            clt.updated_dataclass(inputs["mixing_params"], {"travel_proportions": np.array(_travel_ovr)})
+            if _travel_ovr is not None
+            else inputs["mixing_params"]
+        )
+
+        _inputs_for_build = {**inputs, "states": _states, "mixing_params": _mixing_for_build}
         rngs = make_rng_generators(88888, _SC, np)
         model = build_flu_metapop_model(_SC, _inputs_for_build, _params, _settings, rngs, _vax_dfs, flu)
         model.modify_random_seed(seed)
