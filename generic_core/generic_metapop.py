@@ -255,8 +255,10 @@ class ConfigDrivenMetapopModel(clt.MetapopModel):
 
         # relative_suscept: assumed identical across subpops; expand to (L, A, R)
         rel_suscept_param = self.travel_config["relative_susceptibility_param"]
-        rs = np.asarray(first.params.params[rel_suscept_param], dtype=float)
-        rs_tensor = torch.tensor(rs).view(1, A, R).expand(L, A, R)
+        rs = np.broadcast_to(
+            np.asarray(first.params.params[rel_suscept_param], dtype=float), (A, R)
+        ).copy()
+        rs_tensor = torch.tensor(rs).unsqueeze(0).expand(L, A, R)
         result[rel_suscept_param] = rs_tensor
 
         # Scalar relative-infectiousness params (e.g. IP_relative_inf, IA_relative_inf)

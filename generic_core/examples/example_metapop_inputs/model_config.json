@@ -1,0 +1,80 @@
+{
+  "compartments": ["S", "E", "I", "R"],
+  "params": {
+    "beta_baseline": 0.3,
+    "relative_suscept": 1.0,
+    "E_to_I_rate": 0.2,
+    "I_to_R_rate": 0.143,
+    "humidity_impact": 0.1,
+    "total_contact_matrix": [[7.0, 3.0, 0.5], [3.0, 9.0, 1.5], [0.5, 1.5, 4.0]],
+    "school_contact_matrix": [[3.0, 0.5, 0.0], [0.5, 0.2, 0.0], [0.0, 0.0, 0.0]],
+    "work_contact_matrix": [[0.0, 0.2, 0.0], [0.2, 4.0, 0.3], [0.0, 0.3, 0.5]]
+  },
+  "transitions": [
+    {
+      "name": "S_to_E",
+      "origin": "S",
+      "destination": "E",
+      "rate_template": "force_of_infection_travel",
+      "rate_config": {
+        "beta_param": "beta_baseline",
+        "travel_config": {
+          "infectious_compartments": {"I": null},
+          "immobile_compartments": [],
+          "relative_susceptibility_param": "relative_suscept",
+          "contact_matrix_schedule": "flu_contact_matrix",
+          "mobility_schedule": "mobility_modifier",
+          "humidity_impact_param": "humidity_impact",
+          "humidity_schedule": "absolute_humidity"
+        }
+      }
+    },
+    {
+      "name": "E_to_I",
+      "origin": "E",
+      "destination": "I",
+      "rate_template": "constant_param",
+      "rate_config": {"param": "E_to_I_rate"}
+    },
+    {
+      "name": "I_to_R",
+      "origin": "I",
+      "destination": "R",
+      "rate_template": "constant_param",
+      "rate_config": {"param": "I_to_R_rate"}
+    }
+  ],
+  "transition_groups": [],
+  "epi_metrics": [],
+  "schedules": [
+    {
+      "name": "flu_contact_matrix",
+      "schedule_template": "contact_matrix",
+      "schedule_config": {
+        "school_work_day_df_attribute": "school_work_calendar_df",
+        "total_contact_matrix_param": "total_contact_matrix",
+        "school_contact_matrix_param": "school_contact_matrix",
+        "work_contact_matrix_param": "work_contact_matrix"
+      }
+    },
+    {
+      "name": "mobility_modifier",
+      "schedule_template": "mobility",
+      "schedule_config": {
+        "df_attribute": "mobility_df"
+      }
+    }
+  ],
+  "age_risk": {
+    "num_age_groups": 3,
+    "num_risk_groups": 2
+  },
+  "total_population": 250000,
+  "input_files": {
+    "mobility_csv": "generic_core/examples/example_metapop_inputs/mobility_modifier.csv",
+    "total_contact_matrix_csv": "generic_core/examples/example_metapop_inputs/total_contact_matrix.csv",
+    "school_contact_matrix_csv": "generic_core/examples/example_metapop_inputs/school_contact_matrix.csv",
+    "work_contact_matrix_csv": "generic_core/examples/example_metapop_inputs/work_contact_matrix.csv",
+    "metapop_folder": "generic_core/examples/example_metapop_inputs"
+  }
+}

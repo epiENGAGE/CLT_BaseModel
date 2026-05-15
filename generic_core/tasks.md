@@ -315,6 +315,38 @@ validation including a marimo notebook equivalent.
   - SEIR model (two-compartment split)
   - Stochastic multi-replicate run
 
+- [ ] **6.4** Transition variable history tracking (prerequisite for outcomes)
+  - Add a UI step (between Steps 7 and 8) where the user selects which named
+    transitions to save histories for (multi-select from the defined transition names)
+  - Wire the selection into `_run_once`: pass `transition_variables_to_save` to
+    `ConfigDrivenSubpopModel` (analogous to `FluSubpopModel`'s `transition_variables_to_save`)
+  - Expose the saved tvar histories alongside compartment histories in the return
+    value of `_run_once` so downstream outcome cells can consume them
+
+- [ ] **6.5** Outcomes section in notebook
+  - Add a UI step after the run where the user designates:
+    - Which transition name represents "new infections" (for daily infection curve
+      and attack rate)
+    - Optionally, which transitions represent "hospitalizations" and "deaths"
+  - Call `generic_core.outcomes.*` to compute and display:
+    - Daily new infections timeseries (median + CI ribbon for stochastic)
+    - Attack rate
+    - Cumulative totals for any designated outcome transitions
+  - Mirrors the `flu_outcomes` usage pattern in `scenario_and_outcomes_demo.py`
+
+- [ ] **6.6** Scenario comparison
+  - Add a "Scenarios" step where the user defines 2–3 named parameter overrides
+    (e.g. different `beta_baseline` values) relative to the base config
+  - Run all scenarios and overlay their epidemic curves on a single plot
+  - Show a summary table of peak value and cumulative totals per scenario
+  - Mirrors the `ScenarioRunner` / multi-scenario overlay pattern in
+    `scenario_and_outcomes_demo.py` (no SQL backend needed for the notebook)
+
+- [ ] **6.7** CSV export of simulation results
+  - After a successful run, add a `mo.download` button that exports a tidy
+    CSV with columns: `day`, `replicate`, `compartment`, `value`
+  - If tvar histories are saved, include a second download for those
+
 ---
 
 ## Cross-Phase Notes
