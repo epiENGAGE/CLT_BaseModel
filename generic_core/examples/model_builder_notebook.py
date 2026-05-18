@@ -269,7 +269,8 @@ def _load_config_ui(mo):
         label="Browse for config JSON",
     )
     config_path_input = mo.ui.text(
-        value="",
+        value="/Users/rfp437/Work/CityLevelTransmission/CLT_BaseModel/generic_core/examples/example_metapop_inputs/model_config.json",
+        # value="", 
         placeholder="/path/to/model_config.json  (or use Browse above)",
         label="Or enter config JSON path directly",
         full_width=True,
@@ -576,9 +577,9 @@ def _population_structure_show(
         _parts.append(metapop_folder_input)
         _folder_valid, _folder_status = validate_metapop_folder(metapop_folder_input.value)
         if metapop_folder_input.value.strip():
-            for _fname, _msg in _folder_status.items():
-                _kind = "success" if "OK" in _msg else ("warn" if "absent" in _msg else "danger")
-                _parts.append(mo.callout(mo.md(f"**{_fname}**: {_msg}"), kind=_kind))
+            _lines = [f"- **{_fname}**: {_msg}" for _fname, _msg in _folder_status.items()]
+            _overall_kind = "success" if _folder_valid else "danger"
+            _parts.append(mo.callout(mo.md("\n".join(_lines)), kind=_overall_kind))
     else:
         if num_age_groups > 1 or num_risk_groups > 1:
             _parts.append(mo.callout(
@@ -708,14 +709,11 @@ def _transition_forms_ui(compartments, loaded_config, mo):
         for _i in range(_max_t)
     ])
     t_factors = mo.ui.array([
-        mo.ui.text(value=", ".join(_rcget(_i, "factors", [])), label="Factors")
+        mo.ui.text(value=", ".join(_rcget(_i, "factors", [])), label="")
         for _i in range(_max_t)
     ])
     t_complements = mo.ui.array([
-        mo.ui.text(
-            value=", ".join(_rcget(_i, "complement_factors", [])),
-            label="Complement factors",
-        )
+        mo.ui.text(value=", ".join(_rcget(_i, "complement_factors", [])), label="")
         for _i in range(_max_t)
     ])
 
@@ -770,7 +768,7 @@ def _transition_forms_ui(compartments, loaded_config, mo):
     t_infectious = mo.ui.array([
         mo.ui.text(
             value=_infectious_default(_i),
-            label="Infectious compartments",
+            label="",
             placeholder="IP:IP_relative_inf, IA:IA_relative_inf, ISR, ISH",
         )
         for _i in range(_max_t)
@@ -799,7 +797,7 @@ def _transition_forms_ui(compartments, loaded_config, mo):
     t_immobile = mo.ui.array([
         mo.ui.text(
             value=", ".join(_rcget(_i, "immobile_compartments", [])),
-            label="Immobile compartments",
+            label="",
         )
         for _i in range(_max_t)
     ])
@@ -823,46 +821,142 @@ def _transition_show(
     t_beta, t_rel_sus, t_infectious, t_use_humidity, t_humidity_impact,
     t_use_foi_immunity, t_immobile,
 ):
+    import html as _html
+    import random as _random
+
+    def _tip_label(label_text, tip_text):
+        """Render a field label with an inline ⓘ hover tooltip using CSS only."""
+        _uid = _random.randint(10**7, 10**8 - 1)
+        _esc = _html.escape(tip_text)
+        return mo.Html(
+            f"<style>"
+            f"#tip{_uid}{{position:relative;display:inline-block;"
+            f"cursor:help;color:#888;font-size:0.8em;vertical-align:middle;}}"
+            f"#tip{_uid}>span{{visibility:hidden;opacity:0;"
+            f"transition:opacity .15s;transition-delay:.2s;"
+            f"position:absolute;bottom:120%;left:0;"
+            f"background:#222;color:#fff;border-radius:4px;"
+            f"padding:6px 10px;width:280px;font-size:12px;line-height:1.5;"
+            f"white-space:pre-wrap;pointer-events:none;z-index:9999;}}"
+            f"#tip{_uid}:hover>span{{visibility:visible;opacity:1;}}"
+            f"</style>"
+            f"<span>"
+            f"{label_text}&nbsp;"
+            f'<span id="tip{_uid}">ⓘ<span>{_esc}</span></span>'
+            f"</span>"
+        )
+
+    def _with_tip(label_text, tip_text, widget):
+        return mo.hstack([_tip_label(label_text, tip_text), widget], justify="start", align="center")
+
+    _IMMUNITY_TIP = (
+        "Divides the rate or force of infection by a population-level immunity factor:\n\n"
+        "  immunity_force =\n"
+        "    1\n"
+        "    + (r_inf / (1 − r_inf)) × M\n"
+        "    + (r_vax / (1 − r_vax)) × MV\n\n"
+        "  r_inf = inf_reduce_param ∈ [0, 1)\n"
+        "  r_vax = vax_reduce_param ∈ [0, 1)\n"
+        "  M  = cumulative infection-induced immunity\n"
+        "  MV = cumulative vaccine-induced immunity\n\n"
+        "Higher r → stronger rate reduction.\n"
+        "Example: r_inf = 0.5, M = 1 → rate halved.\n\n"
+        "Requires at least one of M or MV to be enabled\n"
+        "in Step 5, otherwise immunity_force stays at 1."
+    )
+
+    def _immunity_checkbox(checkbox):
+        return mo.hstack([checkbox, _tip_label("", _IMMUNITY_TIP)], justify="start", align="center")
+
+
     _n = int(n_transitions.value)
     _rows = []
     for _i in range(_n):
         _template = t_template.value[_i]
+
         if _template == "constant_param":
             _rate_ui = t_param[_i]
         elif _template == "param_product":
-            _rate_ui = mo.vstack([t_factors[_i], t_complements[_i]])
+            _rate_ui = mo.vstack([
+                _with_tip(
+                    "Factors",
+                    "Comma-separated parameter names multiplied together to form the rate.\n\n"
+                    "Example: base_rate, hosp_prop\n"
+                    "Rate = base_rate × hosp_prop\n\n"
+                    "Each name gets a slider in Step 4.",
+                    t_factors[_i],
+                ),
+                _with_tip(
+                    "Complement factors",
+                    "Parameters applied as (1 − param) factors in the product.\n"
+                    "Useful for modelling the fraction that does NOT take a given path.\n\n"
+                    "Example: hosp_prop as a complement (with base_rate as a factor)\n"
+                    "Rate = base_rate × (1 − hosp_prop)",
+                    t_complements[_i],
+                ),
+            ])
         elif _template == "immunity_modulated":
             _rate_ui = mo.vstack([
                 t_base_rate[_i],
                 t_proportion[_i],
                 t_is_complement[_i],
-                t_use_foi_immunity[_i],
+                _immunity_checkbox(t_use_foi_immunity[_i]),
                 t_inf_reduce[_i],
                 t_vax_reduce[_i],
             ])
         elif _template == "force_of_infection":
-            _rate_ui = mo.vstack([
+            _foi_items = [
                 t_beta[_i],
                 t_rel_sus[_i],
-                t_infectious[_i],
+                _with_tip(
+                    "Infectious compartments",
+                    "Comma-separated compartment names, optionally followed by\n"
+                    ":param_name to supply a relative infectivity parameter.\n\n"
+                    "Format:  Compartment  or  Compartment:param_name\n\n"
+                    "Example: I, A:a_rel_inf\n"
+                    "→ Compartment A has a_rel_inf× the instantaneous infectiousness\n"
+                    "  of I (set its value in Step 4).\n\n"
+                    "Omit the parameter to treat all listed compartments as equally infectious.",
+                    t_infectious[_i],
+                ),
                 t_use_humidity[_i],
-                t_humidity_impact[_i],
-                t_use_foi_immunity[_i],
-                t_inf_reduce[_i],
-                t_vax_reduce[_i],
-            ])
+            ]
+            if t_use_humidity.value[_i]:
+                _foi_items.append(t_humidity_impact[_i])
+            _foi_items.append(_immunity_checkbox(t_use_foi_immunity[_i]))
+            if t_use_foi_immunity.value[_i]:
+                _foi_items.extend([t_inf_reduce[_i], t_vax_reduce[_i]])
+            _rate_ui = mo.vstack(_foi_items)
         else:
-            _rate_ui = mo.vstack([
+            _foit_items = [
                 t_beta[_i],
-                t_use_humidity[_i],
-                t_humidity_impact[_i],
-                t_use_foi_immunity[_i],
-                t_inf_reduce[_i],
-                t_vax_reduce[_i],
-                t_infectious[_i],
                 t_rel_sus[_i],
+                _with_tip(
+                    "Infectious compartments",
+                    "Comma-separated compartment names, optionally followed by\n"
+                    ":param_name to supply a relative infectivity parameter.\n\n"
+                    "Format:  Compartment  or  Compartment:param_name\n\n"
+                    "Example: I, A:a_rel_inf\n"
+                    "→ Compartment A has a_rel_inf× the instantaneous infectiousness\n"
+                    "  of I (set its value in Step 4).\n\n"
+                    "Omit the parameter to treat all listed compartments as equally infectious.",
+                    t_infectious[_i],
+                ),
+                t_use_humidity[_i],
+            ]
+            if t_use_humidity.value[_i]:
+                _foit_items.append(t_humidity_impact[_i])
+            _foit_items.append(_immunity_checkbox(t_use_foi_immunity[_i]))
+            if t_use_foi_immunity.value[_i]:
+                _foit_items.extend([t_inf_reduce[_i], t_vax_reduce[_i]])
+            _foit_items.append(_with_tip(
+                "Immobile compartments",
+                "Comma-separated compartment names whose members do NOT travel\n"
+                "between subpopulations (no cross-subpop mixing).\n\n"
+                "Example: H, ICU",
                 t_immobile[_i],
-            ])
+            ))
+            _rate_ui = mo.vstack(_foit_items)
 
         _rows.append(mo.vstack([
             mo.md(f"**Transition {_i + 1}**"),
@@ -974,7 +1068,19 @@ def _collect_param_names(
             _names.extend([_p for _p in parse_infectious_mapping(t_infectious.value[_i]).values() if _p])
 
     param_names = list(dict.fromkeys(_names))
-    return (param_names,)
+
+    _reduce_names = set()
+    for _i in range(_n):
+        _template = t_template.value[_i]
+        if _template in ("immunity_modulated", "force_of_infection", "force_of_infection_travel"):
+            if t_use_foi_immunity.value[_i]:
+                for _p in (t_inf_reduce.value[_i], t_vax_reduce.value[_i]):
+                    _p = _p.strip()
+                    if _p:
+                        _reduce_names.add(_p)
+    reduce_param_names = _reduce_names
+
+    return param_names, reduce_param_names
 
 
 # ---------------------------------------------------------------------------
@@ -982,12 +1088,12 @@ def _collect_param_names(
 # ---------------------------------------------------------------------------
 
 @app.cell
-def _params_ui(param_names, loaded_config, mo):
+def _params_ui(param_names, reduce_param_names, loaded_config, mo):
     _saved_params = loaded_config.get("params", {})
     params_inputs = mo.ui.array([
         mo.ui.number(
-            start=0.0, stop=10.0, step=0.1,
-            value=float(_saved_params.get(_name, 1.0)),
+            start=0.0, stop=10.0, step=0.001,
+            value=float(_saved_params.get(_name, 0.5 if _name in reduce_param_names else 1.0)),
             label=_name,
         )
         for _name in param_names
@@ -1096,17 +1202,25 @@ def _epi_metric_ui(n_transitions, t_name, mo, loaded_config):
 def _schedule_csv_ui(
     mo, loaded_config, num_age_groups, num_risk_groups,
     uses_absolute_humidity, uses_contact_matrix, uses_mobility, include_vax_immunity,
+    is_metapop, metapop_folder_input, Path,
 ):
     _inf = loaded_config.get("input_files", {})
     _multi = (num_age_groups > 1) or (num_risk_groups > 1)
 
+    # Auto-detect absolute_humidity.csv from metapop folder when not explicitly saved
+    _ah_csv_saved = _inf.get("absolute_humidity_csv", "")
+    if not _ah_csv_saved and is_metapop and metapop_folder_input.value.strip():
+        _candidate = Path(metapop_folder_input.value.strip()) / "absolute_humidity.csv"
+        if _candidate.exists():
+            _ah_csv_saved = str(_candidate)
+
     ah_mode = mo.ui.radio(
         options=["constant", "csv"],
-        value="csv" if _inf.get("absolute_humidity_csv") else "constant",
+        value="csv" if _ah_csv_saved else "constant",
         label="Absolute humidity source",
     )
     ah_path = mo.ui.text(
-        value=_inf.get("absolute_humidity_csv", ""),
+        value=_ah_csv_saved,
         placeholder="/path/to/absolute_humidity.csv",
         label="Absolute humidity CSV",
         full_width=True,
@@ -1371,9 +1485,53 @@ def _schedule_and_immunity_show(
     vax_mode,
     num_age_groups,
 ):
+    import html as _html
+    import random as _random
+
+    def _tip_label(label_text, tip_text):
+        _uid = _random.randint(10**7, 10**8 - 1)
+        _esc = _html.escape(tip_text)
+        return mo.Html(
+            f"<style>"
+            f"#tip{_uid}{{position:relative;display:inline-block;"
+            f"cursor:help;color:#888;font-size:0.8em;vertical-align:middle;}}"
+            f"#tip{_uid}>span{{visibility:hidden;opacity:0;"
+            f"transition:opacity .15s;transition-delay:.2s;"
+            f"position:absolute;bottom:120%;left:0;"
+            f"background:#222;color:#fff;border-radius:4px;"
+            f"padding:6px 10px;width:300px;font-size:12px;line-height:1.5;"
+            f"white-space:pre-wrap;pointer-events:none;z-index:9999;}}"
+            f"#tip{_uid}:hover>span{{visibility:visible;opacity:1;}}"
+            f"</style>"
+            f"<span>"
+            f"{label_text}&nbsp;"
+            f'<span id="tip{_uid}">ⓘ<span>{_esc}</span></span>'
+            f"</span>"
+        )
+
+    def _wtip(widget, tip_text):
+        return mo.hstack([widget, _tip_label("", tip_text)], justify="start", align="center")
+
     _parts = [
         mo.md("### Step 5 — Schedules and Immunity"),
-        mo.hstack([include_inf_immunity, include_vax_immunity], wrap=True),
+        mo.hstack([
+            _wtip(
+                include_inf_immunity,
+                "Track population-level infection-induced immunity (M).\n\n"
+                "For instance, if driven by (R→S) transitions:\n\n"
+                "ΔM = (R→S / N) × (1 − inf_sat×M − vax_sat×MV) − wane×M\n\n"
+                "M increases when recently-recovered individuals re-enter\n"
+                "the susceptible pool (R→S), and decays via waning.\n\n"
+                "Must be enabled for inf_reduce_param (Step 3) to have effect.",
+            ),
+            _wtip(
+                include_vax_immunity,
+                "Track population-level vaccine-induced immunity (MV).\n\n"
+                "MV grows with daily vaccine doses and decays via waning:\n\n"
+                "ΔMV = daily_vaccines − wane×MV\n\n"
+                "Must be enabled for vax_reduce_param (Step 3) to have effect.",
+            ),
+        ], wrap=True),
     ]
 
     _scalar_schedule_inputs = []
@@ -1407,9 +1565,47 @@ def _schedule_and_immunity_show(
     if _immunity_active:
         _metric_inputs = []
         if include_inf_immunity.value:
-            _metric_inputs.extend([r_to_s_picker, inf_sat_input, vax_sat_input, inf_wane_input])
+            _metric_inputs.extend([
+                _wtip(
+                    r_to_s_picker,
+                    "The transition that drives immunity gain.\n\n"
+                    "M increases as people move from R back to S — recently-\n"
+                    "recovered individuals re-entering the susceptible pool\n"
+                    "still carry partial immunity.\n\n"
+                    "Select the transition that represents this R→S flow.",
+                ),
+                _wtip(
+                    inf_sat_input,
+                    "Limits how much M can grow as immunity accumulates.\n\n"
+                    "ΔM = (R→S / N) × (1 − inf_sat×M − vax_sat×MV) − wane×M\n\n"
+                    "Higher values → M saturates at a lower level.\n"
+                    "0 = no saturation limit.",
+                ),
+                _wtip(
+                    vax_sat_input,
+                    "How much vaccine immunity (MV) dampens further gain in M.\n\n"
+                    "ΔM = (R→S / N) × (1 − inf_sat×M − vax_sat×MV) − wane×M\n\n"
+                    "Higher values → MV reduces M accumulation more.\n"
+                    "0 = vaccine and infection immunity are independent.",
+                ),
+                _wtip(
+                    inf_wane_input,
+                    "Daily decay rate of infection-induced immunity M.\n\n"
+                    "ΔM = (R→S / N) × (...) − wane×M\n\n"
+                    "0 = no waning.\n"
+                    "0.01 ≈ half-life of ~70 days.",
+                ),
+            ])
         if include_vax_immunity.value:
-            _metric_inputs.extend([vax_wane_input])
+            _metric_inputs.append(
+                _wtip(
+                    vax_wane_input,
+                    "Daily decay rate of vaccine-induced immunity MV.\n\n"
+                    "ΔMV = daily_vaccines − wane×MV\n\n"
+                    "0 = no waning.\n"
+                    "0.01 ≈ half-life of ~70 days.",
+                )
+            )
             if vax_mode.value == "constant":
                 _metric_inputs.append(daily_vaccines_input)
         _parts.append(mo.hstack(_metric_inputs, wrap=True))
@@ -1984,7 +2180,7 @@ def _run_sim(
             )
             _metapop.simulate_until_day(_num_days)
             return {
-                _c: np.array(_subpop.compartments[_c].history_vals_list).squeeze()
+                _c: np.array(_subpop.compartments[_c].history_vals_list).sum(axis=(1, 2))
                 for _c in compartments
             }
 
@@ -2110,10 +2306,10 @@ def _run_sim(
             )
             _metapop.simulate_until_day(_num_days)
 
-            # Aggregate histories by summing across subpops
+            # Aggregate histories by summing across subpops and age/risk groups
             return {
                 _c: sum(
-                    np.array(_sp.compartments[_c].history_vals_list).squeeze()
+                    np.array(_sp.compartments[_c].history_vals_list).sum(axis=(1, 2))
                     for _sp in _subpop_models
                 )
                 for _c in compartments

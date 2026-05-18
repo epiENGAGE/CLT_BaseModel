@@ -1,7 +1,7 @@
 {
   "compartments": ["S", "E", "I", "R"],
   "params": {
-    "beta_baseline": 0.3,
+    "beta_baseline": 0.21,
     "relative_suscept": 1.0,
     "E_to_I_rate": 0.2,
     "I_to_R_rate": 0.143,
@@ -23,10 +23,10 @@
           "immobile_compartments": [],
           "relative_susceptibility_param": "relative_suscept",
           "contact_matrix_schedule": "flu_contact_matrix",
-          "mobility_schedule": "mobility_modifier",
-          "humidity_impact_param": "humidity_impact",
-          "humidity_schedule": "absolute_humidity"
-        }
+          "mobility_schedule": "mobility_modifier"
+        },
+        "humidity_impact_param": "humidity_impact",
+        "humidity_schedule": "absolute_humidity"
       }
     },
     {
@@ -47,6 +47,14 @@
   "transition_groups": [],
   "epi_metrics": [],
   "schedules": [
+    {
+      "name": "absolute_humidity",
+      "schedule_template": "timeseries_lookup",
+      "schedule_config": {
+        "df_attribute": "absolute_humidity_df",
+        "value_column": "absolute_humidity"
+      }
+    },
     {
       "name": "flu_contact_matrix",
       "schedule_template": "contact_matrix",
