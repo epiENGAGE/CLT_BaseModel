@@ -11,7 +11,7 @@
 	"inf_induced_hosp_risk_reduce": 0.87,
 	"inf_induced_death_risk_reduce": 0.0,
     "vax_induced_inf_risk_reduce": [[0.52,0.52],[0.52,0.52],[0.43,0.43],[0.43,0.43],[0.10,0.10]],
-    "vax_induced_hosp_risk_reduce": [[0.63],[0.63],[0.51],[0.51],[0.57]],
+    "vax_induced_hosp_risk_reduce": [[0.63,0.63],[0.63,0.63],[0.51,0.51],[0.51,0.51],[0.57,0.57]],
 	"vax_induced_death_risk_reduce": 0.0,
 	"vax_protection_delay_days": 14,
 	"vax_immunity_reset_date_mm_dd": "07_30",

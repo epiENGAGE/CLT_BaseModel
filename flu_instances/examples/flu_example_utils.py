@@ -8,7 +8,18 @@ To configure for a different city, update SUBPOP_CONFIG and SHARED_FILES_CONFIG.
 """
 
 from pathlib import Path
+import copy
+import json
+import warnings
+
+import numpy as np
 import clt_toolkit as clt
+
+
+EXAMPLES_ROOT = Path(__file__).resolve().parent
+FLU_INSTANCES_ROOT = EXAMPLES_ROOT.parent
+CLT_BASEMODEL_ROOT = FLU_INSTANCES_ROOT.parent
+REPO_ROOT = CLT_BASEMODEL_ROOT.parent
 
 
 # ---------------------------------------------------------------------------
@@ -16,8 +27,19 @@ import clt_toolkit as clt
 # ---------------------------------------------------------------------------
 
 #: Shared (non-subpopulation-specific) input files.
-AUSTIN_SHARED_FILES_CONFIG = {
-    "base_path":          clt.utils.PROJECT_ROOT / "flu_instances" / "austin_input_files_2024_2025",
+AUSTIN_L2_SHARED_FILES_CONFIG = {
+    # Season-specific base_path is set by get_austin_shared_files_config().
+    "base_path":          None,
+    "common_params_file": "common_subpop_params.json",
+    "mixing_params_file": "mixing_params.json",
+    "settings_file":      "simulation_settings.json",
+    "humidity_file":      "absolute_humidity_austin.csv",
+    "mobility_file":      "mobility_modifier.csv",
+}
+
+AUSTIN_L3_SHARED_FILES_CONFIG = {
+    # Season-specific base_path is set by get_austin_shared_files_config().
+    "base_path":          None,
     "common_params_file": "common_subpop_params.json",
     "mixing_params_file": "mixing_params.json",
     "settings_file":      "simulation_settings.json",
@@ -29,7 +51,7 @@ AUSTIN_SHARED_FILES_CONFIG = {
 #: The order of subpopulations should match the rows/columns of the travel_proportion
 #: matrix in mixing_params.json.
 #: To use a different city, replace this list (and update SHARED_FILES_CONFIG).
-AUSTIN_SUBPOP_CONFIG = [
+AUSTIN_L2_SUBPOP_CONFIG = [
     {
         "name":            "east",
         "init_vals_file":  "init_vals_east.json",
@@ -44,8 +66,120 @@ AUSTIN_SUBPOP_CONFIG = [
     },
 ]
 
-SHARED_FILES_CONFIG = AUSTIN_SHARED_FILES_CONFIG
-SUBPOP_CONFIG = AUSTIN_SUBPOP_CONFIG
+AUSTIN_L3_SUBPOP_CONFIG = [
+    {
+        "name":            "east",
+        "init_vals_file":  "init_vals_East.json",
+        "vaccines_file":   "daily_vaccines_East.csv",
+        "calendar_file":   "school_work_calendar_austin_East.csv",
+    },
+    {
+        "name":            "mid",
+        "init_vals_file":  "init_vals_Mid.json",
+        "vaccines_file":   "daily_vaccines_Mid.csv",
+        "calendar_file":   "school_work_calendar_austin_Mid.csv",
+    },
+    {
+        "name":            "west",
+        "init_vals_file":  "init_vals_West.json",
+        "vaccines_file":   "daily_vaccines_West.csv",
+        "calendar_file":   "school_work_calendar_austin_West.csv",
+    },
+]
+
+AUSTIN_REGION_CONFIGS = {
+    "L2": {
+        "shared": AUSTIN_L2_SHARED_FILES_CONFIG,
+        "subpops": AUSTIN_L2_SUBPOP_CONFIG,
+        "input_prefix": "austin_input_files",
+        "report_dir": "Austin_L2",
+        "param_tag": "Austin2",
+    },
+    "L3": {
+        "shared": AUSTIN_L3_SHARED_FILES_CONFIG,
+        "subpops": AUSTIN_L3_SUBPOP_CONFIG,
+        "input_prefix": "austin3_input_files",
+        "report_dir": "Austin_L3",
+        "param_tag": "Austin3",
+    },
+}
+
+AUSTIN_CALIBRATION_MODE_DIRS = {
+    "normal": {
+        "L2": "Austin_L2",
+        "L3": "Austin_L3",
+    },
+    "rescale": {
+        "L2": "Austin_L2_updated",
+        "L3": "Austin_L3_updated",
+    },
+    "pop": {
+        "L2": "Austin_L2_E0_pop",
+        "L3": "Austin_L3_E0_pop",
+    },
+}
+
+CURRENT_AUSTIN_REGION_MODEL = "L2"
+SHARED_FILES_CONFIG = AUSTIN_REGION_CONFIGS[CURRENT_AUSTIN_REGION_MODEL]["shared"]
+SUBPOP_CONFIG = AUSTIN_REGION_CONFIGS[CURRENT_AUSTIN_REGION_MODEL]["subpops"]
+
+
+def get_austin_subpop_config(region_model="L2"):
+    return copy.deepcopy(AUSTIN_REGION_CONFIGS[region_model]["subpops"])
+
+
+def get_austin_shared_files_config(season, region_model="L2"):
+    region_cfg = AUSTIN_REGION_CONFIGS[region_model]
+    return {
+        **region_cfg["shared"],
+        "base_path": FLU_INSTANCES_ROOT / f"{region_cfg['input_prefix']}_{season}",
+    }
+
+
+def get_calibrated_austin_l_path(
+    region_model,
+    season,
+    flatten_contact_calendar=True,
+    calibration_mode="normal",
+):
+    region_cfg = AUSTIN_REGION_CONFIGS[region_model]
+    report_root = AUSTIN_CALIBRATION_MODE_DIRS[calibration_mode][region_model]
+    base_dir = (
+        REPO_ROOT
+        / "0_save_reports"
+        / "Austin_calibration"
+        / report_root
+        / f"{region_cfg['report_dir']}_{season}_cal_{'on' if flatten_contact_calendar else 'off'}"
+    )
+    matches = sorted(base_dir.glob(f"calibrated_params_offset*_{region_cfg['param_tag']}_{season}.json"))
+    if not matches:
+        raise FileNotFoundError(f"No calibrated parameter JSON found in {base_dir}")
+    return matches[0]
+
+HIGH_RISK_IHR_MULTIPLIERS = np.array([7.8, 3.2, 6.7, 7.2, 5.1], dtype=float)
+IHR_MAX_PROB = 0.999
+HIGH_RISK_FRACTIONS_BY_MODEL = {
+    "L2": {
+        "east": np.array([0.048, 0.111, 0.181, 0.350, 0.552], dtype=float),
+        "west": np.array([0.053, 0.121, 0.186, 0.354, 0.549], dtype=float),
+    },
+    "L3": {
+        "east": np.array([0.048, 0.111, 0.181, 0.350, 0.552], dtype=float),
+        "mid": np.array([0.0505, 0.116, 0.1835, 0.352, 0.5505], dtype=float),
+        "west": np.array([0.053, 0.121, 0.186, 0.354, 0.549], dtype=float),
+    },
+}
+CALIBRATION_POP_SCALE = 100.0
+RATE_PARAMS_TO_SCALE = [
+    "E_to_I_rate",
+    "IP_to_IS_rate",
+    "ISR_to_R_rate",
+    "IA_to_R_rate",
+    "ISH_to_H_rate",
+    "HR_to_R_rate",
+    "HD_to_D_rate",
+    "R_to_S_rate",
+]
 
 # ---------------------------------------------------------------------------
 # File loading
@@ -117,6 +251,334 @@ def load_flu_inputs(subpop_config, shared_config, clt_module, flu_module, pd_mod
     }
 
 
+def convert_1risk_to_2risk(data_1risk, low_risk_frac=None, high_risk_frac=None):
+    """Convert a trailing singleton risk dimension into two risk groups."""
+    data_array = np.asarray(data_1risk, dtype=float)
+
+    shape_2risk = list(data_array.shape)
+    shape_2risk[-1] = 2
+    data_2risk = np.zeros(shape_2risk, dtype=float)
+
+    if high_risk_frac is not None:
+        high_frac = np.asarray(high_risk_frac, dtype=float)
+        low_frac = 1.0 - high_frac
+    elif low_risk_frac is not None:
+        low_frac = np.asarray(low_risk_frac, dtype=float)
+        high_frac = 1.0 - low_frac
+    else:
+        low_frac = 0.7
+        high_frac = 0.3
+
+    data_2risk[..., 0] = data_array[..., 0] * low_frac
+    data_2risk[..., 1] = data_array[..., 0] * high_frac
+    return data_2risk
+
+def convert_1risk_to_2risk2(data_1risk, low_risk_frac=None, high_risk_frac=None):
+    """Convert a trailing singleton risk dimension into two risk groups."""
+    data_array = np.asarray(data_1risk, dtype=float)
+
+    shape_2risk = list(data_array.shape)
+    shape_2risk[-1] = 2
+    data_2risk = np.zeros(shape_2risk, dtype=float)
+
+    if high_risk_frac is not None:
+        high_frac = np.asarray(high_risk_frac, dtype=float)
+        low_frac = 1.0 - high_frac
+    elif low_risk_frac is not None:
+        low_frac = np.asarray(low_risk_frac, dtype=float)
+        high_frac = 1.0 - low_frac
+    else:
+        low_frac = 0.7
+        high_frac = 0.3
+
+    data_2risk[..., 0] = data_array[..., 0] 
+    data_2risk[..., 1] = data_array[..., 0] 
+    return data_2risk
+
+
+def _convert_schedule_df_to_2risk(df, value_col, high_risk_frac=None, low_risk_frac=None):
+    """Convert JSON-encoded age-by-risk schedule entries from 1 to 2 risk groups."""
+    import pandas as _pd
+
+    if len(df) == 0:
+        return df.copy()
+
+    first_val = np.asarray(json.loads(df.iloc[0][value_col]), dtype=float)
+    if first_val.ndim == 2 and first_val.shape[1] == 2:
+        converted = df.copy()
+        if "date" in converted.columns:
+            converted["date"] = _pd.to_datetime(converted["date"]).dt.strftime("%Y-%m-%d")
+        return converted.set_index(_pd.RangeIndex(len(converted)))
+
+    rows = []
+    for _, row in df.iterrows():
+        val_1risk = json.loads(row[value_col])
+        val_2risk = convert_1risk_to_2risk2(
+            val_1risk,
+            high_risk_frac=high_risk_frac,
+            low_risk_frac=low_risk_frac,
+        )
+        new_row = row.to_dict()
+        new_row[value_col] = json.dumps(val_2risk.tolist())
+        rows.append(new_row)
+
+    converted = _pd.DataFrame(rows)
+    if "date" in converted.columns:
+        converted["date"] = _pd.to_datetime(converted["date"]).dt.strftime("%Y-%m-%d")
+    return converted.set_index(_pd.RangeIndex(len(converted)))
+
+
+def _align_vaccine_schedule_to_contact_start(vax_df, contact_start):
+    """Trim any leading vaccine rows before the contact-calendar start date."""
+    import pandas as _pd
+
+    aligned = vax_df.copy()
+    if "date" not in aligned.columns:
+        return aligned
+
+    _vax_dates = _pd.to_datetime(aligned["date"])
+    _contact_start = _pd.to_datetime(contact_start)
+    aligned = aligned.loc[_vax_dates >= _contact_start].reset_index(drop=True)
+    if "date" in aligned.columns:
+        aligned["date"] = _pd.to_datetime(aligned["date"]).dt.strftime("%Y-%m-%d")
+    return aligned
+
+
+def _expand_mobility_to_calendar_dates(mobility_df, calendar_dates):
+    """Expand day-of-week mobility rows to one row per calendar date."""
+    import pandas as _pd
+
+    if "day_of_week" not in mobility_df.columns:
+        expanded = mobility_df.copy()
+        if "date" in expanded.columns:
+            expanded["date"] = _pd.to_datetime(expanded["date"]).dt.strftime("%Y-%m-%d")
+        return expanded.reset_index(drop=True)
+
+    dates = _pd.to_datetime(calendar_dates)
+    day_names = [
+        "Monday", "Tuesday", "Wednesday", "Thursday",
+        "Friday", "Saturday", "Sunday",
+    ]
+    rows = []
+    for date in dates:
+        day_name = day_names[date.dayofweek]
+        day_row = mobility_df.loc[mobility_df["day_of_week"] == day_name]
+        if len(day_row) > 0:
+            rows.append(
+                {
+                    "date": date.strftime("%Y-%m-%d"),
+                    "mobility_modifier": day_row["mobility_modifier"].iloc[0],
+                }
+            )
+        else:
+            rows.append(
+                {
+                    "date": date.strftime("%Y-%m-%d"),
+                    "mobility_modifier": json.dumps([[1.0], [1.0], [1.0], [1.0], [1.0]]),
+                }
+            )
+
+    return _pd.DataFrame(rows).set_index(_pd.RangeIndex(len(rows)))
+
+
+def _expand_age_risk_params_to_2risk(params):
+    """Duplicate age-risk arrays that are still stored as (A, 1)."""
+    age_risk_params = [
+        "vax_induced_immune_wane",
+        "vax_induced_inf_risk_reduce",
+        "vax_induced_hosp_risk_reduce",
+        "HR_to_R_rate",
+        "HD_to_D_rate",
+        "E_to_IA_prop",
+        "relative_suscept",
+        "ISH_to_HD_prop",
+    ]
+
+    updated = params
+    for param_name in age_risk_params:
+        param_val = getattr(updated, param_name, None)
+        if param_val is None:
+            continue
+        param_arr = np.asarray(param_val, dtype=float)
+        if param_arr.ndim == 2 and param_arr.shape[1] == 1:
+            updated = clt.updated_dataclass(
+                updated,
+                {param_name: convert_1risk_to_2risk2(param_arr, low_risk_frac=1.0)},
+            )
+    return updated
+
+
+def load_calibrated_austin_inputs(
+    clt_module,
+    flu_module,
+    pd_module,
+    calibration_path=None,
+    flatten_contact_calendar=True,
+    season="2024_2025",
+    region_model="L2",
+    calibration_mode="normal",
+):
+    """Load Austin calibrated inputs with calibrated beta/E0/IHR and 2 risk groups."""
+    global CURRENT_AUSTIN_REGION_MODEL, SHARED_FILES_CONFIG, SUBPOP_CONFIG
+
+    CURRENT_AUSTIN_REGION_MODEL = region_model
+    SHARED_FILES_CONFIG = get_austin_shared_files_config(season, region_model)
+    SUBPOP_CONFIG = get_austin_subpop_config(region_model)
+    high_risk_fractions = HIGH_RISK_FRACTIONS_BY_MODEL[region_model]
+
+    shared_config = SHARED_FILES_CONFIG
+    inputs = load_flu_inputs(SUBPOP_CONFIG, shared_config, clt_module, flu_module, pd_module)
+
+    calibration_file = Path(
+        calibration_path
+        or get_calibrated_austin_l_path(
+            region_model,
+            season,
+            flatten_contact_calendar,
+            calibration_mode=calibration_mode,
+        )
+    )
+    calibrated = json.loads(calibration_file.read_text())
+
+    calendar_df = {}
+    for sp in SUBPOP_CONFIG:
+        name = sp["name"]
+        df = inputs["calendar_df"][name].copy()
+        if flatten_contact_calendar:
+            for col in ["is_school_day", "is_work_day"]:
+                if col in df.columns:
+                    df[col] = df[col].mean()
+        if "date" in df.columns:
+            df["date"] = pd_module.to_datetime(df["date"]).dt.strftime("%Y-%m-%d")
+        calendar_df[name] = df
+
+    vaccines_df = {}
+    contact_start = calendar_df[SUBPOP_CONFIG[0]["name"]]["date"].iloc[0]
+    for sp in SUBPOP_CONFIG:
+        name = sp["name"]
+        aligned_vax = _align_vaccine_schedule_to_contact_start(inputs["vaccines_df"][name], contact_start)
+        vaccines_df[name] = _convert_schedule_df_to_2risk(
+            aligned_vax,
+            "daily_vaccines",
+            high_risk_frac=high_risk_fractions[name],
+        )
+
+    mobility_expanded = _expand_mobility_to_calendar_dates(
+        inputs["mobility_df"],
+        calendar_df[SUBPOP_CONFIG[0]["name"]]["date"],
+    )
+    mobility_df = _convert_schedule_df_to_2risk(
+        mobility_expanded,
+        "mobility_modifier",
+        low_risk_frac=1.0,
+    )
+
+    params_base = clt_module.updated_dataclass(inputs["params_baseline"], {"num_risk_groups": 2})
+    params_base = _expand_age_risk_params_to_2risk(params_base)
+    time_stretch = float(calibrated.get("time_stretch", 1.0))
+    if time_stretch != 1.0:
+        rate_updates = {}
+        for rate_name in RATE_PARAMS_TO_SCALE:
+            orig = getattr(params_base, rate_name)
+            orig_arr = np.asarray(orig, dtype=float)
+            rate_updates[rate_name] = orig_arr / time_stretch
+        params_base = clt_module.updated_dataclass(params_base, rate_updates)
+
+    params_by_subpop = {}
+    states = {}
+    for idx, sp in enumerate(SUBPOP_CONFIG):
+        name = sp["name"]
+
+        ihr_low = np.asarray(calibrated["IHR_low"][idx], dtype=float)
+        ihr_high = np.asarray(calibrated["IHR_high"][idx], dtype=float)
+        max_low = IHR_MAX_PROB / HIGH_RISK_IHR_MULTIPLIERS
+        if np.any(ihr_high >= IHR_MAX_PROB) or np.any(ihr_low > max_low):
+            warnings.warn(
+                f"Calibrated IHR for {name} exceeds valid probability bounds; "
+                "clipping low-risk IHR so derived high-risk IHR stays below 1.0."
+            )
+            ihr_low = np.minimum(ihr_low, max_low)
+            ihr_high = ihr_low * HIGH_RISK_IHR_MULTIPLIERS
+        beta = float(calibrated["beta"][idx])
+        params_by_subpop[name] = clt_module.updated_dataclass(
+            params_base,
+            {
+                "beta_baseline": beta,
+                "IP_to_ISH_prop": np.column_stack([ihr_low, ihr_high]),
+            },
+        )
+
+        state = copy.deepcopy(inputs["states"][name])
+        high_risk_frac = high_risk_fractions[name]
+        state_s_arr = np.asarray(state.S, dtype=float)
+        if state_s_arr.ndim == 2 and state_s_arr.shape[1] == 1:
+            for comp_name in ["S", "E", "IP", "ISR", "ISH", "IA", "HR", "HD", "R", "D", "M", "MV"]:
+                comp_val = getattr(state, comp_name)
+                setattr(
+                    state,
+                    comp_name,
+                    convert_1risk_to_2risk(comp_val, high_risk_frac=high_risk_frac),
+                )
+
+        e0_raw = np.asarray(calibrated["E0"][idx], dtype=float)
+        s_arr = np.asarray(state.S, dtype=float)
+        if e0_raw.ndim == 1:
+            e0_2risk = np.zeros_like(s_arr, dtype=float)
+            e0_2risk[:, 0] = e0_raw * (1.0 - high_risk_frac)
+            e0_2risk[:, 1] = e0_raw * high_risk_frac
+        elif e0_raw.ndim == 2 and e0_raw.shape[1] == 2:
+            e0_2risk = e0_raw
+        else:
+            raise ValueError(
+                f"Unsupported calibrated E0 shape for {name}: {e0_raw.shape}. "
+                "Expected (age,) or (age, 2)."
+            )
+        state.S = s_arr - e0_2risk + np.asarray(state.E, dtype=float)
+        state.E = e0_2risk
+        states[name] = state
+
+    return {
+        **inputs,
+        "states": states,
+        "vaccines_df": vaccines_df,
+        "calendar_df": calendar_df,
+        "mobility_df": mobility_df,
+        "params_baseline": params_by_subpop[SUBPOP_CONFIG[0]["name"]],
+        "params_by_subpop": params_by_subpop,
+        "calibrated_params_file": calibration_file,
+        "calibrated_params": calibrated,
+        "calibrated_offset": int(calibrated["offset"]),
+        "pop_scale": float(calibrated.get("pop_scale", CALIBRATION_POP_SCALE)),
+        "season": season,
+        "region_model": region_model,
+        "calibration_mode": calibration_mode,
+        "subpop_config": SUBPOP_CONFIG,
+        "shared_config": shared_config,
+    }
+
+
+def load_calibrated_austin_l2_2024_2025_inputs(
+    clt_module,
+    flu_module,
+    pd_module,
+    calibration_path=None,
+    flatten_contact_calendar=True,
+    season="2024_2025",
+    calibration_mode="normal",
+):
+    """Backward-compatible wrapper for the existing 2-region Austin loader."""
+    return load_calibrated_austin_inputs(
+        clt_module,
+        flu_module,
+        pd_module,
+        calibration_path=calibration_path,
+        flatten_contact_calendar=flatten_contact_calendar,
+        season=season,
+        region_model="L2",
+        calibration_mode=calibration_mode,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Vaccine schedule utilities
 # ---------------------------------------------------------------------------
@@ -134,7 +596,7 @@ def scale_vaccines_df(df, scale, np_module):
     scaled["daily_vaccines"] = scaled["daily_vaccines"].apply(
         lambda s: json.dumps((np_module.array(json.loads(s)) * scale).tolist())
     )
-    scaled["date"] = _pd.to_datetime(scaled["date"], format="%Y-%m-%d").dt.date
+    scaled["date"] = _pd.to_datetime(scaled["date"], format="%Y-%m-%d").dt.strftime("%Y-%m-%d")
     return scaled
 
 
@@ -211,6 +673,7 @@ def build_flu_metapop_model(subpop_config, inputs, params, settings,
     subpop_models = []
     for sp_cfg, rng in zip(subpop_config, rng_list):
         name = sp_cfg["name"]
+        subpop_params = params[name] if isinstance(params, dict) else params
         schedules = flu_module.FluSubpopSchedules(
             absolute_humidity=inputs["humidity_df"],
             flu_contact_matrix=inputs["calendar_df"][name],
@@ -218,7 +681,7 @@ def build_flu_metapop_model(subpop_config, inputs, params, settings,
             mobility_modifier=inputs["mobility_df"],
         )
         model = flu_module.FluSubpopModel(
-            inputs["states"][name], params, settings, rng, schedules, name=name
+            inputs["states"][name], subpop_params, settings, rng, schedules, name=name
         )
         subpop_models.append(model)
     return flu_module.FluMetapopModel(subpop_models, inputs["mixing_params"])
@@ -245,36 +708,6 @@ def apply_init_overrides(states, overrides, subpop_config):
     return new_states
 
 
-def apply_general_init_overrides(states, overrides, subpop_config, np_module):
-    """Apply initial condition overrides to states.
-
-    Keys in ``overrides`` follow two patterns:
-
-    - ``"init:{sp_name}:{comp}:{i}:{j}"`` → set ``state.{comp}[i][j] = value``
-    - ``"M:{sp_name}"`` or ``"M:all"`` → multiply ``state.M`` element-wise by
-      ``value`` (treated as a scale factor)
-
-    Returns a new dict of deepcopied, modified states for all subpopulations.
-    """
-    import copy
-    modified = {sp["name"]: copy.deepcopy(states[sp["name"]]) for sp in subpop_config}
-
-    for key, val in overrides.items():
-        parts = key.split(":")
-        if parts[0] == "init":
-            _, sp_name, comp, i_str, j_str = parts
-            getattr(modified[sp_name], comp)[int(i_str)][int(j_str)] = val
-        elif parts[0] == "M":
-            sp_target = parts[1]
-            scale = float(val)
-            for sp in subpop_config:
-                if sp_target == "all" or sp["name"] == sp_target:
-                    s = modified[sp["name"]]
-                    s.M = np_module.asarray(s.M) * scale
-
-    return modified
-
-
 # ---------------------------------------------------------------------------
 # UI helpers
 # ---------------------------------------------------------------------------
@@ -286,3 +719,47 @@ def subpop_dropdown_options(subpop_config, aggregate_label="combined"):
     flu_sensitivity.py or ``"all subpops"`` for flu_scenario_analysis.py).
     """
     return [aggregate_label] + [sp["name"] for sp in subpop_config]
+
+
+def load_austin_observed_hosp(pd_module, season="2024_2025", region_model="L2"):
+    """Load observed daily hospital admissions for the selected Austin region model/season.
+
+    Returns a dict with:
+      - ``dates``: pandas.DatetimeIndex
+      - ``values``: ndarray shaped ``(T, n_regions, 5)``
+      - ``subpop_names``: list of lowercase region names
+    """
+    season_start_year, season_end_year = season.split("_")
+    start_date = pd_module.Timestamp(f"{season_start_year}-08-01")
+    end_date = pd_module.Timestamp(f"{season_end_year}-05-31")
+
+    if region_model == "L2":
+        region_files = {
+            "east": REPO_ROOT / "InputFiles" / "HospitalFiles" / "Hosp_Austin2_East.csv",
+            "west": REPO_ROOT / "InputFiles" / "HospitalFiles" / "Hosp_Austin2_West.csv",
+        }
+    elif region_model == "L3":
+        region_files = {
+            "east": REPO_ROOT / "InputFiles" / "HospitalFiles" / "Hosp_Austin3_East.csv",
+            "mid": REPO_ROOT / "InputFiles" / "HospitalFiles" / "Hosp_Austin3_Mid.csv",
+            "west": REPO_ROOT / "InputFiles" / "HospitalFiles" / "Hosp_Austin3_West.csv",
+        }
+    else:
+        raise ValueError(f"Unknown region_model: {region_model}")
+
+    age_cols = ["0-4", "5-17", "18-49", "50-64", "65plus"]
+    dates = pd_module.date_range(start_date, end_date, freq="D")
+    region_arrays = []
+    for _, path in region_files.items():
+        df = pd_module.read_csv(path)
+        df["Dates"] = pd_module.to_datetime(df["Dates"])
+        df = df[(df["Dates"] >= start_date) & (df["Dates"] <= end_date)].copy()
+        df = df.set_index("Dates").reindex(dates)
+        df[age_cols] = df[age_cols].fillna(0.0)
+        region_arrays.append(df[age_cols].to_numpy(dtype=float))
+
+    return {
+        "dates": dates,
+        "values": np.stack(region_arrays, axis=1),
+        "subpop_names": list(region_files.keys()),
+    }

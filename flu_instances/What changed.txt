@@ -1,3 +1,11 @@
+05/20/2026
+vax_induced_hosp_risk_reduce wasn't set up properly for 2 risk groups
+Small updates to how calculate M(0), including fixed problem with 2 age groups.  
+	This affects both Austin and Austin3 values. Will change again.
+Now number of exposed is based on a proportion, and distributed across both risk groups, so slight change to pop numbers
+Added Keyi's code to run Austin 2subpop model using calibration results.  Need to provide calibration file for this to work.
+Preliminary Dallas Input Files, not yet tested
+
 4/22/2026
 Experiments code:
 texas_input_files/simulation_settings.json “transition_type”:”binom”
