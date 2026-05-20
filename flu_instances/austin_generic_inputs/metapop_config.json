@@ -1,0 +1,7 @@
+{
+  "subpopulations": ["East", "West"],
+  "travel_matrix": [
+    [0.98, 0.02],
+    [0.09, 0.91]
+  ]
+}

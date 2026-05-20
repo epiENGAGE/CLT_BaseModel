@@ -1,0 +1,281 @@
+{
+  "compartments": ["S", "E", "IP", "ISR", "ISH", "IA", "HR", "HD", "R", "D"],
+
+  "params": {
+    "beta_baseline":                  0.042,
+    "humidity_impact":                0.0119,
+    "IP_relative_inf":                2.22,
+    "IA_relative_inf":                1.03,
+    "relative_suscept":               [[1.0], [1.0], [1.0], [1.0], [1.0]],
+
+    "R_to_S_rate":                    0.02,
+    "E_to_I_rate":                    1.43,
+    "E_to_IA_prop":                   [[0.25], [0.25], [0.3], [0.3], [0.3]],
+    "IP_to_IS_rate":                  1.11,
+    "IP_to_ISH_prop":                 [[0.0070], [0.0027], [0.0056], [0.0106], [0.0909]],
+    "ISH_to_H_rate":                  0.27,
+    "ISH_to_HD_prop":                 [[0.0132], [0.0099], [0.0295], [0.0595], [0.0802]],
+    "ISR_to_R_rate":                  0.5,
+    "IA_to_R_rate":                   0.43,
+    "HR_to_R_rate":                   [[0.21], [0.21], [0.16], [0.15], [0.15]],
+    "HD_to_D_rate":                   0.17,
+
+    "inf_induced_inf_risk_reduce":    0.80,
+    "inf_induced_hosp_risk_reduce":   0.87,
+    "inf_induced_death_risk_reduce":  0.0,
+    "vax_induced_inf_risk_reduce":    [[0.52], [0.52], [0.43], [0.43], [0.10]],
+    "vax_induced_hosp_risk_reduce":   [[0.63], [0.63], [0.51], [0.51], [0.57]],
+    "vax_induced_death_risk_reduce":  0.0,
+
+    "inf_induced_saturation":         0.7,
+    "inf_induced_immune_wane":        0.01,
+    "vax_induced_saturation":         0.2,
+    "vax_induced_immune_wane":        [[0.0025], [0.0025], [0.0025], [0.0025], [0.0036]],
+    "vax_protection_delay_days":      14,
+    "vax_immunity_reset_date_mm_dd":  "07_30",
+
+    "total_contact_matrix": [
+      [1.4386772748228889, 2.4950167238473906, 3.897889289458357,  0.7460158164557638, 0.3540169346248976],
+      [0.9781457057746431, 11.214725823508719, 4.347881643877341,  1.1604802834906682, 0.4109153478516912],
+      [0.6848441971202415, 1.9485431591612077, 7.942388198815615,  2.2092990821178957, 0.5559580254867994],
+      [0.3380270354033536, 1.3412542626044646, 5.697647754683422,  3.243848550768355,  0.7825458042887478],
+      [0.27004022723067916, 0.7995153228779148, 2.413704713559556, 1.317379363951773,  1.9674974816019093]
+    ],
+    "school_contact_matrix": [
+      [0.6741530557723324,  1.0915718072088696, 0.1786438250672893,  0.08040537474190405, 0.010294887351891546],
+      [0.4279396077018729,  9.492588931589397,  0.8280351960747283,  0.2986455068778206,  0.04245535579085526],
+      [0.031387052224062496, 0.37109155905899477, 1.4789499983064518, 0.09606385085100591, 0.024176691472954502],
+      [0.03643247327476926, 0.34516707069372293, 0.24774283643341816, 0.03786076720722684, 0.00608342920724837],
+      [0.007852833623155378, 0.08260515657403462, 0.10496372458081374, 0.010241171771272, 0.0035764223441618467]
+    ],
+    "work_contact_matrix": [
+      [0.0, 0.0,                  0.0,                 0.0,                 0.0],
+      [0.0, 0.0012079552414849435, 0.09263255308402495, 0.033970107376730924, 0.003092101257662916],
+      [0.0, 0.04151408163100309,  3.389666138048762,   1.2281885148389586,  0.11162781163243846],
+      [0.0, 0.03926176185866875,  3.1674232355863676,  1.1491122398232,     0.10529504291723912],
+      [0.0, 0.006016275851069464, 0.4846348517390796,  0.17725932795930327, 0.018326890835702787]
+    ]
+  },
+
+  "transitions": [
+    {
+      "name": "R_to_S",
+      "origin": "R",
+      "destination": "S",
+      "rate_template": "constant_param",
+      "rate_config": {"param": "R_to_S_rate"}
+    },
+    {
+      "name": "S_to_E",
+      "origin": "S",
+      "destination": "E",
+      "rate_template": "force_of_infection_travel",
+      "rate_config": {
+        "beta_param": "beta_baseline",
+        "humidity_impact_param": "humidity_impact",
+        "humidity_schedule": "absolute_humidity",
+        "inf_reduce_param": "inf_induced_inf_risk_reduce",
+        "vax_reduce_param": "vax_induced_inf_risk_reduce",
+        "travel_config": {
+          "infectious_compartments": {
+            "IP":  "IP_relative_inf",
+            "IA":  "IA_relative_inf",
+            "ISR": null,
+            "ISH": null
+          },
+          "immobile_compartments": ["HR", "HD"],
+          "relative_susceptibility_param": "relative_suscept",
+          "contact_matrix_schedule": "flu_contact_matrix",
+          "mobility_schedule": "mobility_modifier"
+        }
+      }
+    },
+    {
+      "name": "E_to_IP",
+      "origin": "E",
+      "destination": "IP",
+      "rate_template": "param_product",
+      "rate_config": {
+        "factors": ["E_to_I_rate"],
+        "complement_factors": ["E_to_IA_prop"]
+      },
+      "jointly_distributed_with": "E_to_IA"
+    },
+    {
+      "name": "E_to_IA",
+      "origin": "E",
+      "destination": "IA",
+      "rate_template": "param_product",
+      "rate_config": {
+        "factors": ["E_to_I_rate", "E_to_IA_prop"]
+      },
+      "jointly_distributed_with": "E_to_IP"
+    },
+    {
+      "name": "IP_to_ISR",
+      "origin": "IP",
+      "destination": "ISR",
+      "rate_template": "immunity_modulated",
+      "rate_config": {
+        "base_rate": "IP_to_IS_rate",
+        "proportion": "IP_to_ISH_prop",
+        "is_complement": true,
+        "inf_reduce_param": "inf_induced_hosp_risk_reduce",
+        "vax_reduce_param": "vax_induced_hosp_risk_reduce"
+      },
+      "jointly_distributed_with": "IP_to_ISH"
+    },
+    {
+      "name": "IP_to_ISH",
+      "origin": "IP",
+      "destination": "ISH",
+      "rate_template": "immunity_modulated",
+      "rate_config": {
+        "base_rate": "IP_to_IS_rate",
+        "proportion": "IP_to_ISH_prop",
+        "is_complement": false,
+        "inf_reduce_param": "inf_induced_hosp_risk_reduce",
+        "vax_reduce_param": "vax_induced_hosp_risk_reduce"
+      },
+      "jointly_distributed_with": "IP_to_ISR"
+    },
+    {
+      "name": "IA_to_R",
+      "origin": "IA",
+      "destination": "R",
+      "rate_template": "constant_param",
+      "rate_config": {"param": "IA_to_R_rate"}
+    },
+    {
+      "name": "ISR_to_R",
+      "origin": "ISR",
+      "destination": "R",
+      "rate_template": "constant_param",
+      "rate_config": {"param": "ISR_to_R_rate"}
+    },
+    {
+      "name": "ISH_to_HR",
+      "origin": "ISH",
+      "destination": "HR",
+      "rate_template": "immunity_modulated",
+      "rate_config": {
+        "base_rate": "ISH_to_H_rate",
+        "proportion": "ISH_to_HD_prop",
+        "is_complement": true,
+        "inf_reduce_param": "inf_induced_death_risk_reduce",
+        "vax_reduce_param": "vax_induced_death_risk_reduce"
+      },
+      "jointly_distributed_with": "ISH_to_HD"
+    },
+    {
+      "name": "ISH_to_HD",
+      "origin": "ISH",
+      "destination": "HD",
+      "rate_template": "immunity_modulated",
+      "rate_config": {
+        "base_rate": "ISH_to_H_rate",
+        "proportion": "ISH_to_HD_prop",
+        "is_complement": false,
+        "inf_reduce_param": "inf_induced_death_risk_reduce",
+        "vax_reduce_param": "vax_induced_death_risk_reduce"
+      },
+      "jointly_distributed_with": "ISH_to_HR"
+    },
+    {
+      "name": "HR_to_R",
+      "origin": "HR",
+      "destination": "R",
+      "rate_template": "constant_param",
+      "rate_config": {"param": "HR_to_R_rate"}
+    },
+    {
+      "name": "HD_to_D",
+      "origin": "HD",
+      "destination": "D",
+      "rate_template": "constant_param",
+      "rate_config": {"param": "HD_to_D_rate"}
+    }
+  ],
+
+  "transition_groups": [
+    {"name": "E_out",   "transition_type": "multinom_deterministic", "members": ["E_to_IP",  "E_to_IA"]},
+    {"name": "IP_out",  "transition_type": "multinom_deterministic", "members": ["IP_to_ISR", "IP_to_ISH"]},
+    {"name": "ISH_out", "transition_type": "multinom_deterministic", "members": ["ISH_to_HR", "ISH_to_HD"]}
+  ],
+
+  "epi_metrics": [
+    {
+      "name": "M",
+      "init_val": [[0.0], [0.0], [0.0], [0.0], [0.0]],
+      "metric_template": "infection_induced_immunity",
+      "update_config": {
+        "r_to_s_transition": "R_to_S",
+        "inf_induced_saturation_param": "inf_induced_saturation",
+        "vax_induced_saturation_param": "vax_induced_saturation",
+        "inf_induced_immune_wane_param": "inf_induced_immune_wane"
+      }
+    },
+    {
+      "name": "MV",
+      "init_val": [[0.0], [0.0], [0.0], [0.0], [0.0]],
+      "metric_template": "vaccine_induced_immunity",
+      "update_config": {
+        "daily_vaccines_schedule": "daily_vaccines",
+        "vax_induced_immune_wane_param": "vax_induced_immune_wane",
+        "vax_immunity_reset_date_mm_dd_param": "vax_immunity_reset_date_mm_dd",
+        "vax_protection_delay_days_param": "vax_protection_delay_days"
+      }
+    }
+  ],
+
+  "schedules": [
+    {
+      "name": "absolute_humidity",
+      "schedule_template": "timeseries_lookup",
+      "schedule_config": {
+        "df_attribute": "absolute_humidity_df",
+        "value_column": "absolute_humidity"
+      }
+    },
+    {
+      "name": "flu_contact_matrix",
+      "schedule_template": "contact_matrix",
+      "schedule_config": {
+        "school_work_day_df_attribute": "school_work_calendar_df",
+        "total_contact_matrix_param": "total_contact_matrix",
+        "school_contact_matrix_param": "school_contact_matrix",
+        "work_contact_matrix_param": "work_contact_matrix"
+      }
+    },
+    {
+      "name": "mobility_modifier",
+      "schedule_template": "mobility",
+      "schedule_config": {
+        "df_attribute": "mobility_df"
+      }
+    },
+    {
+      "name": "daily_vaccines",
+      "schedule_template": "vaccine_schedule",
+      "schedule_config": {
+        "df_attribute": "daily_vaccines_df"
+      }
+    }
+  ],
+
+  "age_risk": {
+    "num_age_groups": 5,
+    "num_risk_groups": 1
+  },
+
+  "total_population": 1166848,
+
+  "simulation_settings": {
+    "start_real_date": "2024-08-14",
+    "transition_variables_to_save": ["ISH_to_HR", "ISH_to_HD", "S_to_E", "E_to_IP", "R_to_S", "IA_to_R", "ISR_to_R", "HR_to_R"]
+  },
+
+  "input_files": {
+    "metapop_folder": "/Users/rfp437/Work/CityLevelTransmission/CLT_BaseModel/flu_instances/austin_generic_inputs"
+  }
+}

@@ -14,8 +14,7 @@ Output is written to::
 Files produced
 --------------
 Required (metapop structure):
-  subpopulations.csv
-  travel_matrix.csv
+  metapop_config.json        keys: subpopulations (list), travel_matrix (NxN list of lists)
 
 Shared schedules (all subpops):
   absolute_humidity.csv      — seasonal cosine wave
@@ -26,13 +25,8 @@ Per-subpop schedules:
   school_work_calendar_SubpopB.csv
   vaccines_SubpopA.csv
   vaccines_SubpopB.csv
-  initial_conditions_SubpopA.csv
-  initial_conditions_SubpopB.csv
-
-Contact matrices (A×A plain floats, no headers):
-  total_contact_matrix.csv
-  school_contact_matrix.csv
-  work_contact_matrix.csv
+  initial_conditions_SubpopA.json   keys: compartments {name: A×R list}, epi_metrics {name: A×R list}
+  initial_conditions_SubpopB.json
 
 Population structure
 --------------------
@@ -122,20 +116,17 @@ def _is_work_day(date: datetime.date) -> float:
 
 
 # ---------------------------------------------------------------------------
-# subpopulations.csv
-# ---------------------------------------------------------------------------
-pd.DataFrame(SUBPOPS).to_csv(os.path.join(OUT_DIR, "subpopulations.csv"), index=False)
-print("Wrote subpopulations.csv")
-
-# ---------------------------------------------------------------------------
-# travel_matrix.csv  (rows sum to 1)
+# metapop_config.json  (subpopulation names + travel matrix)
 # ---------------------------------------------------------------------------
 # SubpopA: 95% stay, 5% visit SubpopB
 # SubpopB: 3% visit SubpopA, 97% stay
-_travel = pd.DataFrame({"SubpopA": [0.95, 0.03], "SubpopB": [0.05, 0.97]})
-_travel.index = pd.Index(["SubpopA", "SubpopB"])  # type: ignore[assignment]
-_travel.to_csv(os.path.join(OUT_DIR, "travel_matrix.csv"))
-print("Wrote travel_matrix.csv")
+_metapop_cfg = {
+    "subpopulations": [_sp["name"] for _sp in SUBPOPS],
+    "travel_matrix": [[0.95, 0.05], [0.03, 0.97]],
+}
+with open(os.path.join(OUT_DIR, "metapop_config.json"), "w") as _f:
+    json.dump(_metapop_cfg, _f, indent=2)
+print("Wrote metapop_config.json")
 
 # ---------------------------------------------------------------------------
 # absolute_humidity.csv  (seasonal cosine, range 0.004 – 0.014)
@@ -169,37 +160,6 @@ pd.DataFrame({
 print("Wrote mobility_modifier.csv")
 
 # ---------------------------------------------------------------------------
-# Contact matrices (A×A, plain floats, no header)
-# Polymod-inspired: rows = age of contact initiator, cols = age of contact
-# ---------------------------------------------------------------------------
-# Total contacts (symmetric)
-_total_contact = np.array([
-    [7.0, 3.0, 0.5],
-    [3.0, 9.0, 1.5],
-    [0.5, 1.5, 4.0],
-])
-# School contacts (mostly young–young)
-_school_contact = np.array([
-    [3.0, 0.5, 0.0],
-    [0.5, 0.2, 0.0],
-    [0.0, 0.0, 0.0],
-])
-# Work contacts (mostly adult–adult)
-_work_contact = np.array([
-    [0.0, 0.2, 0.0],
-    [0.2, 4.0, 0.3],
-    [0.0, 0.3, 0.5],
-])
-
-for _fname, _mat in [
-    ("total_contact_matrix.csv", _total_contact),
-    ("school_contact_matrix.csv", _school_contact),
-    ("work_contact_matrix.csv", _work_contact),
-]:
-    pd.DataFrame(_mat).to_csv(os.path.join(OUT_DIR, _fname), index=False, header=False)
-    print(f"Wrote {_fname}")
-
-# ---------------------------------------------------------------------------
 # Per-subpop files
 # ---------------------------------------------------------------------------
 for _sp in SUBPOPS:
@@ -231,17 +191,31 @@ for _sp in SUBPOPS:
     }).to_csv(os.path.join(OUT_DIR, f"vaccines_{_name}.csv"), index=False)
     print(f"Wrote vaccines_{_name}.csv")
 
-    # initial_conditions_{name}.csv
-    # SubpopA: 10 exposed (seed), everyone else susceptible
-    # SubpopB: fully susceptible
-    _E_seed = 10 if _name == "SubpopA" else 0
-    _S_init = _total - _E_seed
-    pd.DataFrame({
-        "compartment": ["S", "E", "I", "R"],
-        "value": [_S_init, _E_seed, 0, 0],
-    }).to_csv(os.path.join(OUT_DIR, f"initial_conditions_{_name}.csv"), index=False)
-    print(f"Wrote initial_conditions_{_name}.csv")
+    # initial_conditions_{name}.json
+    # Compartments and epi metrics as explicit A×R arrays.
+    # SubpopA: 10 exposed (split across adult age group), everyone else susceptible.
+    # SubpopB: fully susceptible.
+    _ar_fracs = np.outer(AGE_FRACS, RISK_FRACS)
+    _S_arr = (_ar_fracs * _total).tolist()
+    _E_arr = np.zeros((A, R))
+    if _name == "SubpopA":
+        _E_arr[1, :] = 5.0   # seed 5 exposed per risk group in the adult age group
+        _S_arr = (_ar_fracs * _total - _E_arr).tolist()
+    _ic = {
+        "compartments": {
+            "S": _S_arr,
+            "E": _E_arr.tolist(),
+            "I": np.zeros((A, R)).tolist(),
+            "R": np.zeros((A, R)).tolist(),
+        },
+        "epi_metrics": {
+            "M":  (np.full((A, R), 0.05) * np.array([[1.0, 1.0], [1.0, 1.0], [0.5, 0.5]])).tolist(),
+            "MV": np.zeros((A, R)).tolist(),
+        },
+    }
+    with open(os.path.join(OUT_DIR, f"initial_conditions_{_name}.json"), "w") as _f:
+        json.dump(_ic, _f, indent=2)
+    print(f"Wrote initial_conditions_{_name}.json")
 
 print(f"\nAll files written to: {OUT_DIR}")
 print("Use this folder as the metapop folder path in model_builder_notebook.py")
-print(f"Contact matrix files are {A}×{A} plain-float CSVs (no header row).")

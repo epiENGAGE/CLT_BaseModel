@@ -1,0 +1,16 @@
+{
+  "subpopulations": [
+    "SubpopA",
+    "SubpopB"
+  ],
+  "travel_matrix": [
+    [
+      0.95,
+      0.05
+    ],
+    [
+      0.03,
+      0.97
+    ]
+  ]
+}

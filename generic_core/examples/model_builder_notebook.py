@@ -20,14 +20,14 @@ Supported rate templates
 Scope note
 ----------
 This notebook supports single-population and metapopulation models, with
-configurable age and risk groups. For multi-age/risk-group models, schedule
-data (contact matrices, vaccines, mobility) must be supplied as CSV files.
+configurable age and risk groups. For multi-age/risk-group models, contact
+matrices are embedded inline in the config JSON; vaccines and mobility can
+be supplied as CSV files or as constant scalar values.
 
 Metapopulation folder conventions
 ----------------------------------
 Required files:
-  subpopulations.csv           cols: name, total_population
-  travel_matrix.csv            NxN matrix, subpop names as header row and index col
+  metapop_config.json          keys: subpopulations (ordered list of names), travel_matrix (NxN list of lists)
 
 Optional shared files (all subpops):
   absolute_humidity.csv        cols: date, absolute_humidity
@@ -36,7 +36,7 @@ Optional shared files (all subpops):
 Optional per-subpop files ({name} = subpop name):
   school_work_calendar_{name}.csv   cols: date, is_school_day, is_work_day
   vaccines_{name}.csv               cols: date, daily_vaccines (JSON A×R array)
-  initial_conditions_{name}.csv     cols: compartment, value
+  initial_conditions_{name}.json    keys: compartments {name: A×R list}, epi_metrics {name: A×R list}
 """
 
 import marimo
@@ -218,7 +218,7 @@ def _helpers(Path, SimpleNamespace, json, np, pd):
         _folder = Path(folder_path_str.strip())
         if not _folder.exists() or not _folder.is_dir():
             return False, {"folder": f"Not found or not a directory: {_folder}"}
-        _required = ["subpopulations.csv", "travel_matrix.csv"]
+        _required = ["metapop_config.json"]
         _optional_shared = [
             "absolute_humidity.csv",
             "mobility_modifier.csv",
@@ -245,6 +245,10 @@ def _helpers(Path, SimpleNamespace, json, np, pd):
             _parts.append(f"{_k}:{_v}" if _v else _k)
         return ", ".join(_parts)
 
+    def is_array_param(cfg, name):
+        """Return True if the named param in cfg has a list (A×R array) value."""
+        return isinstance(cfg.get("params", {}).get(name), list)
+
     return (
         build_notebook_schedules_input,
         build_scalar_array,
@@ -255,6 +259,7 @@ def _helpers(Path, SimpleNamespace, json, np, pd):
         load_config_json,
         validate_metapop_folder,
         infectious_mapping_to_str,
+        is_array_param,
     )
 
 
@@ -374,12 +379,13 @@ Available templates:
 Numeric sliders appear automatically for every parameter name referenced by your transitions.
 
 **Step 5 — Schedules and Immunity**
-For rate templates that use schedules (contact matrix, humidity, mobility, vaccines):
+For rate templates that use schedules (humidity, mobility, vaccines):
 - Choose *constant* to use a single scalar value for the whole simulation.
 - Choose *csv* to load a real time-varying schedule from a CSV file.
-When A > 1, contact matrix CSVs are required and vaccine/mobility CSVs are
-strongly recommended. Risk groups (R > 1) affect transition and susceptibility parameters
-but do not require separate contact matrices.
+Contact matrices (total, school, work) are always stored as inline arrays in the
+config JSON. When A > 1, supply them via CSV paths in the contact matrix fields —
+or load a saved config that already has them embedded. Risk groups (R > 1) affect
+transition and susceptibility parameters but do not require separate contact matrices.
 
 **Step 6 — Model diagram**
 Auto-generated from your compartments and transitions. Requires `graphviz`; falls back
@@ -437,13 +443,14 @@ date,daily_vaccines
 2024-01-01,"[[0.000417, 0.000667], [0.000288, 0.000615], [0.001563, 0.003]]"
 ```
 
-**Contact matrix CSVs** — plain floats, A×A, no header row, no index column
+**Contact matrix CSVs** — plain floats, A×A, no header row, no index column *(optional)*
 ```
 7.0,3.0,0.5
 3.0,9.0,1.5
 0.5,1.5,4.0
 ```
-Separate files for total, school, and work contact matrices.
+Separate files for total, school, and work contact matrices. When not provided,
+the matrices embedded in the loaded config JSON are used directly.
         """),
 
         "🗂️ Metapopulation folder conventions": mo.md("""
@@ -454,8 +461,7 @@ The folder path is entered in **Step 1** and saved in the config JSON.
 
 | File | Description |
 |---|---|
-| `subpopulations.csv` | One row per subpop; columns: `name`, `total_population` |
-| `travel_matrix.csv` | N×N matrix; subpop names as header row and index column |
+| `metapop_config.json` | `subpopulations` (ordered list of names) and `travel_matrix` (N×N list of lists, rows sum to 1) |
 
 **Optional shared files** (used by all subpops if present):
 
@@ -464,16 +470,29 @@ The folder path is entered in **Step 1** and saved in the config JSON.
 | `absolute_humidity.csv` | `date`, `absolute_humidity` |
 | `mobility_modifier.csv` | `day_of_week`, `mobility_modifier` (JSON A×R) |
 
-**Optional per-subpop files** (`{name}` = the subpop's name from `subpopulations.csv`):
+**Optional per-subpop files** (`{name}` = a name from `metapop_config.json → subpopulations`):
 
 | File | Description |
 |---|---|
 | `school_work_calendar_{name}.csv` | `date`, `is_school_day`, `is_work_day` |
 | `vaccines_{name}.csv` | `date`, `daily_vaccines` (JSON A×R) |
-| `initial_conditions_{name}.csv` | `compartment`, `value` — seeded counts per compartment |
+| `initial_conditions_{name}.json` | `compartments` and `epi_metrics` keys, each mapping name → A×R list |
 
-If `initial_conditions_{name}.csv` is absent, the entire subpop population is placed
-in the first compartment (e.g., S).
+Example `initial_conditions_West.json`:
+```json
+{
+  "compartments": {
+    "S": [[31680], [96589], [344716], [116909], [87681]],
+    "E": [[0], [0], [30], [0], [0]]
+  },
+  "epi_metrics": {
+    "M":  [[0.1], [0.1], [0.06], [0.08], [0.04]],
+    "MV": [[0.0], [0.0], [0.0],  [0.0],  [0.0]]
+  }
+}
+```
+
+If `initial_conditions_{name}.json` is absent, all compartments are initialised to zero and the simulation will stop with an error if the model has more than one age or risk group.
 
 **Example folder** is included in the repository at
 `generic_core/examples/example_metapop_inputs/` (2 subpops, 3 age groups, 2 risk groups,
@@ -494,19 +513,20 @@ The downloaded `model_config.json` contains everything needed to restore the ses
 transitions, parameters, immunity toggles, file paths, metapop folder) will be
 pre-populated automatically.
 
-**Note on contact matrices:** When A > 1, matrix values are *not* embedded in the JSON
-(they stay in the CSV files). The config stores only the CSV paths, which are re-read
-at run time. Move or rename the CSV files and the paths in the config will need updating.
+**Note on contact matrices:** When A > 1, matrix values *are* embedded inline in the
+config JSON under `params` (as nested lists). CSV file paths are optional — if provided
+in Step 5, they override the inline values at load time. If no CSV paths are set, the
+inline param arrays are used as-is.
         """),
 
         "⚡ Rate template quick reference": mo.md("""
-| Template | When to use | Required rate_config keys |
-|---|---|---|
-| `constant_param` | Fixed transition rate | `param` |
-| `param_product` | Product of factors (e.g., base rate × proportion) | `factors` (list); optionally `complement_factors` |
-| `immunity_modulated` | Rate reduced by cumulative immunity M/MV | `base_rate`, `proportion`, `is_complement`; optionally `inf_reduce_param`, `vax_reduce_param` |
-| `force_of_infection` | Standard SIR-style infection | `beta_param`, `contact_matrix_schedule`, `infectious_compartments`, `relative_susceptibility_param`; optionally humidity/immunity fields |
-| `force_of_infection_travel` | FOI with inter-subpop mixing | Same as above plus `travel_config` with `immobile_compartments`, `mobility_schedule` |
+| Template | When to use | Example | Required rate_config keys |
+|---|---|---|---|
+| `constant_param` | Single fixed-rate transition | E→I recovery at rate `gamma` | `param` |
+| `param_product` | Product of two or more parameters | S→H at `sigma × hosp_prop`; complement branch S→I at `sigma × (1 − hosp_prop)` | `factors` (list); optionally `complement_factors` |
+| `immunity_modulated` | Rate that scales down as population immunity (M/MV) accumulates | S→E exposure rate suppressed by prior infection/vaccine immunity | `base_rate`, `proportion`, `is_complement`; optionally `inf_reduce_param`, `vax_reduce_param` |
+| `force_of_infection` | Standard frequency-dependent incidence with a contact matrix | S→E infection driven by `beta`, contact patterns, and infectious compartments I/A | `beta_param`, `contact_matrix_schedule`, `infectious_compartments`, `relative_susceptibility_param`; optionally humidity/immunity fields |
+| `force_of_infection_travel` | FOI with commuter mixing across subpopulations *(metapop only)* | S→E where residents of subpop A contact infectious individuals from subpop B during work hours | Same as above plus `travel_config` with `immobile_compartments`, `mobility_schedule` |
 
 **Infectious compartments field** uses the format `CompartmentName:relative_infectivity_param`
 (or just `CompartmentName` if all compartments are equally infectious), comma-separated.
@@ -699,7 +719,7 @@ def _transition_forms_ui(compartments, loaded_config, mo):
         mo.ui.dropdown(
             options=_templates,
             value=_tget(_i, "rate_template", "constant_param"),
-            label="Rate template",
+            label="",
         )
         for _i in range(_max_t)
     ])
@@ -759,8 +779,17 @@ def _transition_forms_ui(compartments, loaded_config, mo):
         for _i in range(_max_t)
     ])
 
+    def _travel_config_get(i, key, default):
+        """Look up a key inside rate_config.travel_config (for force_of_infection_travel)."""
+        _tc = _rcget(i, "travel_config", None)
+        if _tc and isinstance(_tc, dict):
+            return _tc.get(key, default)
+        return default
+
     def _infectious_default(i):
         _raw = _rcget(i, "infectious_compartments", None)
+        if _raw is None:
+            _raw = _travel_config_get(i, "infectious_compartments", None)
         if _raw and isinstance(_raw, dict):
             return ", ".join(f"{_k}:{_v}" if _v else _k for _k, _v in _raw.items())
         return "I"
@@ -796,7 +825,10 @@ def _transition_forms_ui(compartments, loaded_config, mo):
     ])
     t_immobile = mo.ui.array([
         mo.ui.text(
-            value=", ".join(_rcget(_i, "immobile_compartments", [])),
+            value=", ".join(
+                _travel_config_get(_i, "immobile_compartments", None)
+                or _rcget(_i, "immobile_compartments", [])
+            ),
             label="",
         )
         for _i in range(_max_t)
@@ -962,7 +994,22 @@ def _transition_show(
             mo.md(f"**Transition {_i + 1}**"),
             mo.vstack([
                 mo.hstack([t_name[_i], t_origin[_i], t_dest[_i]], justify="start"),
-                t_template[_i],
+                _with_tip(
+                    "Rate template",
+                    "Determines how the transition rate is computed each timestep.\n\n"
+                    "constant_param — single fixed rate parameter\n"
+                    "  e.g. E→I recovery at rate gamma\n\n"
+                    "param_product — product of multiple parameters\n"
+                    "  e.g. S→H at sigma × hosp_prop\n\n"
+                    "immunity_modulated — rate suppressed by cumulative infection/vaccine immunity (M/MV)\n"
+                    "  e.g. S→E exposure dampened by prior immunity\n\n"
+                    "force_of_infection — standard frequency-dependent incidence with a contact matrix\n"
+                    "  e.g. S→E driven by beta, contact patterns, and infectious compartments\n\n"
+                    "force_of_infection_travel — FOI with commuter mixing across subpopulations (metapop only)\n"
+                    "  e.g. S→E where residents of subpop A contact infectious people from subpop B\n\n"
+                    "See the ⚡ Rate template quick reference accordion above for full details.",
+                    t_template[_i],
+                ),
             ]),
             _rate_ui,
             mo.md("---"),
@@ -1088,27 +1135,40 @@ def _collect_param_names(
 # ---------------------------------------------------------------------------
 
 @app.cell
-def _params_ui(param_names, reduce_param_names, loaded_config, mo):
+def _params_ui(param_names, reduce_param_names, loaded_config, mo, is_array_param):
     _saved_params = loaded_config.get("params", {})
+    scalar_param_names = [_n for _n in param_names if not is_array_param(loaded_config, _n)]
+    array_param_names  = [_n for _n in param_names if is_array_param(loaded_config, _n)]
     params_inputs = mo.ui.array([
         mo.ui.number(
             start=0.0, stop=10.0, step=0.001,
             value=float(_saved_params.get(_name, 0.5 if _name in reduce_param_names else 1.0)),
             label=_name,
         )
-        for _name in param_names
+        for _name in scalar_param_names
     ])
-    return (params_inputs,)
+    return params_inputs, scalar_param_names, array_param_names
 
 
 @app.cell
-def _params_show(param_names, params_inputs, mo):
-    _body = (
-        mo.hstack(list(params_inputs), wrap=True)
-        if param_names
-        else mo.callout(mo.md("No transition parameters found yet."), kind="warn")
-    )
-    mo.vstack([mo.md("### Step 4 — Parameters"), _body])
+def _params_show(param_names, params_inputs, scalar_param_names, array_param_names, loaded_config, mo):
+    _saved_params = loaded_config.get("params", {})
+    _parts = [mo.md("### Step 4 — Parameters")]
+    if not param_names:
+        _parts.append(mo.callout(mo.md("No transition parameters found yet."), kind="warn"))
+    if scalar_param_names:
+        _parts.append(mo.hstack(list(params_inputs), wrap=True))
+    for _name in array_param_names:
+        _val = _saved_params[_name]
+        _parts.append(mo.callout(
+            mo.md(
+                f"**`{_name}`** — loaded from config as A×R array "
+                f"(slider disabled, value passes through unchanged)\n\n"
+                f"```json\n{_val}\n```"
+            ),
+            kind="info",
+        ))
+    mo.vstack(_parts)
     return
 
 
@@ -1190,12 +1250,27 @@ def _epi_metric_ui(n_transitions, t_name, mo, loaded_config):
         value=float(_saved_params.get("inf_induced_immune_wane", 0.01)),
         label="inf_induced_immune_wane",
     )
+    _vax_wane_raw = _saved_params.get("vax_induced_immune_wane", 0.0)
+    vax_wane_is_array = isinstance(_vax_wane_raw, list)
+    vax_wane_loaded_val = _vax_wane_raw
     vax_wane_input = mo.ui.number(
         start=0.0, stop=1.0, step=0.001,
-        value=float(_saved_params.get("vax_induced_immune_wane", 0.0)),
+        value=0.0 if vax_wane_is_array else float(_vax_wane_raw),
         label="vax_induced_immune_wane",
     )
-    return r_to_s_picker, inf_sat_input, vax_sat_input, inf_wane_input, vax_wane_input
+    vax_delay_input = mo.ui.number(
+        start=0, stop=60, step=1,
+        value=int(_saved_params.get("vax_protection_delay_days", 0)),
+        label="vax_protection_delay_days",
+    )
+    vax_reset_date_input = mo.ui.text(
+        value=str(_saved_params.get("vax_immunity_reset_date_mm_dd", "")),
+        placeholder="07_30",
+        label="vax_immunity_reset_date_mm_dd (MM_DD, blank to disable)",
+    )
+    return (r_to_s_picker, inf_sat_input, vax_sat_input, inf_wane_input,
+            vax_wane_input, vax_wane_is_array, vax_wane_loaded_val,
+            vax_delay_input, vax_reset_date_input)
 
 
 @app.cell
@@ -1412,10 +1487,11 @@ def _schedule_csv_show(
         else:
             _parts.append(mo.callout(
                 mo.md(
-                    f"Total contact matrix CSV not set. "
-                    "Scalar `[[1.0]]` will be used (may be incorrect for A>1)."
+                    "Total contact matrix CSV not set. "
+                    "Inline value from loaded config will be used if available, "
+                    "otherwise scalar `[[1.0]]`."
                 ),
-                kind="warn",
+                kind="info",
             ))
 
         _parts.append(school_contact_csv_path)
@@ -1475,6 +1551,10 @@ def _schedule_and_immunity_show(
     vax_sat_input,
     inf_wane_input,
     vax_wane_input,
+    vax_wane_is_array,
+    vax_wane_loaded_val,
+    vax_delay_input,
+    vax_reset_date_input,
     uses_absolute_humidity,
     uses_contact_matrix,
     uses_mobility,
@@ -1543,7 +1623,7 @@ def _schedule_and_immunity_show(
                 _scalar_schedule_inputs.extend([
                     total_contact_input, school_contact_input, work_contact_input,
                 ])
-        # when A > 1 contact matrices come from CSV only; no scalar fallback shown
+        # when A > 1 contact matrices come from CSV or inline config params; no scalar fallback shown
     if uses_mobility and mob_mode.value == "constant":
         _scalar_schedule_inputs.append(mobility_input)
 
@@ -1597,15 +1677,26 @@ def _schedule_and_immunity_show(
                 ),
             ])
         if include_vax_immunity.value:
-            _metric_inputs.append(
-                _wtip(
-                    vax_wane_input,
-                    "Daily decay rate of vaccine-induced immunity MV.\n\n"
-                    "ΔMV = daily_vaccines − wane×MV\n\n"
-                    "0 = no waning.\n"
-                    "0.01 ≈ half-life of ~70 days.",
+            if vax_wane_is_array:
+                _metric_inputs.append(mo.callout(
+                    mo.md(
+                        "**`vax_induced_immune_wane`** — loaded from config as A×R array "
+                        "(slider disabled, value passes through unchanged)\n\n"
+                        f"```json\n{vax_wane_loaded_val}\n```"
+                    ),
+                    kind="info",
+                ))
+            else:
+                _metric_inputs.append(
+                    _wtip(
+                        vax_wane_input,
+                        "Daily decay rate of vaccine-induced immunity MV.\n\n"
+                        "ΔMV = daily_vaccines − wane×MV\n\n"
+                        "0 = no waning.\n"
+                        "0.01 ≈ half-life of ~70 days.",
+                    )
                 )
-            )
+            _metric_inputs.extend([vax_delay_input, vax_reset_date_input])
             if vax_mode.value == "constant":
                 _metric_inputs.append(daily_vaccines_input)
         _parts.append(mo.hstack(_metric_inputs, wrap=True))
@@ -1707,25 +1798,35 @@ def _init_ui(compartments, mo, loaded_config, num_age_groups, num_risk_groups):
 
 
 @app.cell
-def _init_show(compartments, total_pop_input, seed_inputs, mo):
-    _N = int(total_pop_input.value)
-    _seeded = {compartments[_j + 1]: int(seed_inputs.value[_j]) for _j in range(len(seed_inputs.value))}
-    _remainder = _N - sum(_seeded.values())
-    _first = compartments[0] if compartments else "?"
-    _table_rows = {_first: _remainder, **_seeded}
-    _rows_md = "\n".join(f"| `{_c}` | {_v:,} |" for _c, _v in _table_rows.items())
-    _parts = [
-        mo.md("### Step 7 — Initial Conditions"),
-        total_pop_input,
-        mo.hstack(list(seed_inputs), wrap=True) if seed_inputs.value else mo.md(""),
-        mo.md(
-            "| Compartment | Initial count |\n"
-            "|---|---|\n"
-            f"{_rows_md}"
-        ),
-    ]
-    if _remainder < 0:
-        _parts.append(mo.callout(mo.md("Seeded counts exceed total population N."), kind="danger"))
+def _init_show(compartments, total_pop_input, seed_inputs, is_metapop, mo):
+    _parts = [mo.md("### Step 7 — Initial Conditions")]
+    if is_metapop:
+        _parts.append(mo.callout(
+            mo.md(
+                "**Metapopulation mode:** initial conditions are read from "
+                "`initial_conditions_{name}.csv` and `age_risk_fractions_{name}.csv` "
+                "in the metapop folder."
+            ),
+            kind="info",
+        ))
+    else:
+        _N = int(total_pop_input.value)
+        _seeded = {compartments[_j + 1]: int(seed_inputs.value[_j]) for _j in range(len(seed_inputs.value))}
+        _remainder = _N - sum(_seeded.values())
+        _first = compartments[0] if compartments else "?"
+        _table_rows = {_first: _remainder, **_seeded}
+        _rows_md = "\n".join(f"| `{_c}` | {_v:,} |" for _c, _v in _table_rows.items())
+        _parts += [
+            total_pop_input,
+            mo.hstack(list(seed_inputs), wrap=True) if seed_inputs.value else mo.md(""),
+            mo.md(
+                "| Compartment | Initial count |\n"
+                "|---|---|\n"
+                f"{_rows_md}"
+            ),
+        ]
+        if _remainder < 0:
+            _parts.append(mo.callout(mo.md("Seeded counts exceed total population N."), kind="danger"))
     mo.vstack(_parts)
     return
 
@@ -1736,6 +1837,7 @@ def _init_show(compartments, total_pop_input, seed_inputs, mo):
 
 @app.cell
 def _sim_settings_ui(mo, loaded_config):
+    _sim = loaded_config.get("simulation_settings", {})
     sim_days = mo.ui.number(start=10, stop=730, step=10, value=100, label="Simulation days")
     sim_mode = mo.ui.radio(
         options=["Deterministic", "Stochastic"],
@@ -1745,11 +1847,21 @@ def _sim_settings_ui(mo, loaded_config):
     n_reps = mo.ui.number(start=1, stop=100, step=1, value=10, label="Replicates")
     rng_seed = mo.ui.number(start=0, stop=99999, step=1, value=42, label="RNG seed")
     timesteps = mo.ui.number(start=1, stop=24, step=1, value=7, label="Timesteps per day")
-    return sim_days, sim_mode, n_reps, rng_seed, timesteps
+    start_date_input = mo.ui.text(
+        value=_sim.get("start_real_date", "2024-01-01"),
+        label="Simulation start date (YYYY-MM-DD)",
+    )
+    transition_vars_input = mo.ui.text(
+        value=", ".join(_sim.get("transition_variables_to_save", [])),
+        placeholder="ISH_to_HR, ISH_to_HD, S_to_E  (blank = save all)",
+        label="Transition variables to save",
+        full_width=True,
+    )
+    return sim_days, sim_mode, n_reps, rng_seed, timesteps, start_date_input, transition_vars_input
 
 
 @app.cell
-def _sim_settings_show(mo, sim_days, sim_mode, n_reps, rng_seed, timesteps):
+def _sim_settings_show(mo, sim_days, sim_mode, n_reps, rng_seed, timesteps, start_date_input, transition_vars_input):
     mo.vstack([
         mo.md("### Step 8 — Simulation Settings"),
         mo.hstack([sim_days, sim_mode, timesteps, rng_seed], justify="start"),
@@ -1757,6 +1869,8 @@ def _sim_settings_show(mo, sim_days, sim_mode, n_reps, rng_seed, timesteps):
             n_reps,
             mo.md("*Ignored in deterministic mode.*") if sim_mode.value == "Deterministic" else mo.md(""),
         ]),
+        start_date_input,
+        transition_vars_input,
     ])
     return
 
@@ -1774,9 +1888,11 @@ def _build_config(
     t_base_rate, t_proportion, t_is_complement, t_inf_reduce, t_vax_reduce,
     t_beta, t_rel_sus, t_infectious, t_use_humidity, t_humidity_impact,
     t_use_foi_immunity, t_immobile,
-    param_names, params_inputs,
+    scalar_param_names, params_inputs,
     include_inf_immunity, include_vax_immunity,
-    r_to_s_picker, inf_sat_input, vax_sat_input, inf_wane_input, vax_wane_input,
+    r_to_s_picker, inf_sat_input, vax_sat_input, inf_wane_input,
+    vax_wane_input, vax_wane_is_array, vax_wane_loaded_val,
+    vax_delay_input, vax_reset_date_input,
     uses_absolute_humidity, uses_contact_matrix, uses_mobility, requires_immunity_metrics,
     parse_csv_list, parse_infectious_mapping,
     total_contact_input, school_contact_input, work_contact_input,
@@ -1787,15 +1903,18 @@ def _build_config(
     ah_path, cal_path, mob_path, vax_path,
     total_contact_csv_path, school_contact_csv_path, work_contact_csv_path,
     total_pop_input,
+    loaded_config,
+    start_date_input, transition_vars_input,
     np,
 ):
     _n = int(n_transitions.value)
     _A = num_age_groups
     _R = num_risk_groups
-    params_dict: dict = {
-        _name: float(params_inputs.value[_j])
-        for _j, _name in enumerate(param_names)
-    }
+    # Seed from loaded config first (preserves A×R array-valued params), then
+    # overlay the scalar slider values for any param the user has wired up in Step 3.
+    params_dict: dict = dict(loaded_config.get("params", {}))
+    for _j, _name in enumerate(scalar_param_names):
+        params_dict[_name] = float(params_inputs.value[_j])
 
     _transitions = []
     _metapop_travel_config = {}
@@ -1881,15 +2000,15 @@ def _build_config(
         else:
             if loaded_schedule_dfs.total_contact_matrix is not None:
                 params_dict["total_contact_matrix"] = loaded_schedule_dfs.total_contact_matrix
-            else:
+            elif not isinstance(params_dict.get("total_contact_matrix"), list):
                 params_dict["total_contact_matrix"] = [[float(total_contact_input.value)]]
             if loaded_schedule_dfs.school_contact_matrix is not None:
                 params_dict["school_contact_matrix"] = loaded_schedule_dfs.school_contact_matrix
-            else:
+            elif not isinstance(params_dict.get("school_contact_matrix"), list):
                 params_dict["school_contact_matrix"] = [[float(school_contact_input.value)]]
             if loaded_schedule_dfs.work_contact_matrix is not None:
                 params_dict["work_contact_matrix"] = loaded_schedule_dfs.work_contact_matrix
-            else:
+            elif not isinstance(params_dict.get("work_contact_matrix"), list):
                 params_dict["work_contact_matrix"] = [[float(work_contact_input.value)]]
 
     _schedules = []
@@ -1950,7 +2069,13 @@ def _build_config(
             },
         })
     if include_vax_immunity.value:
-        params_dict["vax_induced_immune_wane"] = float(vax_wane_input.value)
+        if not vax_wane_is_array:
+            params_dict["vax_induced_immune_wane"] = float(vax_wane_input.value)
+        # else: array already seeded from loaded_config above — vax_wane_loaded_val passes through
+        if int(vax_delay_input.value) > 0:
+            params_dict["vax_protection_delay_days"] = int(vax_delay_input.value)
+        if vax_reset_date_input.value.strip():
+            params_dict["vax_immunity_reset_date_mm_dd"] = vax_reset_date_input.value.strip()
         _epi_metrics.append({
             "name": "MV",
             "init_val": np.zeros((_A, _R)).tolist(),
@@ -1981,6 +2106,7 @@ def _build_config(
     if is_metapop and metapop_folder_input.value.strip():
         _input_files["metapop_folder"] = metapop_folder_input.value.strip()
 
+    _tvs = [v.strip() for v in transition_vars_input.value.split(",") if v.strip()]
     config_dict = {
         "compartments": compartments,
         "params": params_dict,
@@ -1993,6 +2119,10 @@ def _build_config(
             "num_risk_groups": _R,
         },
         "total_population": int(total_pop_input.value),
+        "simulation_settings": {
+            "start_real_date": start_date_input.value.strip(),
+            "transition_variables_to_save": _tvs,
+        },
     }
     if _input_files:
         config_dict["input_files"] = _input_files
@@ -2055,6 +2185,8 @@ def _run_sim(
     n_reps,
     rng_seed,
     timesteps,
+    start_date_input,
+    transition_vars_input,
     absolute_humidity_input,
     mobility_input,
     daily_vaccines_input,
@@ -2069,6 +2201,7 @@ def _run_sim(
     flu,
     np,
     mo,
+    json,
     num_age_groups,
     num_risk_groups,
     is_metapop,
@@ -2081,7 +2214,8 @@ def _run_sim(
 
     _A = num_age_groups
     _R = num_risk_groups
-    start_real_date = "2024-01-01"
+    start_real_date = start_date_input.value.strip() or "2024-01-01"
+    _tvs = [v.strip() for v in transition_vars_input.value.split(",") if v.strip()]
     _is_stochastic = sim_mode.value == "Stochastic"
     _transition_type = (
         clt.TransitionTypes.BINOM if _is_stochastic
@@ -2117,7 +2251,7 @@ def _run_sim(
                 else loaded_schedule_dfs.daily_vaccines_df,
         )
 
-    def _build_subpop(schedules_input, compartment_init, seed_offset, name="aggregate_pop"):
+    def _build_subpop(schedules_input, compartment_init, seed_offset, name="aggregate_pop", epi_metric_init=None):
         _config_err = None
         _model_config = None
         try:
@@ -2128,13 +2262,14 @@ def _run_sim(
             _config_err = str(_exc)
         if _config_err is not None:
             raise RuntimeError(f"Config error: {_config_err}")
-        _state = build_state_from_config(_model_config, compartment_init, epi_metric_init={})
+        _state = build_state_from_config(_model_config, compartment_init, epi_metric_init=epi_metric_init or {})
         _params = build_params_from_config(_model_config, num_age_groups=_A, num_risk_groups=_R)
         _settings = clt.SimulationSettings(
             timesteps_per_day=_ts_per_day,
             transition_type=_transition_type,
             start_real_date=start_real_date,
             save_daily_history=True,
+            transition_variables_to_save=_tvs,
         )
         _rng = np.random.default_rng(_seed + seed_offset)
         return ConfigDrivenSubpopModel(
@@ -2215,22 +2350,19 @@ def _run_sim(
             not _folder.exists() or not _folder.is_dir(),
             mo.callout(mo.md(f"**Metapop folder not found:** {_folder}"), kind="danger"),
         )
-        _subpops_csv = _folder / "subpopulations.csv"
-        _travel_csv = _folder / "travel_matrix.csv"
+        _metapop_cfg_path = _folder / "metapop_config.json"
         mo.stop(
-            not _subpops_csv.exists(),
-            mo.callout(mo.md("**Missing:** `subpopulations.csv` in metapop folder."), kind="danger"),
+            not _metapop_cfg_path.exists(),
+            mo.callout(mo.md("**Missing:** `metapop_config.json` in metapop folder."), kind="danger"),
         )
+        with open(_metapop_cfg_path) as _f:
+            _metapop_cfg = json.load(_f)
         mo.stop(
-            not _travel_csv.exists(),
-            mo.callout(mo.md("**Missing:** `travel_matrix.csv` in metapop folder."), kind="danger"),
+            "subpopulations" not in _metapop_cfg or "travel_matrix" not in _metapop_cfg,
+            mo.callout(mo.md("**Invalid `metapop_config.json`:** must have `subpopulations` and `travel_matrix` keys."), kind="danger"),
         )
-
-        _subpops_df = pd.read_csv(_subpops_csv)
-        _subpops_df = _subpops_df.loc[:, ~_subpops_df.columns.str.match(r"^Unnamed")]
-        _travel_df = pd.read_csv(_travel_csv, index_col=0)
-        _travel_arr = _travel_df.values.astype(float)
-        _sp_names = list(_subpops_df["name"])
+        _sp_names = list(_metapop_cfg["subpopulations"])
+        _travel_arr = np.array(_metapop_cfg["travel_matrix"], dtype=float)
         _n_subpops = len(_sp_names)
 
         # Shared optional schedule files
@@ -2248,14 +2380,11 @@ def _run_sim(
         def _run_metapop_once(seed_offset):
             _subpop_models = []
             _model_config_ref = None
-            for _sp_idx, _sp_row in _subpops_df.iterrows():
-                _sp_name = _sp_row["name"]
-                _sp_total = int(_sp_row["total_population"])
-
+            for _sp_idx, _sp_name in enumerate(_sp_names):
                 # Load per-subpop schedule files
                 _sp_cal_path = _folder / f"school_work_calendar_{_sp_name}.csv"
                 _sp_vax_path = _folder / f"vaccines_{_sp_name}.csv"
-                _sp_ic_path = _folder / f"initial_conditions_{_sp_name}.csv"
+                _sp_ic_path  = _folder / f"initial_conditions_{_sp_name}.json"
 
                 _sp_cal_df = None
                 _sp_vax_df = None
@@ -2273,22 +2402,26 @@ def _run_sim(
                     vax_df_override=_sp_vax_df,
                 )
 
-                # Build initial conditions
+                # Build initial conditions from JSON (supports A×R arrays and epi metric init)
+                _sp_epi_init = {}
+                _sp_comp_init = {_c: build_scalar_array(0.0, _A, _R) for _c in compartments}
                 if _sp_ic_path.exists():
-                    _ic_df = pd.read_csv(_sp_ic_path)
-                    _ic_df = _ic_df.loc[:, ~_ic_df.columns.str.match(r"^Unnamed")]
-                    _ic_map = dict(zip(_ic_df["compartment"], _ic_df["value"].astype(float)))
-                    _sp_comp_init = {
-                        _c: build_scalar_array(_ic_map.get(_c, 0.0), _A, _R)
-                        for _c in compartments
-                    }
+                    with open(_sp_ic_path) as _f:
+                        _ic = json.load(_f)
+                    for _c, _arr in _ic.get("compartments", {}).items():
+                        if _c in compartments:
+                            _sp_comp_init[_c] = np.array(_arr, dtype=float)
+                    for _m, _arr in _ic.get("epi_metrics", {}).items():
+                        _sp_epi_init[_m] = np.array(_arr, dtype=float)
                 else:
-                    # Default: everyone in first compartment
-                    _sp_comp_init = {_c: build_scalar_array(0.0, _A, _R) for _c in compartments}
-                    _sp_comp_init[compartments[0]] = build_scalar_array(float(_sp_total), _A, _R)
+                    mo.stop(
+                        _A > 1 or _R > 1,
+                        mo.callout(mo.md(f"**Missing:** `initial_conditions_{_sp_name}.json` is required when the model has more than one age or risk group."), kind="danger"),
+                    )
 
                 _subpop, _mc = _build_subpop(
-                    _sched, _sp_comp_init, seed_offset + _sp_idx, name=_sp_name
+                    _sched, _sp_comp_init, seed_offset + _sp_idx, name=_sp_name,
+                    epi_metric_init=_sp_epi_init,
                 )
                 _subpop_models.append(_subpop)
                 if _model_config_ref is None:
