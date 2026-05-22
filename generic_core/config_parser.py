@@ -122,6 +122,10 @@ class ModelConfig:
     epi_metrics: list[EpiMetricConfig]
     schedules: list[ScheduleConfig]
 
+    # Per-subpopulation parameter overrides: {subpop_name: {param_name: raw_value}}
+    # Raw JSON values (numbers, lists) — not yet parsed through _parse_param_value.
+    subpop_params: dict[str, dict] = field(default_factory=dict)
+
     # Derived name sets (pre-computed for fast lookup)
     param_names: set[str] = field(default_factory=set)
     compartment_names: set[str] = field(default_factory=set)
@@ -332,6 +336,16 @@ def parse_model_config_from_dict(
             update_config=update_cfg,
         ))
 
+    # --- 8. Subpop params ---
+    subpop_params_raw = raw.get("subpop_params", {})
+    if not isinstance(subpop_params_raw, dict):
+        raise ValueError("ModelConfig: 'subpop_params' must be a JSON object")
+    for sp_name, sp_overrides in subpop_params_raw.items():
+        if not isinstance(sp_overrides, dict):
+            raise ValueError(
+                f"ModelConfig: 'subpop_params[\"{sp_name}\"]' must be a JSON object"
+            )
+
     config = ModelConfig(
         compartments=compartments,
         params=params,
@@ -339,6 +353,7 @@ def parse_model_config_from_dict(
         transition_groups=groups,
         epi_metrics=epi_metrics,
         schedules=schedules,
+        subpop_params=subpop_params_raw,
     )
     return config
 

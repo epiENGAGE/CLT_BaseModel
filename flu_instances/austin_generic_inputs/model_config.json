@@ -263,6 +263,11 @@
     }
   ],
 
+  "subpop_params": {
+    "East": {},
+    "West": {}
+  },
+
   "age_risk": {
     "num_age_groups": 5,
     "num_risk_groups": 1

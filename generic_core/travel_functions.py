@@ -96,9 +96,9 @@ def compute_wtd_infectious_LA(
     result: torch.Tensor | None = None
     for comp_name, rel_inf_param in infectious_config.items():
         comp = compartment_tensors[comp_name]          # (L, A, R)
-        wtd = torch.einsum("lar->la", comp)            # (L, A)
         if rel_inf_param is not None:
-            wtd = param_tensors[rel_inf_param] * wtd
+            comp = param_tensors[rel_inf_param] * comp  # broadcast before summing over R
+        wtd = torch.einsum("lar->la", comp)            # (L, A)
         result = wtd if result is None else result + wtd
     return result
 
@@ -335,9 +335,14 @@ def compute_total_mixing_exposure(
     mobility_modifier = schedule_tensors[travel_config["mobility_schedule"]]      # (L, A, R)
     travel_proportions = param_tensors["travel_proportions"]                      # (L, L)
 
-    # relative_suscept is (L, A, R) or (1, A, R); take first location, all ages, first risk → (A,)
     rel_suscept_param = travel_config["relative_susceptibility_param"]
-    relative_suscept = param_tensors[rel_suscept_param][0, :, 0]                 # (A,)
+    _rs = param_tensors[rel_suscept_param]
+    # Normalize to (L, A, R) so per-location slicing works for any input shape.
+    # Scalar→(1,A,R), (A,R)→(1,A,R); (L,A,R) passes through. expand() is zero-copy.
+    if _rs.dim() == 0:
+        _rs = _rs.expand(1, A, R)
+    elif _rs.dim() == 2:
+        _rs = _rs.unsqueeze(0)                                                    # (1, A, R)
 
     sum_residents_nonlocal = precomputed.sum_residents_nonlocal_travel_prop
     wtd_infectious_ratio_LLA = compute_wtd_infectious_ratio_LLA(
@@ -371,7 +376,9 @@ def compute_total_mixing_exposure(
                 travel_proportions, wtd_infectious_ratio_LLA, l, k
             )
 
-        # Normalize by relative susceptibility (same across risk groups within age)
+        # Slice per-location relative susceptibility; broadcast over risk groups.
+        _l = min(int(l), _rs.shape[0] - 1)                                       # clamp for (1,A,R) case
+        relative_suscept = _rs[_l, :, 0]                                         # (A,)
         normalized = relative_suscept * raw_exposure
         total_mixing_exposure[l, :, :] = normalized.view(A, 1).expand((A, R))
 
