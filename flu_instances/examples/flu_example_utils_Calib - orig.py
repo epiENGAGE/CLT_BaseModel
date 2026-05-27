@@ -4,11 +4,7 @@ flu_example_utils.py
 Shared utility functions and configuration for flu marimo notebooks
 (flu_sensitivity.py and flu_scenario_analysis.py).
 
-To switch cities or region models, change only ``CURRENT_LOCATION`` near the
-bottom of the configuration section.  All module-level defaults
-(``SHARED_FILES_CONFIG``, ``SUBPOP_CONFIG``) are derived from that single
-variable.  Adding a new location requires one new entry in
-``ALL_LOCATION_CONFIGS`` plus the corresponding raw config dicts.
+To configure for a different city, update SUBPOP_CONFIG and SHARED_FILES_CONFIG.
 """
 
 from pathlib import Path
@@ -27,10 +23,12 @@ REPO_ROOT = CLT_BASEMODEL_ROOT.parent
 
 
 # ---------------------------------------------------------------------------
-# Shared-file config templates  (base_path is None; filled in at runtime)
+# Configuration
 # ---------------------------------------------------------------------------
 
+#: Shared (non-subpopulation-specific) input files.
 AUSTIN_L2_SHARED_FILES_CONFIG = {
+    # Season-specific base_path is set by get_austin_shared_files_config().
     "base_path":          None,
     "common_params_file": "common_subpop_params.json",
     "mixing_params_file": "mixing_params.json",
@@ -40,6 +38,7 @@ AUSTIN_L2_SHARED_FILES_CONFIG = {
 }
 
 AUSTIN_L3_SHARED_FILES_CONFIG = {
+    # Season-specific base_path is set by get_austin_shared_files_config().
     "base_path":          None,
     "common_params_file": "common_subpop_params.json",
     "mixing_params_file": "mixing_params.json",
@@ -48,20 +47,10 @@ AUSTIN_L3_SHARED_FILES_CONFIG = {
     "mobility_file":      "mobility_modifier.csv",
 }
 
-DALLAS_L6_SHARED_FILES_CONFIG = {
-    "base_path":          None,
-    "common_params_file": "common_subpop_params.json",
-    "mixing_params_file": "mixing_params.json",
-    "settings_file":      "simulation_settings.json",
-    "humidity_file":      "absolute_humidity_dallas.csv",
-    "mobility_file":      "mobility_modifier.csv",
-}
-
-
-# ---------------------------------------------------------------------------
-# Subpopulation config lists
-# ---------------------------------------------------------------------------
-
+#: One entry per subpopulation.  Each dict must have the keys shown here.
+#: The order of subpopulations should match the rows/columns of the travel_proportion
+#: matrix in mixing_params.json.
+#: To use a different city, replace this list (and update SHARED_FILES_CONFIG).
 AUSTIN_L2_SUBPOP_CONFIG = [
     {
         "name":            "east",
@@ -98,96 +87,88 @@ AUSTIN_L3_SUBPOP_CONFIG = [
     },
 ]
 
-# Dallas files are dummy placeholders
-DALLAS_L6_SUBPOP_CONFIG = [
-    {
-        "name":           f"Dallas_{i + 1}",
-        "init_vals_file": f"init_vals_Dallas_{i + 1}.json",
-        "vaccines_file":  f"daily_vaccines_Dallas_{i + 1}.csv",
-        "calendar_file":  f"school_work_calendar_dallas_Dallas_{i + 1}.csv",
+AUSTIN_REGION_CONFIGS = {
+    "L2": {
+        "shared": AUSTIN_L2_SHARED_FILES_CONFIG,
+        "subpops": AUSTIN_L2_SUBPOP_CONFIG,
+        "input_prefix": "austin_input_files",
+        "report_dir": "Austin_L2",
+        "param_tag": "Austin2",
+    },
+    "L3": {
+        "shared": AUSTIN_L3_SHARED_FILES_CONFIG,
+        "subpops": AUSTIN_L3_SUBPOP_CONFIG,
+        "input_prefix": "austin3_input_files",
+        "report_dir": "Austin_L3",
+        "param_tag": "Austin3",
+    },
+}
+
+AUSTIN_CALIBRATION_MODE_DIRS = {
+    "normal": {
+        "L2": "Austin_L2",
+        "L3": "Austin_L3",
+    },
+    "rescale": {
+        "L2": "Austin_L2_updated",
+        "L3": "Austin_L3_updated",
+    },
+    "pop": {
+        "L2": "Austin_L2_E0_pop",
+        "L3": "Austin_L3_E0_pop",
+    },
+}
+
+CURRENT_AUSTIN_REGION_MODEL = "L2"
+SHARED_FILES_CONFIG = AUSTIN_REGION_CONFIGS[CURRENT_AUSTIN_REGION_MODEL]["shared"]
+SUBPOP_CONFIG = AUSTIN_REGION_CONFIGS[CURRENT_AUSTIN_REGION_MODEL]["subpops"]
+
+
+def get_austin_subpop_config(region_model="L2"):
+    return copy.deepcopy(AUSTIN_REGION_CONFIGS[region_model]["subpops"])
+
+
+def get_austin_shared_files_config(season, region_model="L2"):
+    region_cfg = AUSTIN_REGION_CONFIGS[region_model]
+    return {
+        **region_cfg["shared"],
+        "base_path": FLU_INSTANCES_ROOT / f"{region_cfg['input_prefix']}_{season}",
     }
-    for i in range(6)
-]
-# Dallas values are dummy placeholders
-_DALLAS_HIGH_RISK_FRACTIONS = {
-    f"Dallas_{i + 1}": np.array([0.050, 0.116, 0.183, 0.352, 0.550], dtype=float)
-    for i in range(6)
-}
 
 
-# ---------------------------------------------------------------------------
-# Master location registry — add new cities/models here
-# ---------------------------------------------------------------------------
-
-ALL_LOCATION_CONFIGS = {
-    "Austin_L2": {
-        "shared":          AUSTIN_L2_SHARED_FILES_CONFIG,
-        "subpops":         AUSTIN_L2_SUBPOP_CONFIG,
-        "input_prefix":    "austin_input_files",
-        "report_dir":      "Austin_L2",
-        "param_tag":       "Austin2",
-        "high_risk_fractions": {
-            "east": np.array([0.048, 0.111, 0.181, 0.350, 0.552], dtype=float),
-            "west": np.array([0.053, 0.121, 0.186, 0.354, 0.549], dtype=float),
-        },
-        "calibration_mode_dirs": {
-            "normal":  "Austin_L2",
-            "rescale": "Austin_L2_updated",
-            "pop":     "Austin_L2_E0_pop",
-        },
-    },
-    "Austin_L3": {
-        "shared":          AUSTIN_L3_SHARED_FILES_CONFIG,
-        "subpops":         AUSTIN_L3_SUBPOP_CONFIG,
-        "input_prefix":    "austin3_input_files",
-        "report_dir":      "Austin_L3",
-        "param_tag":       "Austin3",
-        "high_risk_fractions": {
-            "east": np.array([0.048, 0.111, 0.181, 0.350, 0.552], dtype=float),
-            "mid":  np.array([0.0505, 0.116, 0.1835, 0.352, 0.5505], dtype=float),
-            "west": np.array([0.053, 0.121, 0.186, 0.354, 0.549], dtype=float),
-        },
-        "calibration_mode_dirs": {
-            "normal":  "Austin_L3",
-            "rescale": "Austin_L3_updated",
-            "pop":     "Austin_L3_E0_pop",
-        },
-    },
-    "Dallas_L6": {
-        "shared":          DALLAS_L6_SHARED_FILES_CONFIG,
-        "subpops":         DALLAS_L6_SUBPOP_CONFIG,
-        "input_prefix":    "dallas_input_files",
-        "report_dir":      "Dallas_L6",
-        "param_tag":       "Dallas6",
-        "high_risk_fractions": _DALLAS_HIGH_RISK_FRACTIONS,
-        "calibration_mode_dirs": {
-            "normal":  "Dallas_L6",
-            "rescale": "Dallas_L6_updated",
-            "pop":     "Dallas_L6_E0_pop",
-        },
-    },
-}
-
-
-# ---------------------------------------------------------------------------
-# Active location — change only this variable to switch cities/models
-# ---------------------------------------------------------------------------
-
-CURRENT_LOCATION = "Austin_L2"
-
-SHARED_FILES_CONFIG = {
-    **ALL_LOCATION_CONFIGS[CURRENT_LOCATION]["shared"],
-    "base_path": FLU_INSTANCES_ROOT / f"{ALL_LOCATION_CONFIGS[CURRENT_LOCATION]['input_prefix']}_2024_2025",
-}
-SUBPOP_CONFIG = ALL_LOCATION_CONFIGS[CURRENT_LOCATION]["subpops"]
-
-
-# ---------------------------------------------------------------------------
-# Calibration constants
-# ---------------------------------------------------------------------------
+def get_calibrated_austin_l_path(
+    region_model,
+    season,
+    flatten_contact_calendar=True,
+    calibration_mode="normal",
+):
+    region_cfg = AUSTIN_REGION_CONFIGS[region_model]
+    report_root = AUSTIN_CALIBRATION_MODE_DIRS[calibration_mode][region_model]
+    base_dir = (
+        REPO_ROOT
+        / "0_save_reports"
+        / "Austin_calibration"
+        / report_root
+        / f"{region_cfg['report_dir']}_{season}_cal_{'on' if flatten_contact_calendar else 'off'}"
+    )
+    matches = sorted(base_dir.glob(f"calibrated_params_offset*_{region_cfg['param_tag']}_{season}.json"))
+    if not matches:
+        raise FileNotFoundError(f"No calibrated parameter JSON found in {base_dir}")
+    return matches[0]
 
 HIGH_RISK_IHR_MULTIPLIERS = np.array([7.8, 3.2, 6.7, 7.2, 5.1], dtype=float)
 IHR_MAX_PROB = 0.999
+HIGH_RISK_FRACTIONS_BY_MODEL = {
+    "L2": {
+        "east": np.array([0.048, 0.111, 0.181, 0.350, 0.552], dtype=float),
+        "west": np.array([0.053, 0.121, 0.186, 0.354, 0.549], dtype=float),
+    },
+    "L3": {
+        "east": np.array([0.048, 0.111, 0.181, 0.350, 0.552], dtype=float),
+        "mid": np.array([0.0505, 0.116, 0.1835, 0.352, 0.5505], dtype=float),
+        "west": np.array([0.053, 0.121, 0.186, 0.354, 0.549], dtype=float),
+    },
+}
 CALIBRATION_POP_SCALE = 100.0
 RATE_PARAMS_TO_SCALE = [
     "E_to_I_rate",
@@ -199,54 +180,6 @@ RATE_PARAMS_TO_SCALE = [
     "HD_to_D_rate",
     "R_to_S_rate",
 ]
-
-
-# ---------------------------------------------------------------------------
-# Location helpers
-# ---------------------------------------------------------------------------
-
-def get_shared_files_config(location, season):
-    """Return a shared-files config dict with ``base_path`` filled in for ``season``."""
-    cfg = ALL_LOCATION_CONFIGS[location]
-    return {
-        **cfg["shared"],
-        "base_path": FLU_INSTANCES_ROOT / f"{cfg['input_prefix']}_{season}",
-    }
-
-
-def get_subpop_config(location):
-    """Return a deep copy of the subpop config list for ``location``."""
-    return copy.deepcopy(ALL_LOCATION_CONFIGS[location]["subpops"])
-
-
-def get_austin_subpop_config(region_model="L2"):
-    return get_subpop_config(f"Austin_{region_model}")
-
-
-def get_austin_shared_files_config(season, region_model="L2"):
-    return get_shared_files_config(f"Austin_{region_model}", season)
-
-
-def get_calibrated_austin_l_path(
-    region_model,
-    season,
-    flatten_contact_calendar=True,
-    calibration_mode="normal",
-):
-    loc_cfg = ALL_LOCATION_CONFIGS[f"Austin_{region_model}"]
-    report_root = loc_cfg["calibration_mode_dirs"][calibration_mode]
-    base_dir = (
-        REPO_ROOT
-        / "0_save_reports"
-        / "Austin_calibration"
-        / report_root
-        / f"{loc_cfg['report_dir']}_{season}_cal_{'on' if flatten_contact_calendar else 'off'}"
-    )
-    matches = sorted(base_dir.glob(f"calibrated_params_offset*_{loc_cfg['param_tag']}_{season}.json"))
-    if not matches:
-        raise FileNotFoundError(f"No calibrated parameter JSON found in {base_dir}")
-    return matches[0]
-
 
 # ---------------------------------------------------------------------------
 # File loading
@@ -340,7 +273,6 @@ def convert_1risk_to_2risk(data_1risk, low_risk_frac=None, high_risk_frac=None):
     data_2risk[..., 1] = data_array[..., 0] * high_frac
     return data_2risk
 
-
 def convert_1risk_to_2risk2(data_1risk, low_risk_frac=None, high_risk_frac=None):
     """Convert a trailing singleton risk dimension into two risk groups."""
     data_array = np.asarray(data_1risk, dtype=float)
@@ -359,8 +291,8 @@ def convert_1risk_to_2risk2(data_1risk, low_risk_frac=None, high_risk_frac=None)
         low_frac = 0.7
         high_frac = 0.3
 
-    data_2risk[..., 0] = data_array[..., 0]
-    data_2risk[..., 1] = data_array[..., 0]
+    data_2risk[..., 0] = data_array[..., 0] 
+    data_2risk[..., 1] = data_array[..., 0] 
     return data_2risk
 
 
@@ -487,13 +419,12 @@ def load_calibrated_austin_inputs(
     calibration_mode="normal",
 ):
     """Load Austin calibrated inputs with calibrated beta/E0/IHR and 2 risk groups."""
-    global CURRENT_LOCATION, SHARED_FILES_CONFIG, SUBPOP_CONFIG
+    global CURRENT_AUSTIN_REGION_MODEL, SHARED_FILES_CONFIG, SUBPOP_CONFIG
 
-    location = f"Austin_{region_model}"
-    CURRENT_LOCATION = location
-    SHARED_FILES_CONFIG = get_shared_files_config(location, season)
-    SUBPOP_CONFIG = get_subpop_config(location)
-    high_risk_fractions = ALL_LOCATION_CONFIGS[location]["high_risk_fractions"]
+    CURRENT_AUSTIN_REGION_MODEL = region_model
+    SHARED_FILES_CONFIG = get_austin_shared_files_config(season, region_model)
+    SUBPOP_CONFIG = get_austin_subpop_config(region_model)
+    high_risk_fractions = HIGH_RISK_FRACTIONS_BY_MODEL[region_model]
 
     shared_config = SHARED_FILES_CONFIG
     inputs = load_flu_inputs(SUBPOP_CONFIG, shared_config, clt_module, flu_module, pd_module)
@@ -620,7 +551,6 @@ def load_calibrated_austin_inputs(
         "pop_scale": float(calibrated.get("pop_scale", CALIBRATION_POP_SCALE)),
         "season": season,
         "region_model": region_model,
-        "location": location,
         "calibration_mode": calibration_mode,
         "subpop_config": SUBPOP_CONFIG,
         "shared_config": shared_config,
@@ -728,8 +658,8 @@ def build_flu_metapop_model(subpop_config, inputs, params, settings,
         Each dict must have a ``"name"`` key.
     inputs : dict
         As returned by :func:`load_flu_inputs`.
-    params : FluSubpopParams or dict[str, FluSubpopParams]
-        Parameters shared across subpopulations, or a per-subpop dict.
+    params : FluSubpopParams
+        Parameters shared across all subpopulations (scenario overrides applied).
     settings : SimulationSettings
         Simulation settings (scenario overrides applied).
     rng_list : list[np.random.Generator]
@@ -755,36 +685,6 @@ def build_flu_metapop_model(subpop_config, inputs, params, settings,
         )
         subpop_models.append(model)
     return flu_module.FluMetapopModel(subpop_models, inputs["mixing_params"])
-
-
-def apply_general_init_overrides(states, overrides, subpop_config, np_module):
-    """Apply initial condition overrides to states.
-
-    Keys in ``overrides`` follow two patterns:
-
-    - ``"init:{sp_name}:{comp}:{i}:{j}"`` → set ``state.{comp}[i][j] = value``
-    - ``"M:{sp_name}"`` or ``"M:all"`` → multiply ``state.M`` element-wise by
-      ``value`` (treated as a scale factor)
-
-    Returns a new dict of deepcopied, modified states for all subpopulations.
-    """
-    import copy
-    modified = {sp["name"]: copy.deepcopy(states[sp["name"]]) for sp in subpop_config}
-
-    for key, val in overrides.items():
-        parts = key.split(":")
-        if parts[0] == "init":
-            _, sp_name, comp, i_str, j_str = parts
-            getattr(modified[sp_name], comp)[int(i_str)][int(j_str)] = val
-        elif parts[0] == "M":
-            sp_target = parts[1]
-            scale = float(val)
-            for sp in subpop_config:
-                if sp_target == "all" or sp["name"] == sp_target:
-                    s = modified[sp["name"]]
-                    s.M = np_module.asarray(s.M) * scale
-
-    return modified
 
 
 def apply_init_overrides(states, overrides, subpop_config):
@@ -841,7 +741,7 @@ def load_austin_observed_hosp(pd_module, season="2024_2025", region_model="L2"):
     elif region_model == "L3":
         region_files = {
             "east": REPO_ROOT / "InputFiles" / "HospitalFiles" / "Hosp_Austin3_East.csv",
-            "mid":  REPO_ROOT / "InputFiles" / "HospitalFiles" / "Hosp_Austin3_Mid.csv",
+            "mid": REPO_ROOT / "InputFiles" / "HospitalFiles" / "Hosp_Austin3_Mid.csv",
             "west": REPO_ROOT / "InputFiles" / "HospitalFiles" / "Hosp_Austin3_West.csv",
         }
     else:
