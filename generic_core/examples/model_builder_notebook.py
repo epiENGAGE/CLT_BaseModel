@@ -2,6 +2,30 @@
 model_builder_notebook.py
 =========================
 
+** GENERATED FILE — DO NOT EDIT DIRECTLY **
+
+This file is assembled from section files by build_notebook.py.
+Edit the relevant section file instead, then rebuild:
+
+    python generic_core/examples/build_notebook.py
+
+Section files (all in generic_core/examples/):
+  _nb_shared.py               — imports and helper functions
+  _nb_analysis_metric_defs.py — analysis metric definition widgets
+  _nb_entry.py                — tab selector, output directory, autosave
+  _nb_model_builder.py        — Model Builder tab (Steps 0–10)
+  _nb_shared_factory.py       — shared model factory functions
+  _nb_fitting.py              — Fitting tab
+  _nb_forecast.py             — Forecast tab
+  _nb_export.py               — Export tab
+  _nb_analysis.py             — Analysis tab
+  _nb_docs.py                 — Documentation tab
+
+If you edited cells in the marimo browser UI, sync changes back to the
+section files first:
+
+    python generic_core/examples/split_notebook.py
+
 Interactive marimo notebook for building, visualising, and running
 config-driven epidemic models.
 
@@ -43,7 +67,6 @@ import marimo
 
 __generated_with = "0.20.4"
 app = marimo.App(width="medium")
-
 
 @app.cell
 def _imports():
@@ -118,6 +141,11 @@ def _imports():
         compute_rsquared,
         FitResult,
     )
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 
 @app.cell
@@ -303,10 +331,57 @@ def _helpers(Path, SimpleNamespace, json, np, pd):
         is_array_param,
     )
 
+@app.cell
+def _analysis_metric_defs_ui(mo, loaded_config, n_transitions, t_name, transition_vars_input):
+    _MAX_MET = 5
+    _saved = loaded_config.get("analysis_metrics", [])
+    analysis_n_metrics_input = mo.ui.number(
+        start=1, stop=_MAX_MET, step=1,
+        value=min(max(len(_saved), 1), _MAX_MET),
+        label="Number of user-defined metrics",
+    )
+    analysis_metric_names = mo.ui.array([
+        mo.ui.text(
+            value=_saved[i]["name"] if i < len(_saved) else f"metric_{i + 1}",
+            label="Name",
+        )
+        for i in range(_MAX_MET)
+    ])
+    _tvs_explicit = [v.strip() for v in transition_vars_input.value.split(",") if v.strip()]
+    tv_opts = _tvs_explicit if _tvs_explicit else [
+        t_name.value[_i].strip()
+        for _i in range(int(n_transitions.value))
+        if t_name.value[_i].strip()
+    ]
+    analysis_metric_tvs = mo.ui.array([
+        mo.ui.multiselect(
+            options=tv_opts if tv_opts else [""],
+            value=[v for v in (_saved[i].get("transition_variables", []) if i < len(_saved) else []) if v in tv_opts],
+            label="Transition variables to sum",
+        )
+        for i in range(_MAX_MET)
+    ])
+    return analysis_n_metrics_input, analysis_metric_names, analysis_metric_tvs, tv_opts
 
-# ---------------------------------------------------------------------------
-# Tab selector — must depend only on `mo` so it never resets on param changes
-# ---------------------------------------------------------------------------
+
+@app.cell
+def _analysis_metric_sel_state(mo):
+    get_sel_metrics, set_sel_metrics = mo.state([])
+    return get_sel_metrics, set_sel_metrics
+
+
+@app.cell
+def _analysis_metric_plot_controls(mo, analysis_n_metrics_input, analysis_metric_names, get_sel_metrics, set_sel_metrics):
+    _n = int(analysis_n_metrics_input.value)
+    _opts = [analysis_metric_names.value[i].strip() or f"metric_{i + 1}" for i in range(_n)]
+    _saved = [m for m in get_sel_metrics() if m in _opts]
+    analysis_plot_metric_sel = mo.ui.multiselect(
+        options=_opts if _opts else ["(no metrics defined)"],
+        value=_saved if _saved else (_opts[:1] if _opts else []),
+        on_change=set_sel_metrics,
+        label="Metric(s) to show in plots",
+    )
+    return (analysis_plot_metric_sel,)
 
 @app.cell
 def _main_tab_selector(mo):
@@ -352,11 +427,6 @@ def _autosave_config(config_dict, output_dir, json):
     _p = output_dir / "model_config.json"
     _ = _p.write_text(json.dumps(config_dict, indent=2))
     return
-
-
-# ---------------------------------------------------------------------------
-# Step 0 — Load Existing Config
-# ---------------------------------------------------------------------------
 
 @app.cell
 def _load_config_state(mo):
@@ -470,6 +540,7 @@ def _load_config_display(
 # ---------------------------------------------------------------------------
 # Intro
 # ---------------------------------------------------------------------------
+
 
 @app.cell
 def _intro(mo, main_tab):
@@ -704,6 +775,7 @@ Example: `IP:IP_relative_inf, IA:IA_relative_inf, ISR, ISH`
 # Step 1 — Population Structure
 # ---------------------------------------------------------------------------
 
+
 @app.cell
 def _population_structure_ui(mo, loaded_config):
     _ar = loaded_config.get("age_risk", {})
@@ -796,6 +868,7 @@ def _population_structure_show(
 # Step 2 — Compartments
 # ---------------------------------------------------------------------------
 
+
 @app.cell
 def _compartments_ui(mo, loaded_config):
     _default = ", ".join(loaded_config.get("compartments", ["S", "E", "I", "R"]))
@@ -833,6 +906,7 @@ def _compartments_display(compartments, compartments_text, mo, main_tab):
 # ---------------------------------------------------------------------------
 # Step 3 — Transitions
 # ---------------------------------------------------------------------------
+
 
 @app.cell
 def _transition_count_ui(mo, loaded_config):
@@ -1315,6 +1389,7 @@ def _collect_param_names(
 # Step 4 — Parameters
 # ---------------------------------------------------------------------------
 
+
 @app.cell
 def _params_ui(param_names, reduce_param_names, loaded_config, mo, is_array_param):
     _saved_params = loaded_config.get("params", {})
@@ -1357,6 +1432,7 @@ def _params_show(param_names, params_inputs, scalar_param_names, array_param_nam
 # ---------------------------------------------------------------------------
 # Step 5 — Schedules and Immunity (scalar inputs + CSV file paths)
 # ---------------------------------------------------------------------------
+
 
 @app.cell
 def _schedule_and_immunity_ui(mo, loaded_config):
@@ -1894,6 +1970,7 @@ def _schedule_and_immunity_show(
 # Step 6 — Model Diagram
 # ---------------------------------------------------------------------------
 
+
 @app.cell
 def _diagram(compartments, n_transitions, t_name, t_origin, t_dest, mo, plt, main_tab):
     mo.stop(main_tab.value != "Model Builder", None)
@@ -1967,6 +2044,7 @@ def _diagram(compartments, n_transitions, t_name, t_origin, t_dest, mo, plt, mai
 # Step 7 — Initial Conditions
 # ---------------------------------------------------------------------------
 
+
 @app.cell
 def _init_ui(compartments, mo, loaded_config, num_age_groups, num_risk_groups):
     _saved_N = loaded_config.get("total_population", 10000)
@@ -2020,6 +2098,7 @@ def _init_show(compartments, total_pop_input, seed_inputs, is_metapop, mo, main_
 # Step 8 — Simulation Settings
 # ---------------------------------------------------------------------------
 
+
 @app.cell
 def _sim_settings_ui(mo, loaded_config):
     _sim = loaded_config.get("simulation_settings", {})
@@ -2064,6 +2143,7 @@ def _sim_settings_show(mo, sim_days, sim_mode, n_reps, rng_seed, timesteps, star
 # ---------------------------------------------------------------------------
 # Build config dict
 # ---------------------------------------------------------------------------
+
 
 @app.cell
 def _build_config(
@@ -2334,6 +2414,7 @@ def _build_config(
 # Step 9 — Config Preview
 # ---------------------------------------------------------------------------
 
+
 @app.cell
 def _config_preview(config_dict, json, mo, main_tab):
     mo.stop(main_tab.value != "Model Builder", None)
@@ -2358,6 +2439,7 @@ def _config_preview(config_dict, json, mo, main_tab):
 # ---------------------------------------------------------------------------
 # Step 10 — Run
 # ---------------------------------------------------------------------------
+
 
 @app.cell
 def _run_button(mo):
@@ -2773,12 +2855,6 @@ def _summary_stats(histories, compartments, np, mo, main_tab):
         ),
     ])
     return
-
-
-
-# ============================================================
-# Shared model factory — reused by Fitting, Forecast, Analysis
-# ============================================================
 
 @app.cell
 def _shared_model_factory(
@@ -4307,8 +4383,7 @@ def _run_analysis(
     set_analysis_results,
     np, mo, build_scalar_array,
 ):
-    if not analysis_run_button.value:
-        return
+    mo.stop(not analysis_run_button.value)
 
     mo.stop(
         not analysis_scenarios,
@@ -4555,58 +4630,6 @@ def _analysis_summary_table(
 # ---------------------------------------------------------------------------
 # Analysis — User-defined metrics (line, box, and bar plots)
 # ---------------------------------------------------------------------------
-
-@app.cell
-def _analysis_metric_defs_ui(mo, loaded_config, n_transitions, t_name, transition_vars_input):
-    _MAX_MET = 5
-    _saved = loaded_config.get("analysis_metrics", [])
-    analysis_n_metrics_input = mo.ui.number(
-        start=1, stop=_MAX_MET, step=1,
-        value=min(max(len(_saved), 1), _MAX_MET),
-        label="Number of user-defined metrics",
-    )
-    analysis_metric_names = mo.ui.array([
-        mo.ui.text(
-            value=_saved[i]["name"] if i < len(_saved) else f"metric_{i + 1}",
-            label="Name",
-        )
-        for i in range(_MAX_MET)
-    ])
-    _tvs_explicit = [v.strip() for v in transition_vars_input.value.split(",") if v.strip()]
-    tv_opts = _tvs_explicit if _tvs_explicit else [
-        t_name.value[_i].strip()
-        for _i in range(int(n_transitions.value))
-        if t_name.value[_i].strip()
-    ]
-    analysis_metric_tvs = mo.ui.array([
-        mo.ui.multiselect(
-            options=tv_opts if tv_opts else [""],
-            value=[v for v in (_saved[i].get("transition_variables", []) if i < len(_saved) else []) if v in tv_opts],
-            label="Transition variables to sum",
-        )
-        for i in range(_MAX_MET)
-    ])
-    return analysis_n_metrics_input, analysis_metric_names, analysis_metric_tvs, tv_opts
-
-
-@app.cell
-def _analysis_metric_sel_state(mo):
-    get_sel_metrics, set_sel_metrics = mo.state([])
-    return get_sel_metrics, set_sel_metrics
-
-
-@app.cell
-def _analysis_metric_plot_controls(mo, analysis_n_metrics_input, analysis_metric_names, get_sel_metrics, set_sel_metrics):
-    _n = int(analysis_n_metrics_input.value)
-    _opts = [analysis_metric_names.value[i].strip() or f"metric_{i + 1}" for i in range(_n)]
-    _saved = [m for m in get_sel_metrics() if m in _opts]
-    analysis_plot_metric_sel = mo.ui.multiselect(
-        options=_opts if _opts else ["(no metrics defined)"],
-        value=_saved if _saved else (_opts[:1] if _opts else []),
-        on_change=set_sel_metrics,
-        label="Metric(s) to show in plots",
-    )
-    return (analysis_plot_metric_sel,)
 
 
 @app.cell
@@ -4980,9 +5003,10 @@ any setting changes, so you never lose your work.
      loss landscapes.  **Requires a transition variable as the target** (not a compartment).
    - *LBFGS (gradient)* — Second-order gradient method.  Often converges in fewer steps
      than Adam but each step is more expensive.  Same target constraint applies.
-   - *Accept-reject* — Parameter-space random search that accepts samples with R² above
-     a threshold.  Works with any target (compartment or transition) and does not require
-     PyTorch.
+   - *Accept-reject* — Parameter-space random search that runs all samples and collects
+     every draw whose R² meets the threshold.  Works with any target (compartment or
+     transition) and does not require PyTorch.  All accepted sets are stored and can be
+     used as an ensemble in the Forecast tab.
 5. Click **Run fitting**.
 
 ### Results
@@ -5030,6 +5054,37 @@ Auto-saved to `{output_dir}/forecast_ensemble.json`.
   days in a single pass.
 - Stochastic replicates use independent random seeds; increase replicates for smoother
   confidence intervals.
+
+### Starting from the fitted end-state
+
+Enable **Start forecast from fitted end-state** to anchor the forecast at the model
+state reached at the *end* of the fitted period rather than at the fixed initial
+conditions from Step 7 of Model Builder.
+
+When this switch is on, the notebook runs in two phases:
+
+1. **Warm-up** — A deterministic simulation is run forward from the original initial
+   conditions through the entire fit period using the fitted parameters.  This recovers
+   the compartment counts *and* the immunity metrics (M, MV) that the model would have
+   at the moment the observed time series ends.
+2. **Forecast** — A new simulation is started from that end-state, using the correct
+   calendar date as its start, and runs forward for the chosen horizon.
+
+**Accept-reject ensemble:** When the Fitting tab has found multiple accepted parameter
+sets (any sample whose R² met the threshold), each set drives a separate warm-up and
+produces a separate forecast trajectory.  This gives you a proper ensemble that reflects
+both parameter uncertainty and stochastic noise.  The number of accepted sets is shown
+in the Fitting tab after running.
+
+For gradient-based methods (Adam, LBFGS), there is only one solution, so the warm-up
+uses that single parameter set; you can still run multiple stochastic replicates from
+the fitted end-state by increasing "Replicates".
+
+> **When to use this:** If you are fitting mid-season (e.g. the observed series ends
+> partway through a flu wave), this option ensures the forecast trajectory begins at a
+> state the model actually passed through — with the correct levels of susceptibles,
+> exposed individuals, and accumulated immunity — rather than projecting forward from an
+> artificial starting point.
 
 ---
 
@@ -5180,3 +5235,5 @@ if __name__ == "__main__":
     app.run()
 
 
+if __name__ == "__main__":
+    app.run()
