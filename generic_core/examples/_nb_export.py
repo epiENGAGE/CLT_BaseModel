@@ -3,7 +3,7 @@
 # Part of model_builder_notebook.py — assembled by build_notebook.py
 
 @app.cell
-def _export_display(config_dict, fit_result, output_dir, json, mo, main_tab):
+def _export_display(config_dict, fit_result, output_dir, json, mo, main_tab, num_age_groups, num_risk_groups, sim_days, sim_mode, n_reps, timesteps, start_date_input, analysis_scenarios):
     mo.stop(main_tab.value != "Export", None)
     _config_str = json.dumps(config_dict, indent=2)
     _fitted_str = json.dumps(fit_result.best_params if fit_result is not None else {}, indent=2)
@@ -36,11 +36,9 @@ START_DATE = "2024-01-01"
 NUM_AGE_GROUPS = 1
 NUM_RISK_GROUPS = 1
 
-# Define scenarios: {name: {param: value}}
-SCENARIOS = {
-    "baseline": {},
-    # "high_beta": {"beta_baseline": 0.4},
-}
+# <<<SCENARIOS_BLOCK>>>
+
+# <<<SUBPOP_OVERRIDES_BLOCK>>>
 
 # ---- Setup ----
 _HERE = Path(__file__).parent
@@ -82,7 +80,8 @@ def _build_schedules(start_date, num_days):
     )
 
 
-def build_model(cfg, param_overrides, rep):
+def build_model(cfg, param_overrides, rep, subpop_overrides=None):
+    # subpop_overrides: list of {param: value} indexed by subpop order (metapop only)
     _cfg = copy.deepcopy(cfg)
     if param_overrides:
         _cfg["params"] = {**_cfg.get("params", {}), **param_overrides}
@@ -114,9 +113,10 @@ def build_model(cfg, param_overrides, rep):
 all_results = {}
 for scenario_name, overrides in SCENARIOS.items():
     print(f"Running scenario: {scenario_name}")
+    _sp_overrides = SUBPOP_PARAM_OVERRIDES.get(scenario_name)
     _reps_data = []
     for _rep in range(NUM_REPS):
-        _m = build_model(config_dict, overrides, _rep)
+        _m = build_model(config_dict, overrides, _rep, subpop_overrides=_sp_overrides)
         _m.simulate_until_day(NUM_DAYS)
         _sps = list(_m.subpop_models.values())
         _h = {}
@@ -146,6 +146,54 @@ _con.close()
 print(f"Results saved to {_db}")
 """
 
+    _scen_lines = [
+        "# Define scenarios: {name: {param: value}}",
+        "SCENARIOS = {",
+        '    "baseline": {},',
+    ]
+    _subpop_lines = [
+        "# Per-subpopulation parameter overrides per scenario (metapop only)",
+        "# Format: {scenario_name: [override_dict_or_None, ...]} indexed by subpop order",
+        "SUBPOP_PARAM_OVERRIDES = {",
+    ]
+    for _scen_tuple in analysis_scenarios:
+        _sn, _ov = _scen_tuple[0], _scen_tuple[1]
+        _sp_list = _scen_tuple[2] if len(_scen_tuple) > 2 else None
+        if _ov and _sn != "baseline":
+            _inner = ", ".join(f'"{_k}": {repr(_v)}' for _k, _v in _ov.items())
+            _scen_lines.append(f"    {repr(_sn)}: {{{_inner}}},")
+        if _sp_list and any(_r for _r in _sp_list):
+            _subpop_lines.append(f"    {repr(_sn)}: {repr(_sp_list)},")
+    _scen_lines.append("}")
+    _subpop_lines.append("}")
+    _scenarios_block = "\n".join(_scen_lines)
+    _subpop_block = "\n".join(_subpop_lines)
+
+    _script = _script.replace("# <<<SCENARIOS_BLOCK>>>", _scenarios_block).replace(
+        "# <<<SUBPOP_OVERRIDES_BLOCK>>>", _subpop_block,
+    ).replace(
+        "NUM_DAYS = 100\n",
+        f"NUM_DAYS = {int(sim_days.value)}\n",
+    ).replace(
+        "NUM_REPS = 1\n",
+        f"NUM_REPS = {int(n_reps.value)}\n",
+    ).replace(
+        "STOCHASTIC = False\n",
+        f"STOCHASTIC = {sim_mode.value == 'Stochastic'}\n",
+    ).replace(
+        "TIMESTEPS_PER_DAY = 7\n",
+        f"TIMESTEPS_PER_DAY = {int(timesteps.value)}\n",
+    ).replace(
+        'START_DATE = "2024-01-01"\n',
+        f'START_DATE = "{start_date_input.value}"\n',
+    ).replace(
+        "NUM_AGE_GROUPS = 1\n",
+        f"NUM_AGE_GROUPS = {num_age_groups}\n",
+    ).replace(
+        "NUM_RISK_GROUPS = 1\n",
+        f"NUM_RISK_GROUPS = {num_risk_groups}\n",
+    )
+
     _config_dl = mo.download(
         data=_config_str.encode(), filename="model_config.json",
         label="Download model_config.json", mimetype="application/json",
@@ -158,9 +206,37 @@ print(f"Results saved to {_db}")
         data=_fitted_str.encode(), filename="fitted_params.json",
         label="Download fitted_params.json", mimetype="application/json",
     )
+    _n_analysis = len(analysis_scenarios)
+    _n_sp_overrides = sum(
+        1 for _t in analysis_scenarios
+        if len(_t) > 2 and _t[2] and any(_r for _r in _t[2])
+    )
+    if _n_analysis:
+        _sp_note_extra = (
+            f" `SUBPOP_PARAM_OVERRIDES` includes **{_n_sp_overrides}** scenario(s) with per-subpop overrides."
+            if _n_sp_overrides else ""
+        )
+        _scen_note = mo.callout(
+            mo.md(
+                f"`SCENARIOS` pre-populated from the Analysis tab "
+                f"(**{_n_analysis}** scenario(s) + baseline). "
+                f"Edit the script to add or change scenarios.{_sp_note_extra}"
+            ),
+            kind="info",
+        )
+    else:
+        _scen_note = mo.callout(
+            mo.md(
+                "No Analysis scenarios defined — only `baseline` is included in `SCENARIOS`. "
+                "Define scenarios in the Analysis tab to pre-populate this block."
+            ),
+            kind="info",
+        )
+
     mo.vstack([
         mo.md("## Export"),
         mo.md("### Generated script  *(edit `SCENARIOS` and top constants before running)*"),
+        _scen_note,
         mo.accordion({"run_simulation.py": mo.md(f"```python\n{_script}\n```")}),
         mo.md("### Downloads"),
         mo.hstack([_config_dl, _script_dl, _fitted_dl], justify="start"),

@@ -58,7 +58,7 @@ def _imports():
     )
     from generic_core.calibration import compute_rsquared
 
-    FitResult = namedtuple("FitResult", ["best_params", "loss_curve", "num_days", "observed", "method", "accepted_params"])
+    FitResult = namedtuple("FitResult", ["best_params", "loss_curve", "num_days", "observed", "method", "accepted_params", "sim_trajectories", "fit_targets", "target_labels", "target_weights", "target_modes", "r2_threshold", "n_ar_accepted"], defaults=[None, None])
 
     return (
         Path, SimpleNamespace, namedtuple, copy, sqlite3, datetime,

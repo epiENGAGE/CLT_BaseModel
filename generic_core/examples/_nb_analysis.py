@@ -37,6 +37,22 @@ def _analysis_param_catalog(scalar_param_names, params_inputs, array_param_names
 
 
 @app.cell
+def _analysis_subpop_names(is_metapop, metapop_folder_input, Path, json):
+    _sp_names = []
+    if is_metapop and metapop_folder_input.value.strip():
+        _mc_path = Path(metapop_folder_input.value.strip()) / "metapop_config.json"
+        if _mc_path.exists():
+            try:
+                with open(_mc_path) as _f:
+                    _mc_cfg = json.load(_f)
+                _sp_names = list(_mc_cfg.get("subpopulations", []))
+            except Exception:
+                pass
+    analysis_sp_names = _sp_names
+    return (analysis_sp_names,)
+
+
+@app.cell
 def _analysis_sensitivity_controls(mo, ANALYSIS_SCALAR_PARAMS, ANALYSIS_ARRAY_PARAMS):
     _scalar_opts = list(ANALYSIS_SCALAR_PARAMS.keys())
     _array_opts = list(ANALYSIS_ARRAY_PARAMS.keys())
@@ -100,8 +116,7 @@ def _analysis_scenario_controls(mo, ANALYSIS_SCALAR_PARAMS, ANALYSIS_ARRAY_PARAM
     def _make_scalar_input(pname):
         _base = float(ANALYSIS_SCALAR_PARAMS.get(pname, 1.0))
         _stop = max(10.0, _base * 20) if _base > 0 else 10.0
-        _step = max(1e-5, round(_base / 1000, 6)) if _base > 0 else 0.001
-        return mo.ui.number(start=0.0, stop=_stop, step=_step, value=_base)
+        return mo.ui.number(start=0.0, stop=_stop, step=None, value=_base)
 
     analysis_scenario_scalar_inputs = mo.ui.array([
         mo.ui.array([_make_scalar_input(pname) for _ in range(_MAX_SC)])
@@ -109,13 +124,96 @@ def _analysis_scenario_controls(mo, ANALYSIS_SCALAR_PARAMS, ANALYSIS_ARRAY_PARAM
     ]) if _scalar_names else mo.ui.array([])
 
     analysis_scenario_array_scales = mo.ui.array([
-        mo.ui.array([mo.ui.number(start=0.0, stop=10.0, step=0.01, value=1.0) for _ in range(_MAX_SC)])
+        mo.ui.array([mo.ui.number(start=0.0, stop=10.0, step=None, value=1.0) for _ in range(_MAX_SC)])
         for _ in _array_names
     ]) if _array_names else mo.ui.array([])
 
     return (
         analysis_n_scenarios, analysis_scenario_names,
         analysis_scenario_scalar_inputs, analysis_scenario_array_scales,
+    )
+
+
+@app.cell
+def _analysis_param_subpop_controls(
+    mo, is_metapop, analysis_sp_names,
+    ANALYSIS_SCALAR_PARAMS, ANALYSIS_ARRAY_PARAMS, ANALYSIS_SCALAR_RANGES,
+    analysis_scalar_param_sel, analysis_array_param_sel, analysis_param_type,
+):
+    _MAX_SC = 5
+    _MAX_SENS = 6
+    _scalar_names = list(ANALYSIS_SCALAR_PARAMS.keys())
+    _array_names = list(ANALYSIS_ARRAY_PARAMS.keys())
+    _sp_opts = list(analysis_sp_names) if analysis_sp_names else []
+
+    # Scenario sub-tab: per-param subpop multiselects
+    analysis_scalar_subpop_sels = mo.ui.array([
+        mo.ui.multiselect(options=_sp_opts, value=[], label=f"Subpops for {pname}")
+        for pname in _scalar_names
+    ]) if is_metapop and _scalar_names and _sp_opts else mo.ui.array([])
+
+    analysis_array_subpop_sels = mo.ui.array([
+        mo.ui.multiselect(options=_sp_opts, value=[], label=f"Subpops for {pname}")
+        for pname in _array_names
+    ]) if is_metapop and _array_names and _sp_opts else mo.ui.array([])
+
+    # Scenario sub-tab: per-param × per-subpop × per-scenario number inputs [param][subpop][scenario]
+    def _make_sp_scalar_input(pname):
+        _base = float(ANALYSIS_SCALAR_PARAMS.get(pname, 1.0))
+        _lo, _hi, _step = ANALYSIS_SCALAR_RANGES.get(pname, (0.0, 10.0, 0.001))
+        return mo.ui.number(start=_lo, stop=_hi, step=None, value=_base)
+
+    analysis_scalar_subpop_inputs = mo.ui.array([
+        mo.ui.array([
+            mo.ui.array([_make_sp_scalar_input(pname) for _ in range(_MAX_SC)])
+            for _ in _sp_opts
+        ])
+        for pname in _scalar_names
+    ]) if is_metapop and _scalar_names and _sp_opts else mo.ui.array([])
+
+    analysis_array_subpop_scales = mo.ui.array([
+        mo.ui.array([
+            mo.ui.array([mo.ui.number(start=0.0, stop=10.0, step=None, value=1.0) for _ in range(_MAX_SC)])
+            for _ in _sp_opts
+        ])
+        for _ in _array_names
+    ]) if is_metapop and _array_names and _sp_opts else mo.ui.array([])
+
+    # Sensitivity sub-tab: one subpop multiselect for the active parameter
+    analysis_sens_subpop_sel = mo.ui.multiselect(
+        options=_sp_opts if _sp_opts else ["(none)"],
+        value=[],
+        label="Apply to subpopulations (empty = all subpops)",
+    ) if is_metapop else mo.ui.multiselect(options=["(none)"], value=[], label="")
+
+    # Sensitivity sub-tab: per-subpop sliders [subpop][value_index], pre-allocated _MAX_SENS per subpop
+    _is_arr = analysis_param_type.value == "Array (scale factor)"
+    _pname_s = analysis_array_param_sel.value if _is_arr else analysis_scalar_param_sel.value
+
+    if is_metapop and _sp_opts:
+        if _is_arr:
+            _sp_sliders_inner = [
+                mo.ui.array([mo.ui.slider(start=0.1, stop=3.0, step=0.05, value=1.0) for _ in range(_MAX_SENS)])
+                for _ in _sp_opts
+            ]
+        else:
+            if _pname_s in ANALYSIS_SCALAR_RANGES:
+                _lo_s, _hi_s, _step_s = ANALYSIS_SCALAR_RANGES[_pname_s]
+                _base_s = float(ANALYSIS_SCALAR_PARAMS.get(_pname_s, 1.0))
+            else:
+                _lo_s, _hi_s, _step_s, _base_s = 0.0, 10.0, 0.01, 1.0
+            _sp_sliders_inner = [
+                mo.ui.array([mo.ui.slider(start=_lo_s, stop=_hi_s, step=_step_s, value=_base_s) for _ in range(_MAX_SENS)])
+                for _ in _sp_opts
+            ]
+        analysis_sens_subpop_sliders = mo.ui.array(_sp_sliders_inner)
+    else:
+        analysis_sens_subpop_sliders = mo.ui.array([])
+
+    return (
+        analysis_scalar_subpop_sels, analysis_array_subpop_sels,
+        analysis_scalar_subpop_inputs, analysis_array_subpop_scales,
+        analysis_sens_subpop_sel, analysis_sens_subpop_sliders,
     )
 
 
@@ -176,11 +274,17 @@ def _analysis_display(
     analysis_sim_days, analysis_n_reps, analysis_timesteps, analysis_stochastic, analysis_run_button,
     analysis_comp_checkboxes,
     ANALYSIS_SCALAR_PARAMS, ANALYSIS_ARRAY_PARAMS,
+    is_metapop, analysis_sp_names,
+    analysis_sens_subpop_sel, analysis_sens_subpop_sliders,
+    analysis_scalar_subpop_sels, analysis_array_subpop_sels,
+    analysis_scalar_subpop_inputs, analysis_array_subpop_scales,
 ):
     mo.stop(main_tab.value != "Analysis", None)
     _n_sc = int(analysis_n_scenarios.value)
+    _n_values = int(analysis_n_values.value)
     _scalar_names = list(ANALYSIS_SCALAR_PARAMS.keys())
     _array_names = list(ANALYSIS_ARRAY_PARAMS.keys())
+    _use_subpop = is_metapop and bool(analysis_sp_names)
 
     # --- Sensitivity sub-tab ---
     _is_array = analysis_param_type.value == "Array (scale factor)"
@@ -218,33 +322,78 @@ def _analysis_display(
             kind="success",
         )
 
-    _sens_ui = mo.vstack([
+    _sens_parts = [
         mo.md("**Vary one parameter across N values — each value becomes a scenario.**"),
         mo.hstack([analysis_param_type, _param_w, analysis_n_values], justify="start"),
-        mo.md(f"Varying `{_pname}` ({_fmt}):"),
-        mo.hstack(list(analysis_sens_sliders), wrap=True),
-        _sens_preview,
-    ])
+    ]
+    if _use_subpop:
+        _sens_parts.append(mo.hstack([analysis_sens_subpop_sel], justify="start"))
+        _sel_sens_sps = list(analysis_sens_subpop_sel.value or [])
+        if _sel_sens_sps:
+            _sens_parts.append(mo.callout(
+                mo.md(
+                    "**Global sliders** (below) apply to all subpops not listed above. "
+                    "**Per-subpop sliders** override those subpops for each scenario index i."
+                ),
+                kind="info",
+            ))
+
+    _sens_parts.append(mo.md(f"Varying `{_pname}` ({_fmt}):"))
+    _sens_parts.append(mo.hstack(list(analysis_sens_sliders), wrap=True))
+
+    if _use_subpop:
+        _sel_sens_sps = list(analysis_sens_subpop_sel.value or [])
+        for _sp in _sel_sens_sps:
+            if _sp in analysis_sp_names:
+                _sp_idx = analysis_sp_names.index(_sp)
+                if _sp_idx < len(analysis_sens_subpop_sliders):
+                    _sp_slides = list(analysis_sens_subpop_sliders[_sp_idx])[:_n_values]
+                    _sens_parts.append(mo.md(f"↳ `{_pname}` for **{_sp}**:"))
+                    _sens_parts.append(mo.hstack(_sp_slides, wrap=True))
+
+    _sens_parts.append(_sens_preview)
+    _sens_ui = mo.vstack(_sens_parts)
 
     # --- Scenario sub-tab ---
-    _header = mo.hstack(
-        [mo.md("**Parameter**")] + [analysis_scenario_names[j] for j in range(_n_sc)],
-        widths="equal",
-    )
-    _scalar_rows = [
-        mo.hstack(
-            [mo.md(f"`{_pn}`")] + [analysis_scenario_scalar_inputs[_i][j] for j in range(_n_sc)],
-            widths="equal",
-        )
-        for _i, _pn in enumerate(_scalar_names)
-    ]
-    _array_rows = [
-        mo.hstack(
-            [mo.md(f"`{_pn}` ×scale")] + [analysis_scenario_array_scales[_k][j] for j in range(_n_sc)],
-            widths="equal",
-        )
-        for _k, _pn in enumerate(_array_names)
-    ]
+    _show_sp_col = _use_subpop
+
+    _header_items = [mo.md("**Parameter**")] + [analysis_scenario_names[j] for j in range(_n_sc)]
+    if _show_sp_col:
+        _header_items.append(mo.md("**Subpopulations**"))
+    _header = mo.hstack(_header_items, justify="start")
+
+    _scalar_rows = []
+    for _i, _pn in enumerate(_scalar_names):
+        _row_items = [mo.md(f"`{_pn}`")] + [analysis_scenario_scalar_inputs[_i][j] for j in range(_n_sc)]
+        if _show_sp_col and _i < len(analysis_scalar_subpop_sels):
+            _row_items.append(analysis_scalar_subpop_sels[_i])
+        _scalar_rows.append(mo.hstack(_row_items, justify="start"))
+        if _show_sp_col and _i < len(analysis_scalar_subpop_sels):
+            _sel_sps_i = list(analysis_scalar_subpop_sels.value[_i]) if _i < len(analysis_scalar_subpop_sels.value) else []
+            for _sp in _sel_sps_i:
+                if _sp in analysis_sp_names:
+                    _sp_idx = analysis_sp_names.index(_sp)
+                    if _i < len(analysis_scalar_subpop_inputs) and _sp_idx < len(analysis_scalar_subpop_inputs[_i]):
+                        _sp_inputs = [analysis_scalar_subpop_inputs[_i][_sp_idx][j] for j in range(_n_sc)]
+                        _sp_row_items = [mo.md(f"  ↳ *{_sp}*")] + _sp_inputs + [mo.md("")]
+                        _scalar_rows.append(mo.hstack(_sp_row_items, justify="start"))
+
+    _array_rows = []
+    for _k, _pn in enumerate(_array_names):
+        _arr_row_items = [mo.md(f"`{_pn}` ×scale")] + [analysis_scenario_array_scales[_k][j] for j in range(_n_sc)]
+        if _show_sp_col and _k < len(analysis_array_subpop_sels):
+            _arr_row_items.append(analysis_array_subpop_sels[_k])
+        _array_rows.append(mo.hstack(_arr_row_items, justify="start"))
+        if _show_sp_col and _k < len(analysis_array_subpop_sels):
+            _sel_sps_k = list(analysis_array_subpop_sels.value[_k]) if _k < len(analysis_array_subpop_sels.value) else []
+            for _sp in _sel_sps_k:
+                if _sp in analysis_sp_names:
+                    _sp_idx = analysis_sp_names.index(_sp)
+                    if _k < len(analysis_array_subpop_scales) and _sp_idx < len(analysis_array_subpop_scales[_k]):
+                        _sp_scale_inputs = [analysis_array_subpop_scales[_k][_sp_idx][j] for j in range(_n_sc)]
+                        _arr_sp_row = [mo.md(f"  ↳ *{_sp}* ×scale")] + _sp_scale_inputs + [mo.md("")]
+                        _array_rows.append(mo.hstack(_arr_sp_row, justify="start"))
+
     _scen_body = [mo.md("**Define N scenarios with per-parameter overrides.**"), analysis_n_scenarios, _header]
     if _scalar_rows:
         _scen_body += [mo.md("*Scalar parameters:*")] + _scalar_rows
@@ -281,25 +430,58 @@ def _analysis_define_scenarios(
     analysis_n_scenarios, analysis_scenario_names,
     analysis_scenario_scalar_inputs, analysis_scenario_array_scales,
     ANALYSIS_SCALAR_PARAMS, ANALYSIS_ARRAY_PARAMS, np,
+    is_metapop, analysis_sp_names,
+    analysis_sens_subpop_sel, analysis_sens_subpop_sliders,
+    analysis_scalar_subpop_sels, analysis_array_subpop_sels,
+    analysis_scalar_subpop_inputs, analysis_array_subpop_scales,
 ):
     _scalar_names = list(ANALYSIS_SCALAR_PARAMS.keys())
     _array_names = list(ANALYSIS_ARRAY_PARAMS.keys())
+    _use_subpop = is_metapop and bool(analysis_sp_names)
     analysis_scenarios = []
+
+    def _make_per_subpop_list(sp_names, sp_to_override_dict):
+        if not sp_to_override_dict:
+            return None
+        _result = [sp_to_override_dict.get(_sp) for _sp in sp_names]
+        return _result if any(_r for _r in _result) else None
 
     if analysis_sub_tab.value == "Sensitivity":
         _is_array = analysis_param_type.value == "Array (scale factor)"
         if _is_array:
             _pname = analysis_array_param_sel.value
             _base_arr = np.asarray(ANALYSIS_ARRAY_PARAMS.get(_pname, [1.0]))
-            for _v in list(dict.fromkeys(analysis_sens_sliders.value)):
-                analysis_scenarios.append((
-                    f"{_pname} ×{_v:.3g}",
-                    {_pname: (_base_arr * _v).tolist()},
-                ))
+            for _i, _v in enumerate(list(dict.fromkeys(analysis_sens_sliders.value))):
+                _global_ov = {_pname: (_base_arr * _v).tolist()}
+                _per_subpop = None
+                if _use_subpop:
+                    _sel_sps = list(analysis_sens_subpop_sel.value or [])
+                    _sp_ov = {}
+                    for _sp in _sel_sps:
+                        if _sp in analysis_sp_names:
+                            _sp_idx = analysis_sp_names.index(_sp)
+                            _sp_vals = list(analysis_sens_subpop_sliders.value)
+                            if _sp_idx < len(_sp_vals) and _i < len(_sp_vals[_sp_idx]):
+                                _sp_scale = float(_sp_vals[_sp_idx][_i])
+                                _sp_ov[_sp] = {_pname: (_base_arr * _sp_scale).tolist()}
+                    _per_subpop = _make_per_subpop_list(analysis_sp_names, _sp_ov)
+                analysis_scenarios.append((f"{_pname} ×{_v:.3g}", _global_ov, _per_subpop))
         else:
             _pname = analysis_scalar_param_sel.value
-            for _v in list(dict.fromkeys(analysis_sens_sliders.value)):
-                analysis_scenarios.append((f"{_pname}={_v:.4g}", {_pname: float(_v)}))
+            for _i, _v in enumerate(list(dict.fromkeys(analysis_sens_sliders.value))):
+                _global_ov = {_pname: float(_v)}
+                _per_subpop = None
+                if _use_subpop:
+                    _sel_sps = list(analysis_sens_subpop_sel.value or [])
+                    _sp_ov = {}
+                    for _sp in _sel_sps:
+                        if _sp in analysis_sp_names:
+                            _sp_idx = analysis_sp_names.index(_sp)
+                            _sp_vals = list(analysis_sens_subpop_sliders.value)
+                            if _sp_idx < len(_sp_vals) and _i < len(_sp_vals[_sp_idx]):
+                                _sp_ov[_sp] = {_pname: float(_sp_vals[_sp_idx][_i])}
+                    _per_subpop = _make_per_subpop_list(analysis_sp_names, _sp_ov)
+                analysis_scenarios.append((f"{_pname}={_v:.4g}", _global_ov, _per_subpop))
     else:
         _n = int(analysis_n_scenarios.value)
         for j in range(_n):
@@ -312,7 +494,30 @@ def _analysis_define_scenarios(
                 if _scale != 1.0:
                     _base = np.asarray(ANALYSIS_ARRAY_PARAMS[_pn])
                     _overrides[_pn] = (_base * _scale).tolist()
-            analysis_scenarios.append((_name, _overrides))
+            _per_subpop = None
+            if _use_subpop:
+                _sp_ov_by_name = {}
+                for _i, _pn in enumerate(_scalar_names):
+                    _sel_sps = list(analysis_scalar_subpop_sels.value[_i]) if _i < len(analysis_scalar_subpop_sels.value) else []
+                    for _sp in _sel_sps:
+                        if _sp in analysis_sp_names:
+                            _sp_idx = analysis_sp_names.index(_sp)
+                            _sp_vals = list(analysis_scalar_subpop_inputs.value)
+                            if _i < len(_sp_vals) and _sp_idx < len(_sp_vals[_i]) and j < len(_sp_vals[_i][_sp_idx]):
+                                _sp_ov_by_name.setdefault(_sp, {})[_pn] = float(_sp_vals[_i][_sp_idx][j])
+                for _k, _pn in enumerate(_array_names):
+                    _sel_sps = list(analysis_array_subpop_sels.value[_k]) if _k < len(analysis_array_subpop_sels.value) else []
+                    for _sp in _sel_sps:
+                        if _sp in analysis_sp_names:
+                            _sp_idx = analysis_sp_names.index(_sp)
+                            _sp_vals = list(analysis_array_subpop_scales.value)
+                            if _k < len(_sp_vals) and _sp_idx < len(_sp_vals[_k]) and j < len(_sp_vals[_k][_sp_idx]):
+                                _sp_scale = float(_sp_vals[_k][_sp_idx][j])
+                                if _sp_scale != 1.0:
+                                    _base = np.asarray(ANALYSIS_ARRAY_PARAMS[_pn])
+                                    _sp_ov_by_name.setdefault(_sp, {})[_pn] = (_base * _sp_scale).tolist()
+                _per_subpop = _make_per_subpop_list(analysis_sp_names, _sp_ov_by_name)
+            analysis_scenarios.append((_name, _overrides, _per_subpop))
 
     return (analysis_scenarios,)
 
@@ -390,7 +595,9 @@ def _run_analysis(
     _all = {}
     with mo.status.spinner(f"Running {len(analysis_scenarios)} scenario(s) × {_n_reps} rep(s)..."):
         try:
-            for _scen_name, _overrides in analysis_scenarios:
+            for _scen_tuple in analysis_scenarios:
+                _scen_name, _overrides = _scen_tuple[0], _scen_tuple[1]
+                _per_subpop = _scen_tuple[2] if len(_scen_tuple) > 2 else None
                 _reps_hists = []
                 for _rep in range(_n_reps):
                     if not is_metapop:
@@ -407,6 +614,7 @@ def _run_analysis(
                             seed_offset=_rep, seed_base=_seed_b, ts_per_day=_ts,
                             stochastic=_stoch, tvs=_tvs, save_daily=True,
                             param_overrides=_overrides or None,
+                            param_overrides_per_subpop=_per_subpop,
                             travel_config=metapop_travel_config,
                         )
                     _m.simulate_until_day(_num_days)
@@ -517,6 +725,78 @@ def _analysis_plot_compartments(
     _fig.autofmt_xdate()
     plt.tight_layout()
     mo.vstack([mo.md("## Analysis — Compartment Histories"), _fig])
+    return
+
+
+@app.cell
+def _analysis_detailed_download(
+    analysis_results, np, pd, mo, main_tab,
+):
+    mo.stop(main_tab.value != "Analysis", None)
+    mo.stop(analysis_results is None, mo.md(""))
+
+    _scens = analysis_results["scenarios"]
+    _sp_names = analysis_results["subpop_names"]
+    _all_keys = analysis_results["compartments"] + analysis_results["tvs"]
+    _start = analysis_results.get("start_date", "2024-01-01")
+
+    _rows = []
+    for _scen_name, _reps in _scens.items():
+        for _rep_idx, _rep_data in enumerate(_reps):
+            # Aggregate across subpops for each key: shape (days, A, R)
+            _agg_by_key = {}
+            for _key in _all_keys:
+                _arrays = [_rep_data[_sp][_key] for _sp in _sp_names if _key in _rep_data.get(_sp, {})]
+                if _arrays:
+                    _agg_by_key[_key] = np.stack(_arrays, axis=0).sum(axis=0)
+
+            for _sp in _sp_names + ["aggregated"]:
+                for _key in _all_keys:
+                    if _sp == "aggregated":
+                        _arr = _agg_by_key.get(_key)
+                    else:
+                        _arr = _rep_data.get(_sp, {}).get(_key)
+                    if _arr is None:
+                        continue
+                    _arr = np.array(_arr)  # (days, A, R)
+                    _n_days, _n_ages, _n_risks = _arr.shape
+                    _dates = pd.date_range(start=_start, periods=_n_days, freq="D")
+
+                    for _age_idx in range(_n_ages):
+                        _series = _arr[:, _age_idx, :].sum(axis=1)
+                        for _day_i, (_date, _val) in enumerate(zip(_dates, _series)):
+                            _rows.append({
+                                "date": _date.date().isoformat(),
+                                "scenario": _scen_name,
+                                "subpopulation": _sp,
+                                "age_group": _age_idx,
+                                "replicate": _rep_idx,
+                                "metric": _key,
+                                "value": float(_val),
+                            })
+
+                    # Aggregated age group (sum over all ages and risks)
+                    _series_agg = _arr.sum(axis=(1, 2))
+                    for _day_i, (_date, _val) in enumerate(zip(_dates, _series_agg)):
+                        _rows.append({
+                            "date": _date.date().isoformat(),
+                            "scenario": _scen_name,
+                            "subpopulation": _sp,
+                            "age_group": "aggregated",
+                            "replicate": _rep_idx,
+                            "metric": _key,
+                            "value": float(_val),
+                        })
+
+    _detail_df = pd.DataFrame(_rows) if _rows else pd.DataFrame(
+        columns=["date", "scenario", "subpopulation", "age_group", "replicate", "metric", "value"]
+    )
+    _detail_csv_dl = mo.download(
+        data=_detail_df.to_csv(index=False).encode(),
+        filename="analysis_detailed_timeseries.csv",
+        label="Download detailed timeseries CSV",
+    )
+    mo.vstack([_detail_csv_dl])
     return
 
 

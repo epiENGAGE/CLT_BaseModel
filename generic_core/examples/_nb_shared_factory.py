@@ -118,7 +118,7 @@ def _shared_model_factory(
                 for _m, _arr in _ic.get("epi_metrics", {}).items():
                     _epi_init[_m] = np.array(_arr, dtype=float)
             _sp_overrides = dict(param_overrides or {})
-            if param_overrides_per_subpop and _si < len(param_overrides_per_subpop):
+            if param_overrides_per_subpop and _si < len(param_overrides_per_subpop) and param_overrides_per_subpop[_si]:
                 _sp_overrides.update(param_overrides_per_subpop[_si])
             _sp_overrides.update(config.get("subpop_params", {}).get(_sp_name, {}))
             _cfg = config

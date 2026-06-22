@@ -28,25 +28,78 @@ def _forecast_ui(mo):
 def _forecast_display(
     forecast_use_fitted, forecast_params_path, forecast_from_fitted_state,
     forecast_horizon, forecast_n_reps, forecast_stochastic, forecast_run_button,
-    fit_result, mo, main_tab,
+    fit_result, mo, main_tab, json, Path,
 ):
     mo.stop(main_tab.value != "Forecast", None)
     _path_w = forecast_params_path if not forecast_use_fitted.value else mo.md("")
 
+    # Multi-set note — shown when AR or gradient replications produced multiple param sets
+    _ar_note = mo.md("")
+    _is_ar_fitted = False
+    _n_accepted = 0
+    _fit_method_display = "ar"
+    if forecast_use_fitted.value:
+        _is_ar_fitted = (
+            fit_result is not None
+            and len(fit_result.accepted_params) > 1
+        )
+        if _is_ar_fitted:
+            _n_accepted = len(fit_result.accepted_params)
+            _fit_method_display = fit_result.method
+    else:
+        _pp = forecast_params_path.value.strip()
+        if _pp:
+            try:
+                with open(Path(_pp).expanduser()) as _f:
+                    _loaded_preview = json.load(_f)
+                _loaded_accepted = _loaded_preview.get("accepted_params", [])
+                if len(_loaded_accepted) > 1:
+                    _is_ar_fitted = True
+                    _n_accepted = len(_loaded_accepted)
+                    _fit_method_display = _loaded_preview.get("method", "ar")
+            except Exception:
+                pass
+
+    if _is_ar_fitted:
+        _reps_val = int(forecast_n_reps.value)
+        _set_noun = (
+            "accepted parameter set(s)" if _fit_method_display == "ar"
+            else "fitted replication(s)"
+        )
+        _method_label = (
+            "accept-reject" if _fit_method_display == "ar"
+            else _fit_method_display
+        )
+        _set_header = f"**{_n_accepted} {_set_noun}** from {_method_label} fitting."
+        if _reps_val < _n_accepted:
+            _ar_note = mo.callout(
+                mo.md(
+                    f"{_set_header} "
+                    f"Replicates ({_reps_val}) < {_n_accepted} sets — **{_reps_val}** sets will be "
+                    "sampled without replacement, each seeding one trajectory."
+                ),
+                kind="success",
+            )
+        else:
+            _base = _reps_val // _n_accepted
+            _extra = _reps_val % _n_accepted
+            if _extra == 0:
+                _ar_note_text = (
+                    f"{_set_header} "
+                    f"Each will seed **{_base}** replicate(s) — **{_reps_val}** trajectories total."
+                )
+            else:
+                _ar_note_text = (
+                    f"{_set_header} "
+                    f"Each will seed **{_base}** replicate(s); **{_extra}** set(s) sampled without "
+                    f"replacement will run one extra — **{_reps_val}** trajectories total."
+                )
+            _ar_note = mo.callout(mo.md(_ar_note_text), kind="success")
+
     _fitted_state_note = mo.md("")
     if forecast_from_fitted_state.value:
         if fit_result is not None and forecast_use_fitted.value:
-            _n_accepted = len(fit_result.accepted_params)
-            _method = fit_result.method
-            if _method == "ar" and _n_accepted > 1:
-                _fitted_state_note = mo.callout(
-                    mo.md(
-                        f"**{_n_accepted} accepted parameter set(s)** from accept-reject fitting. "
-                        "Each will warm-up through the fit period and seed a separate forecast trajectory."
-                    ),
-                    kind="success",
-                )
-            else:
+            if not _is_ar_fitted:
                 _fitted_state_note = mo.callout(
                     mo.md(
                         "Will run a deterministic warm-up through the fit period, then launch "
@@ -57,8 +110,10 @@ def _forecast_display(
         else:
             _fitted_state_note = mo.callout(
                 mo.md(
-                    "**Start from fitted end-state** requires **Use fitted params from Fitting tab** "
-                    "to be enabled and fitting to have been run."
+                    "**Start from fitted end-state** requires either:\n\n"
+                    "- **Use fitted params from Fitting tab** enabled with fitting already run, or\n"
+                    "- A JSON file (via the path field) exported from the Fitting tab, "
+                    "which includes `num_days`, `method`, and `accepted_params`."
                 ),
                 kind="warn",
             )
@@ -72,6 +127,7 @@ def _forecast_display(
         mo.hstack([forecast_horizon, forecast_n_reps], justify="start"),
         forecast_stochastic,
         forecast_from_fitted_state,
+        _ar_note,
         _fitted_state_note,
         mo.md("**Step 3 — Run**"),
         forecast_run_button,
@@ -94,22 +150,37 @@ def _run_forecast(
     forecast_result = None
     if forecast_run_button.value:
         _fitted_params = {}
+        _fit_meta = {"num_days": 0, "method": "ar", "accepted_params": []}
         if forecast_use_fitted.value:
             mo.stop(
                 fit_result is None,
                 mo.callout(mo.md("**No fitting results.** Run fitting first or disable 'Use fitted params'."), kind="warn"),
             )
             _fitted_params = dict(fit_result.best_params)
+            _fit_meta = {
+                "num_days": fit_result.num_days,
+                "method": fit_result.method,
+                "accepted_params": list(fit_result.accepted_params),
+            }
         else:
             _pp = forecast_params_path.value.strip()
             if _pp:
                 try:
                     with open(Path(_pp).expanduser()) as _f:
-                        _fitted_params = json.load(_f)
+                        _loaded = json.load(_f)
+                    if "best_params" in _loaded:
+                        _fitted_params = _loaded["best_params"]
+                        _fit_meta = {
+                            "num_days": _loaded.get("num_days", 0),
+                            "method": _loaded.get("method", "ar"),
+                            "accepted_params": _loaded.get("accepted_params", []),
+                        }
+                    else:
+                        _fitted_params = _loaded
                 except Exception as _exc:
                     mo.stop(True, mo.callout(mo.md(f"**Could not load fitted params:** {_exc}"), kind="danger"))
 
-        _fit_n = fit_result.num_days if (fit_result is not None and forecast_use_fitted.value) else 0
+        _fit_n = _fit_meta["num_days"]
         _horizon = int(forecast_horizon.value)
         _total_days = _fit_n + _horizon
         _reps = int(forecast_n_reps.value)
@@ -131,19 +202,31 @@ def _run_forecast(
 
         _histories = []
 
+        # Build param sets and run schedule (shared by both forecast paths)
+        _param_sets = _fit_meta["accepted_params"] if _fit_meta["accepted_params"] else [_fitted_params]
+        _n_accepted = len(_param_sets)
+        _is_ar = _n_accepted > 1  # distribute across AR accepted sets OR gradient replications
+        _rng_sched = np.random.default_rng(_seed_b)
+        if _is_ar and _reps < _n_accepted:
+            _selected = _rng_sched.choice(_n_accepted, size=_reps, replace=False)
+            _run_schedule = [(int(_i), 0) for _i in _selected]
+        elif _is_ar:
+            _base = _reps // _n_accepted
+            _extra = _reps % _n_accepted
+            _run_schedule = [(_i, _r) for _i in range(_n_accepted) for _r in range(_base)]
+            if _extra > 0:
+                _extra_idx = _rng_sched.choice(_n_accepted, size=_extra, replace=False)
+                _run_schedule += [(int(_i), _base) for _i in _extra_idx]
+        else:
+            _run_schedule = [(0, _r) for _r in range(_reps)]
+
         if forecast_from_fitted_state.value:
             # Two-phase: warmup through fit period → extract end-state → run forecast
             mo.stop(
-                not forecast_use_fitted.value or fit_result is None,
-                mo.callout(mo.md("**Start from fitted end-state** requires 'Use fitted params from Fitting tab' to be enabled."), kind="warn"),
-            )
-            mo.stop(
                 _fit_n == 0,
-                mo.callout(mo.md("**Start from fitted end-state** requires a non-zero fit period. Run fitting first."), kind="warn"),
+                mo.callout(mo.md("**Start from fitted end-state** requires a non-zero fit period. Run fitting first, or load a JSON exported from the Fitting tab (which includes `num_days`)."), kind="warn"),
             )
 
-            # Ensemble of param sets: all accepted for AR, otherwise just best params
-            _param_sets = fit_result.accepted_params if fit_result.accepted_params else [_fitted_params]
             _metric_names = [_m["name"] for _m in config_dict.get("epi_metrics", [])]
             _fcast_start = (
                 datetime.datetime.strptime(_start, "%Y-%m-%d")
@@ -151,7 +234,6 @@ def _run_forecast(
             ).strftime("%Y-%m-%d")
 
             def _extract_end_states(metapop_model, comps, metric_names):
-                """Return list of (comp_init, epi_init) per subpop from the last simulated day."""
                 _states = []
                 for _sp in metapop_model.subpop_models.values():
                     _comp = {
@@ -171,35 +253,42 @@ def _run_forecast(
 
             with mo.status.spinner("Running warmup + forecast from fitted state..."):
                 try:
-                    for _pset_idx, _pset in enumerate(_param_sets):
-                        # Phase 1: deterministic warmup through the fit period
-                        if not is_metapop:
-                            _wm, _, _ = make_single_pop_metapop(
-                                config_dict, _start, _fit_n, _ci,
-                                seed_offset=_pset_idx, seed_base=_seed_b, ts_per_day=_ts,
-                                stochastic=False, tvs=_tvs, save_daily=True,
-                                param_overrides=_pset or None,
-                                travel_config=metapop_travel_config,
-                            )
-                        else:
-                            _wm, _ = make_metapop_from_folder(
-                                metapop_folder_input.value, config_dict, _start, _fit_n,
-                                list(compartments),
-                                seed_offset=_pset_idx, seed_base=_seed_b, ts_per_day=_ts,
-                                stochastic=False, tvs=_tvs, save_daily=True,
-                                param_overrides=_pset or None,
-                                travel_config=metapop_travel_config,
-                            )
-                        _wm.simulate_until_day(_fit_n)
-                        _warmup_hist = extract_history(_wm, list(compartments), tvs=_tvs)
-                        _end_states = _extract_end_states(_wm, list(compartments), _metric_names)
+                    _warmup_cache = {}
+                    for _traj_idx, (_pset_idx, _rep) in enumerate(_run_schedule):
+                        _pset = _param_sets[_pset_idx]
 
-                        # Phase 2: stochastic forecast from end-state, one rep per param set
+                        # Phase 1: deterministic warmup — cached per param set
+                        if _pset_idx not in _warmup_cache:
+                            if not is_metapop:
+                                _wm, _, _ = make_single_pop_metapop(
+                                    config_dict, _start, _fit_n, _ci,
+                                    seed_offset=_pset_idx, seed_base=_seed_b, ts_per_day=_ts,
+                                    stochastic=False, tvs=_tvs, save_daily=True,
+                                    param_overrides=_pset or None,
+                                    travel_config=metapop_travel_config,
+                                )
+                            else:
+                                _wm, _ = make_metapop_from_folder(
+                                    metapop_folder_input.value, config_dict, _start, _fit_n,
+                                    list(compartments),
+                                    seed_offset=_pset_idx, seed_base=_seed_b, ts_per_day=_ts,
+                                    stochastic=False, tvs=_tvs, save_daily=True,
+                                    param_overrides=_pset or None,
+                                    travel_config=metapop_travel_config,
+                                )
+                            _wm.simulate_until_day(_fit_n)
+                            _warmup_cache[_pset_idx] = (
+                                extract_history(_wm, list(compartments), tvs=_tvs),
+                                _extract_end_states(_wm, list(compartments), _metric_names),
+                            )
+                        _warmup_hist, _end_states = _warmup_cache[_pset_idx]
+
+                        # Phase 2: stochastic forecast from end-state
                         if not is_metapop:
                             _end_comp, _end_epi = _end_states[0]
                             _fm, _, _ = make_single_pop_metapop(
                                 config_dict, _fcast_start, _horizon, _end_comp,
-                                seed_offset=_pset_idx, seed_base=_seed_b, ts_per_day=_ts,
+                                seed_offset=_traj_idx, seed_base=_seed_b, ts_per_day=_ts,
                                 stochastic=_stoch, tvs=_tvs, save_daily=True,
                                 epi_metric_init=_end_epi or None,
                                 param_overrides=_pset or None,
@@ -209,7 +298,7 @@ def _run_forecast(
                             _fm, _ = make_metapop_from_folder(
                                 metapop_folder_input.value, config_dict, _fcast_start, _horizon,
                                 list(compartments),
-                                seed_offset=_pset_idx, seed_base=_seed_b, ts_per_day=_ts,
+                                seed_offset=_traj_idx, seed_base=_seed_b, ts_per_day=_ts,
                                 stochastic=_stoch, tvs=_tvs, save_daily=True,
                                 param_overrides=_pset or None,
                                 travel_config=metapop_travel_config,
@@ -228,24 +317,25 @@ def _run_forecast(
                     mo.stop(True, mo.callout(mo.md(f"**Forecast error:** {_exc}"), kind="danger"))
 
         else:
-            # Original path: single simulation from Step 7 initial conditions
+            # Standard path: run from Step 7 initial conditions, using run schedule for param sets
             with mo.status.spinner("Running forecast..."):
                 try:
-                    for _rep in range(_reps):
+                    for _traj_idx, (_pset_idx, _rep) in enumerate(_run_schedule):
+                        _pset = _param_sets[_pset_idx]
                         if not is_metapop:
                             _m, _, _ = make_single_pop_metapop(
                                 config_dict, _start, _total_days, _ci,
-                                seed_offset=_rep, seed_base=_seed_b, ts_per_day=_ts,
+                                seed_offset=_traj_idx, seed_base=_seed_b, ts_per_day=_ts,
                                 stochastic=_stoch, tvs=_tvs, save_daily=True,
-                                param_overrides=_fitted_params or None,
+                                param_overrides=_pset or None,
                                 travel_config=metapop_travel_config,
                             )
                         else:
                             _m, _ = make_metapop_from_folder(
                                 metapop_folder_input.value, config_dict, _start, _total_days, list(compartments),
-                                seed_offset=_rep, seed_base=_seed_b, ts_per_day=_ts,
+                                seed_offset=_traj_idx, seed_base=_seed_b, ts_per_day=_ts,
                                 stochastic=_stoch, tvs=_tvs, save_daily=True,
-                                param_overrides=_fitted_params or None,
+                                param_overrides=_pset or None,
                                 travel_config=metapop_travel_config,
                             )
                         _m.simulate_until_day(_total_days)
@@ -283,7 +373,17 @@ def _forecast_autosave(forecast_result, output_dir, json):
 
 
 @app.cell
-def _forecast_results_display(forecast_result, np, plt, mo, main_tab):
+def _forecast_chart_style_ui(mo):
+    forecast_chart_style = mo.ui.radio(
+        options={"Median + 95% CI": "band", "Spaghetti lines": "spaghetti"},
+        value="Median + 95% CI",
+        label="Chart style",
+    )
+    return (forecast_chart_style,)
+
+
+@app.cell
+def _forecast_results_display(forecast_result, forecast_chart_style, np, plt, mo, main_tab):
     mo.stop(main_tab.value != "Forecast", None)
     mo.stop(forecast_result is None, mo.md("*Run forecast to see results.*"))
     _hists = forecast_result["histories"]
@@ -292,6 +392,7 @@ def _forecast_results_display(forecast_result, np, plt, mo, main_tab):
     _total = forecast_result["total_days"]
     _days = np.arange(1, _total + 1)
     _colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+    _style = forecast_chart_style.value
     _fig, _ax = plt.subplots(figsize=(12, 5))
     for _ci, _comp in enumerate(_comps):
         _color = _colors[_ci % len(_colors)]
@@ -300,11 +401,17 @@ def _forecast_results_display(forecast_result, np, plt, mo, main_tab):
             continue
         _mat = np.stack(_arrays, axis=0)
         _n = min(len(_days), _mat.shape[1])
-        _med = np.median(_mat[:, :_n], axis=0)
-        _lo = np.percentile(_mat[:, :_n], 2.5, axis=0)
-        _hi = np.percentile(_mat[:, :_n], 97.5, axis=0)
-        _ax.plot(_days[:_n], _med, color=_color, linewidth=2, label=f"{_comp} (median)")
-        _ax.fill_between(_days[:_n], _lo, _hi, color=_color, alpha=0.2)
+        if _style == "spaghetti":
+            for _row in _mat:
+                _ax.plot(_days[:_n], _row[:_n], color=_color, linewidth=0.8, alpha=0.4)
+            _med = np.median(_mat[:, :_n], axis=0)
+            _ax.plot(_days[:_n], _med, color=_color, linewidth=2, label=f"{_comp} (median)")
+        else:
+            _med = np.median(_mat[:, :_n], axis=0)
+            _lo = np.percentile(_mat[:, :_n], 2.5, axis=0)
+            _hi = np.percentile(_mat[:, :_n], 97.5, axis=0)
+            _ax.plot(_days[:_n], _med, color=_color, linewidth=2, label=f"{_comp} (median)")
+            _ax.fill_between(_days[:_n], _lo, _hi, color=_color, alpha=0.2)
     if _fit_n > 0:
         _ax.axvline(_fit_n, color="black", linestyle="--", alpha=0.6, label=f"Fit end (day {_fit_n})")
         _ax.axvspan(0, _fit_n, alpha=0.05, color="gray")
@@ -326,6 +433,7 @@ def _forecast_results_display(forecast_result, np, plt, mo, main_tab):
         )
     mo.vstack([
         mo.md("## Forecast Results"),
+        forecast_chart_style,
         _fig,
         mo.md(
             "### Summary\n\n"

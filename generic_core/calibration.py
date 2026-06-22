@@ -43,11 +43,13 @@ def compute_rsquared(
         raise ValueError(
             "Reference and simulated timeseries must have the same length."
         )
-    ref = np.asarray(reference_timeseries)
-    sim = np.asarray(simulated_timeseries)
+    ref = np.asarray(reference_timeseries, dtype=float)
+    sim = np.asarray(simulated_timeseries, dtype=float)
     ybar = ref.mean(axis=0)
     ss_residual = np.sum(np.square(sim - ref))
     ss_total = np.sum(np.square(ref - ybar))
+    if ss_total == 0:
+        return 1.0 if ss_residual == 0 else -np.inf
     return 1.0 - ss_residual / ss_total
 
 

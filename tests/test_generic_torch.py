@@ -10,8 +10,9 @@ Deterministic path test (task 4.6):
     tolerance used in the existing flu torch tests in test_flu_metapop.py).
 
 Gradient flow test (task 4.6):
-    Run generic_torch_simulate_calibration_target, compute scalar loss, call
-    .backward(), assert gradients exist on beta_baseline and IP_to_ISH_prop.
+    Run generic_torch_simulate_calibration_target (returns dict[str, Tensor]),
+    compute scalar loss, call .backward(), assert gradients exist on
+    beta_baseline and IP_to_ISH_prop.
 """
 
 import numpy as np
@@ -209,9 +210,9 @@ def test_MV_torch_history_matches_flu(both_torch_histories, subpop_ix):
 
 def test_gradient_flows_through_calibration_target():
     """
-    Run generic_torch_simulate_calibration_target, compute a scalar loss,
-    call .backward(), and confirm gradients exist on beta_baseline and
-    IP_to_ISH_prop.
+    Run generic_torch_simulate_calibration_target (dict-returning API),
+    compute a scalar loss, call .backward(), and confirm gradients exist
+    on beta_baseline and IP_to_ISH_prop.
     """
     _state, _params, _mp, settings, _sched = subpop_inputs("caseB_subpop1")
     settings = clt.updated_dataclass(settings, {
@@ -228,7 +229,7 @@ def test_gradient_flows_through_calibration_target():
     num_days = 10
     torch_inputs = build_generic_torch_inputs(gen_model, model_config, num_days, requires_grad=True)
 
-    hospital_admits = generic_torch_simulate_calibration_target(
+    result = generic_torch_simulate_calibration_target(
         torch_inputs["state_dict"],
         torch_inputs["params_dict"],
         model_config,
@@ -241,7 +242,10 @@ def test_gradient_flows_through_calibration_target():
         start_real_date=start_date,
     )
 
-    loss = hospital_admits.sum()
+    assert set(result.keys()) == {"ISH_to_HR", "ISH_to_HD"}, (
+        f"Expected keys {{'ISH_to_HR', 'ISH_to_HD'}}, got {set(result.keys())}"
+    )
+    loss = result["ISH_to_HR"].sum() + result["ISH_to_HD"].sum()
     loss.backward()
 
     beta_grad = torch_inputs["params_dict"]["beta_baseline"].grad

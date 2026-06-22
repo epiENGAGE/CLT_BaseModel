@@ -13,3 +13,4 @@ flu_instances/examples/__pycache__/
 flu_instances/examples/outputs/
 SIHR_core/__pycache__/
 generic_core/__pycache__/
+generic_core/examples/__marimo__/

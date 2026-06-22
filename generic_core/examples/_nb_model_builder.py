@@ -76,9 +76,14 @@ def _load_config_display(
         _, _cfg_err = load_config_json(config_path_input.value)
         _source = "path"
 
+    _browse_row = mo.hstack([config_file_upload] + (
+        [mo.md(f"Selected: `{config_file_upload.value[0].name}`")]
+        if config_file_upload.value else []
+    ), align="center", gap=1)
+
     _parts = [
         mo.md("### Step 0 — Load Existing Config"),
-        config_file_upload,
+        _browse_row,
         config_path_input,
         clear_config_button,
     ]
@@ -971,7 +976,7 @@ def _params_ui(param_names, reduce_param_names, loaded_config, mo, is_array_para
     array_param_names  = [_n for _n in param_names if is_array_param(loaded_config, _n)]
     params_inputs = mo.ui.array([
         mo.ui.number(
-            start=0.0, stop=10.0, step=0.001,
+            start=0.0, stop=10.0, step=None,
             value=float(_saved_params.get(_name, 0.5 if _name in reduce_param_names else 1.0)),
             label=_name,
         )
@@ -1021,19 +1026,19 @@ def _schedule_and_immunity_ui(mo, loaded_config):
         value="MV" in _epi_names,
     )
     absolute_humidity_input = mo.ui.number(
-        start=0.0, stop=1.0, step=0.0001, value=0.006, label="Absolute humidity",
+        start=0.0, stop=1.0, step=None, value=0.006, label="Absolute humidity",
     )
     total_contact_input = mo.ui.number(
-        start=0.0, stop=100.0, step=0.1, value=1.0, label="Total contact matrix value",
+        start=0.0, stop=100.0, step=None, value=1.0, label="Total contact matrix value",
     )
     school_contact_input = mo.ui.number(
-        start=0.0, stop=100.0, step=0.1, value=0.0, label="School contact subtraction",
+        start=0.0, stop=100.0, step=None, value=0.0, label="School contact subtraction",
     )
     work_contact_input = mo.ui.number(
-        start=0.0, stop=100.0, step=0.1, value=0.0, label="Work contact subtraction",
+        start=0.0, stop=100.0, step=None, value=0.0, label="Work contact subtraction",
     )
     mobility_input = mo.ui.number(
-        start=0.0, stop=5.0, step=0.01, value=1.0, label="Mobility modifier",
+        start=0.0, stop=5.0, step=None, value=1.0, label="Mobility modifier",
     )
     daily_vaccines_input = mo.ui.number(
         start=0.0, stop=1e9, step=1.0, value=0.0, label="Daily vaccines",
@@ -1068,17 +1073,17 @@ def _epi_metric_ui(n_transitions, t_name, mo, loaded_config):
         label="Transition used for R→S-style immunity update",
     )
     inf_sat_input = mo.ui.number(
-        start=0.0, stop=1.0, step=0.01,
+        start=0.0, stop=1.0, step=None,
         value=float(_saved_params.get("inf_induced_saturation", 0.0)),
         label="inf_induced_saturation",
     )
     vax_sat_input = mo.ui.number(
-        start=0.0, stop=1.0, step=0.01,
+        start=0.0, stop=1.0, step=None,
         value=float(_saved_params.get("vax_induced_saturation", 0.0)),
         label="vax_induced_saturation",
     )
     inf_wane_input = mo.ui.number(
-        start=0.0, stop=1.0, step=0.001,
+        start=0.0, stop=1.0, step=None,
         value=float(_saved_params.get("inf_induced_immune_wane", 0.01)),
         label="inf_induced_immune_wane",
     )
@@ -1086,7 +1091,7 @@ def _epi_metric_ui(n_transitions, t_name, mo, loaded_config):
     vax_wane_is_array = isinstance(_vax_wane_raw, list)
     vax_wane_loaded_val = _vax_wane_raw
     vax_wane_input = mo.ui.number(
-        start=0.0, stop=1.0, step=0.001,
+        start=0.0, stop=1.0, step=None,
         value=0.0 if vax_wane_is_array else float(_vax_wane_raw),
         label="vax_induced_immune_wane",
     )
@@ -2148,7 +2153,10 @@ def _run_sim(
     def _validate_shapes():
         """Return a list of human-readable issues for param/schedule shapes vs A×R."""
         _issues = []
+        _contact_matrix_params = {"total_contact_matrix", "school_contact_matrix", "work_contact_matrix"}
         for _pname, _pval in config_dict.get("params", {}).items():
+            if _pname in _contact_matrix_params:
+                continue
             if isinstance(_pval, list):
                 try:
                     _arr = np.array(_pval)

@@ -621,23 +621,39 @@ def generic_torch_simulate_calibration_target(
     num_days: int,
     timesteps_per_day: int,
     calibration_transition_names: list,
+    calibration_compartment_names: list | None = None,
     start_real_date: datetime.date | None = None,
-) -> torch.Tensor:
+) -> dict:
     """
     Simulate for num_days, returning only the sum of named calibration-target
-    transitions for each day.
+    transitions and/or end-of-day compartment values for each day.
 
     Mirrors torch_simulate_hospital_admits in flu_torch_det_components.py
     but accepts any list of transition names instead of hardcoding ISH_to_HR
     and ISH_to_HD.
 
+    Parameters
+    ----------
+    calibration_transition_names : list[str]
+        Transition variable names to accumulate (summed across timesteps).
+        May be empty when compartment targets are used alone.
+    calibration_compartment_names : list[str] | None
+        Compartment names whose end-of-day values are added to the output.
+        Gradients flow through these values in the same way as transitions.
+
     Returns
     -------
-    torch.Tensor of shape (num_days, L, A, R)
-        Sum of calibration target transitions for each day.
+    dict[str, torch.Tensor]
+        One tensor of shape (num_days, L, A, R) per requested variable.
+        Transitions are accumulated over all intra-day timesteps; compartments
+        are end-of-day snapshots.
     """
     dt = 1.0 / float(timesteps_per_day)
-    daily_targets = []
+    _comp_names = calibration_compartment_names or []
+    _all_names = list(calibration_transition_names) + _comp_names
+
+    # Per-variable accumulator: {name: list of (L, A, R) tensors, one per day}
+    daily_per_var: dict = {name: [] for name in _all_names}
 
     for day in range(num_days):
         state_dict = update_state_dict_with_schedules(
@@ -648,7 +664,7 @@ def generic_torch_simulate_calibration_target(
                 state_dict, model_config, day, start_real_date
             )
 
-        day_target: torch.Tensor | None = None
+        day_tv_accum: dict = {t: None for t in calibration_transition_names}
         for _ in range(timesteps_per_day):
             state_dict, cal_targets, _ = generic_advance_timestep(
                 state_dict,
@@ -657,16 +673,19 @@ def generic_torch_simulate_calibration_target(
                 rate_registry,
                 precomputed,
                 dt,
-                save_calibration_targets=True,
+                save_calibration_targets=bool(calibration_transition_names),
                 calibration_transition_names=calibration_transition_names,
             )
-            # Accumulate calibration targets across timesteps within the day
-            step_sum: torch.Tensor = sum(  # type: ignore[assignment]
-                cal_targets[t] for t in calibration_transition_names
-            )
-            day_target = step_sum if day_target is None else day_target + step_sum
+            for tname in calibration_transition_names:
+                val = cal_targets[tname]
+                day_tv_accum[tname] = (
+                    val if day_tv_accum[tname] is None else day_tv_accum[tname] + val
+                )
 
-        assert day_target is not None, "timesteps_per_day must be >= 1"
-        daily_targets.append(day_target.clone())
+        for tname in calibration_transition_names:
+            daily_per_var[tname].append(day_tv_accum[tname].clone())
 
-    return torch.stack(daily_targets)
+        for cname in _comp_names:
+            daily_per_var[cname].append(state_dict[cname].clone())
+
+    return {name: torch.stack(daily_per_var[name]) for name in _all_names}

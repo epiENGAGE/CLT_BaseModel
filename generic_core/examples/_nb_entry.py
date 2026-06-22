@@ -6,11 +6,11 @@
 def _main_tab_selector(mo):
     main_tab = mo.ui.tabs({
         "Model Builder": mo.md(""),
-        "Fitting":        mo.md(""),
-        "Forecast":       mo.md(""),
-        "Export":         mo.md(""),
-        "Analysis":       mo.md(""),
-        "Documentation":  mo.md(""),
+        "Analysis":      mo.md(""),
+        "Fitting":       mo.md(""),
+        "Forecast":      mo.md(""),
+        "Export":        mo.md(""),
+        "Documentation": mo.md(""),
     })
     return (main_tab,)
 

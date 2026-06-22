@@ -124,7 +124,7 @@ def _imports():
     )
     from generic_core.calibration import compute_rsquared
 
-    FitResult = namedtuple("FitResult", ["best_params", "loss_curve", "num_days", "observed", "method", "accepted_params"])
+    FitResult = namedtuple("FitResult", ["best_params", "loss_curve", "num_days", "observed", "method", "accepted_params", "sim_trajectories", "fit_targets", "target_labels", "target_weights", "target_modes", "r2_threshold", "n_ar_accepted"], defaults=[None, None])
 
     return (
         Path, SimpleNamespace, namedtuple, copy, sqlite3, datetime,
@@ -387,11 +387,11 @@ def _analysis_metric_plot_controls(mo, analysis_n_metrics_input, analysis_metric
 def _main_tab_selector(mo):
     main_tab = mo.ui.tabs({
         "Model Builder": mo.md(""),
-        "Fitting":        mo.md(""),
-        "Forecast":       mo.md(""),
-        "Export":         mo.md(""),
-        "Analysis":       mo.md(""),
-        "Documentation":  mo.md(""),
+        "Analysis":      mo.md(""),
+        "Fitting":       mo.md(""),
+        "Forecast":      mo.md(""),
+        "Export":        mo.md(""),
+        "Documentation": mo.md(""),
     })
     return (main_tab,)
 
@@ -502,9 +502,14 @@ def _load_config_display(
         _, _cfg_err = load_config_json(config_path_input.value)
         _source = "path"
 
+    _browse_row = mo.hstack([config_file_upload] + (
+        [mo.md(f"Selected: `{config_file_upload.value[0].name}`")]
+        if config_file_upload.value else []
+    ), align="center", gap=1)
+
     _parts = [
         mo.md("### Step 0 — Load Existing Config"),
-        config_file_upload,
+        _browse_row,
         config_path_input,
         clear_config_button,
     ]
@@ -1397,7 +1402,7 @@ def _params_ui(param_names, reduce_param_names, loaded_config, mo, is_array_para
     array_param_names  = [_n for _n in param_names if is_array_param(loaded_config, _n)]
     params_inputs = mo.ui.array([
         mo.ui.number(
-            start=0.0, stop=10.0, step=0.001,
+            start=0.0, stop=10.0, step=None,
             value=float(_saved_params.get(_name, 0.5 if _name in reduce_param_names else 1.0)),
             label=_name,
         )
@@ -1447,19 +1452,19 @@ def _schedule_and_immunity_ui(mo, loaded_config):
         value="MV" in _epi_names,
     )
     absolute_humidity_input = mo.ui.number(
-        start=0.0, stop=1.0, step=0.0001, value=0.006, label="Absolute humidity",
+        start=0.0, stop=1.0, step=None, value=0.006, label="Absolute humidity",
     )
     total_contact_input = mo.ui.number(
-        start=0.0, stop=100.0, step=0.1, value=1.0, label="Total contact matrix value",
+        start=0.0, stop=100.0, step=None, value=1.0, label="Total contact matrix value",
     )
     school_contact_input = mo.ui.number(
-        start=0.0, stop=100.0, step=0.1, value=0.0, label="School contact subtraction",
+        start=0.0, stop=100.0, step=None, value=0.0, label="School contact subtraction",
     )
     work_contact_input = mo.ui.number(
-        start=0.0, stop=100.0, step=0.1, value=0.0, label="Work contact subtraction",
+        start=0.0, stop=100.0, step=None, value=0.0, label="Work contact subtraction",
     )
     mobility_input = mo.ui.number(
-        start=0.0, stop=5.0, step=0.01, value=1.0, label="Mobility modifier",
+        start=0.0, stop=5.0, step=None, value=1.0, label="Mobility modifier",
     )
     daily_vaccines_input = mo.ui.number(
         start=0.0, stop=1e9, step=1.0, value=0.0, label="Daily vaccines",
@@ -1494,17 +1499,17 @@ def _epi_metric_ui(n_transitions, t_name, mo, loaded_config):
         label="Transition used for R→S-style immunity update",
     )
     inf_sat_input = mo.ui.number(
-        start=0.0, stop=1.0, step=0.01,
+        start=0.0, stop=1.0, step=None,
         value=float(_saved_params.get("inf_induced_saturation", 0.0)),
         label="inf_induced_saturation",
     )
     vax_sat_input = mo.ui.number(
-        start=0.0, stop=1.0, step=0.01,
+        start=0.0, stop=1.0, step=None,
         value=float(_saved_params.get("vax_induced_saturation", 0.0)),
         label="vax_induced_saturation",
     )
     inf_wane_input = mo.ui.number(
-        start=0.0, stop=1.0, step=0.001,
+        start=0.0, stop=1.0, step=None,
         value=float(_saved_params.get("inf_induced_immune_wane", 0.01)),
         label="inf_induced_immune_wane",
     )
@@ -1512,7 +1517,7 @@ def _epi_metric_ui(n_transitions, t_name, mo, loaded_config):
     vax_wane_is_array = isinstance(_vax_wane_raw, list)
     vax_wane_loaded_val = _vax_wane_raw
     vax_wane_input = mo.ui.number(
-        start=0.0, stop=1.0, step=0.001,
+        start=0.0, stop=1.0, step=None,
         value=0.0 if vax_wane_is_array else float(_vax_wane_raw),
         label="vax_induced_immune_wane",
     )
@@ -2574,7 +2579,10 @@ def _run_sim(
     def _validate_shapes():
         """Return a list of human-readable issues for param/schedule shapes vs A×R."""
         _issues = []
+        _contact_matrix_params = {"total_contact_matrix", "school_contact_matrix", "work_contact_matrix"}
         for _pname, _pval in config_dict.get("params", {}).items():
+            if _pname in _contact_matrix_params:
+                continue
             if isinstance(_pval, list):
                 try:
                     _arr = np.array(_pval)
@@ -2972,7 +2980,7 @@ def _shared_model_factory(
                 for _m, _arr in _ic.get("epi_metrics", {}).items():
                     _epi_init[_m] = np.array(_arr, dtype=float)
             _sp_overrides = dict(param_overrides or {})
-            if param_overrides_per_subpop and _si < len(param_overrides_per_subpop):
+            if param_overrides_per_subpop and _si < len(param_overrides_per_subpop) and param_overrides_per_subpop[_si]:
                 _sp_overrides.update(param_overrides_per_subpop[_si])
             _sp_overrides.update(config.get("subpop_params", {}).get(_sp_name, {}))
             _cfg = config
@@ -3029,7 +3037,30 @@ def _shared_model_factory(
 # ============================================================
 
 @app.cell
-def _fitting_ui(mo, compartments, n_transitions, t_name, param_names):
+def _fit_n_targets_state(mo):
+    get_n_targets, set_n_targets = mo.state(1)
+    return get_n_targets, set_n_targets
+
+
+@app.cell
+def _fit_target_buttons(mo, get_n_targets, set_n_targets):
+    add_target_btn = mo.ui.button(
+        label="+ Add target",
+        on_click=lambda _: set_n_targets(min(get_n_targets() + 1, 20)),
+    )
+    del_target_btn = mo.ui.button(
+        label="− Remove target",
+        on_click=lambda _: set_n_targets(max(get_n_targets() - 1, 1)),
+    )
+    return add_target_btn, del_target_btn
+
+
+@app.cell
+def _fitting_ui(
+    mo, compartments, n_transitions, t_name, param_names,
+    is_metapop, metapop_folder_input, json, Path,
+    num_age_groups, num_risk_groups,
+):
     _tvars = [
         t_name.value[_i].strip()
         for _i in range(int(n_transitions.value))
@@ -3037,37 +3068,116 @@ def _fitting_ui(mo, compartments, n_transitions, t_name, param_names):
     ]
     _all_tgts = list(compartments) + _tvars
     _tgt_opts = _all_tgts if _all_tgts else ["S"]
-    fit_obs_source = mo.ui.radio(
-        options={"Upload CSV": "upload", "File path": "path"},
-        value="Upload CSV", label="Observed data source",
+
+    # Subpop names for slice dropdowns
+    _subpop_names_ui = []
+    if is_metapop and metapop_folder_input.value.strip():
+        try:
+            with open(Path(metapop_folder_input.value.strip()) / "metapop_config.json") as _f:
+                _subpop_names_ui = json.load(_f).get("subpopulations", [])
+        except Exception:
+            _subpop_names_ui = []
+
+    _sp_opts = ["All (sum)"] + [f"{_i}: {_nm}" for _i, _nm in enumerate(_subpop_names_ui)]
+    _age_opts = ["All (sum)"] + [str(_i) for _i in range(int(num_age_groups))]
+    _risk_opts = ["All (sum)"] + [str(_i) for _i in range(int(num_risk_groups))]
+
+    fit_target_src = mo.ui.array([
+        mo.ui.radio(
+            options={"Upload CSV": "upload", "File path": "path"},
+            value="Upload CSV",
+            label="Data source",
+        )
+        for _ in range(20)
+    ])
+    fit_target_upload = mo.ui.array([
+        mo.ui.file(label="Upload CSV", filetypes=[".csv"])
+        for _ in range(20)
+    ])
+    fit_target_path = mo.ui.array([
+        mo.ui.text(
+            label="CSV file path", placeholder="~/data/observed.csv", full_width=True,
+        )
+        for _ in range(20)
+    ])
+    fit_target_vars = mo.ui.array([
+        mo.ui.multiselect(
+            options={t: t for t in _tgt_opts},
+            value=[_tgt_opts[0]],
+            label="Variables (summed)",
+        )
+        for _ in range(20)
+    ])
+    fit_target_mode = mo.ui.array([
+        mo.ui.radio(
+            options={"Timeseries": "ts", "Scalar total": "scalar", "Proportions": "proportion"},
+            value="Timeseries",
+            label="Observed data type",
+        )
+        for _ in range(20)
+    ])
+    fit_target_weight = mo.ui.array([
+        mo.ui.number(value=1.0, start=0.0, stop=1000.0, step=None, label="Weight λ")
+        for _ in range(20)
+    ])
+    fit_target_subpop = mo.ui.array([
+        mo.ui.dropdown(options=_sp_opts, value=_sp_opts[0], label="Subpopulation")
+        for _ in range(20)
+    ])
+    fit_target_age = mo.ui.array([
+        mo.ui.dropdown(options=_age_opts, value=_age_opts[0], label="Age group")
+        for _ in range(20)
+    ])
+    fit_target_risk = mo.ui.array([
+        mo.ui.dropdown(options=_risk_opts, value=_risk_opts[0], label="Risk group")
+        for _ in range(20)
+    ])
+
+    fit_sim_days_input = mo.ui.number(
+        value=180, start=1, stop=3650, step=1,
+        label="Simulation days (used when all targets are scalar totals)",
     )
-    fit_obs_upload = mo.ui.file(label="Upload CSV (columns: date, value)", filetypes=[".csv"])
-    fit_obs_path = mo.ui.text(
-        label="CSV file path", placeholder="~/data/observed.csv", full_width=True,
-    )
-    fit_target = mo.ui.multiselect(
-        options={t: t for t in _tgt_opts},
-        value=[_tgt_opts[0]],
-        label="Fit target — select one or more (multiple selections are summed)",
-    )
+    _seed_scale_opts = {
+        f"seed_scale_{_c}": f"seed_scale_{_c}"
+        for _c in compartments[1:]
+    }
     fit_params_multiselect = mo.ui.multiselect(
-        options={p: p for p in param_names},
+        options={**{p: p for p in param_names}, **_seed_scale_opts},
         value=[],
         label="Parameters to fit",
     )
     fit_method = mo.ui.radio(
-        options={"Adam (gradient)": "adam", "LBFGS (gradient)": "lbfgs", "Accept-reject": "ar"},
+        options={"Adam (gradient)": "adam", "L-BFGS (gradient)": "lbfgs", "Accept-reject": "ar"},
         value="Adam (gradient)", label="Fitting method",
     )
-    fit_lr = mo.ui.number(value=0.01, start=1e-5, stop=1.0, step=1e-4, label="Learning rate")
     fit_n_iter = mo.ui.number(value=200, start=10, stop=2000, step=10, label="Iterations / Max samples")
-    fit_r2_thresh = mo.ui.number(value=0.75, start=0.0, stop=1.0, step=0.01, label="R² acceptance threshold")
+    fit_r2_thresh = mo.ui.number(value=0.75, start=0.0, stop=1.0, step=None, label="R² acceptance threshold")
     fit_run_button = mo.ui.run_button(label="Run fitting")
+
     return (
-        fit_obs_source, fit_obs_upload, fit_obs_path, fit_target,
+        fit_target_src, fit_target_upload, fit_target_path,
+        fit_target_vars, fit_target_mode, fit_target_weight,
+        fit_target_subpop, fit_target_age, fit_target_risk,
+        fit_sim_days_input,
         fit_params_multiselect,
-        fit_method, fit_lr, fit_n_iter, fit_r2_thresh, fit_run_button,
+        fit_method, fit_n_iter, fit_r2_thresh, fit_run_button,
     )
+
+
+@app.cell
+def _fitting_lr_ui(mo, fit_method):
+    _lr_default = 0.5 if fit_method.value == "lbfgs" else 0.01
+    fit_lr = mo.ui.number(value=_lr_default, start=1e-5, stop=10.0, step=None, label="Learning rate")
+    return (fit_lr,)
+
+
+@app.cell
+def _fitting_replications_ui(mo):
+    fit_n_replications = mo.ui.number(
+        value=5, start=1, stop=200, step=1,
+        label="Number of replications",
+    )
+    return (fit_n_replications,)
 
 
 @app.cell
@@ -3080,17 +3190,17 @@ def _fitting_bounds_ui(
     _A = num_age_groups
     _R = num_risk_groups
 
-    _dim_opts = ["scalar"]
+    _dim_opts = []
     if _A > 1:
-        _dim_opts.append("per age group")
+        _dim_opts.append("age groups")
     if _R > 1:
-        _dim_opts.append("per risk group")
-    if _A > 1 and _R > 1:
-        _dim_opts.append("per age × risk")
+        _dim_opts.append("risk groups")
     if is_metapop:
-        _dim_opts.append("per subpopulation")
+        _dim_opts.append("subpopulation")
 
     def _default_bounds(pn):
+        if pn.startswith("seed_scale_"):
+            return 0.1, 10.0
         _raw = _saved_params.get(pn, 0.1)
         _dv = float(_raw) if not isinstance(_raw, list) else 0.1
         _lo = round(0.5 * _dv, 8)
@@ -3102,305 +3212,1088 @@ def _fitting_bounds_ui(
 
     fit_bounds_lo = mo.ui.array([
         mo.ui.number(
-            start=1e-8, stop=1e8, step=0.001,
+            start=1e-8, stop=1e8, step=None,
             value=_default_bounds(_pn)[0],
-            label="Lower",
+            label="Lower bound",
         )
         for _pn in _selected
     ])
     fit_bounds_hi = mo.ui.array([
         mo.ui.number(
-            start=1e-8, stop=1e8, step=0.001,
+            start=1e-8, stop=1e8, step=None,
             value=_default_bounds(_pn)[1],
-            label="Upper",
+            label="Upper bound",
         )
         for _pn in _selected
     ])
     fit_param_dims = mo.ui.array([
-        mo.ui.radio(options=_dim_opts, value="scalar", label="")
+        mo.ui.multiselect(
+            options=[] if _pn.startswith("seed_scale_") else _dim_opts,
+            value=[],
+            label="Granularity",
+        )
         for _pn in _selected
     ])
     return (fit_bounds_lo, fit_bounds_hi, fit_param_dims)
 
 
 @app.cell
+def _fitting_start_offset_ui(mo):
+    fit_start_offset_enable = mo.ui.checkbox(
+        label="Fit epidemic start date offset", value=False,
+    )
+    fit_start_offset_lo = mo.ui.number(
+        value=-30, start=-365, stop=0, step=1, label="Min offset (days)",
+    )
+    fit_start_offset_hi = mo.ui.number(
+        value=30, start=0, stop=365, step=1, label="Max offset (days)",
+    )
+    return fit_start_offset_enable, fit_start_offset_lo, fit_start_offset_hi
+
+
+@app.cell
 def _fitting_display(
-    fit_obs_source, fit_obs_upload, fit_obs_path,
-    fit_target, fit_params_multiselect,
+    get_n_targets, add_target_btn, del_target_btn,
+    fit_target_src, fit_target_upload, fit_target_path,
+    fit_target_vars, fit_target_mode, fit_target_weight,
+    fit_target_subpop, fit_target_age, fit_target_risk,
+    fit_sim_days_input,
+    fit_params_multiselect,
     fit_bounds_lo, fit_bounds_hi, fit_param_dims,
-    fit_method, fit_lr, fit_n_iter, fit_r2_thresh, fit_run_button,
-    compartments, mo, main_tab,
+    fit_start_offset_enable, fit_start_offset_lo, fit_start_offset_hi,
+    fit_method, fit_lr, fit_n_iter, fit_r2_thresh, fit_n_replications, fit_run_button,
+    mo, main_tab,
+    num_age_groups, num_risk_groups, is_metapop,
 ):
     mo.stop(main_tab.value != "Fitting", None)
-    _obs_w = fit_obs_upload if fit_obs_source.value == "upload" else fit_obs_path
-    _selected_targets = list(fit_target.value)
+    _n = get_n_targets()
     _selected_params = list(fit_params_multiselect.value)
-    _tvars_selected = [t for t in _selected_targets if t not in compartments]
+    _any_non_ts = any(fit_target_mode.value[_k] in ("scalar", "proportion") for _k in range(_n))
+    _any_ts = any(fit_target_mode.value[_k] == "ts" for _k in range(_n))
 
-    _target_note = (
-        mo.callout(
-            mo.md(f"Fitting to **sum** of: {', '.join(f'`{t}`' for t in _selected_targets)}"),
-            kind="info",
+    # ── tooltip helpers ───────────────────────────────────────────────────────
+    import html as _html
+    import random as _random
+
+    def _tip_label(tip_text, width=520):
+        _uid = _random.randint(10**7, 10**8 - 1)
+        _body = tip_text.replace("\n", "<br>")
+        return mo.Html(
+            f"<style>#tip{_uid}{{position:relative;display:inline-block;"
+            f"cursor:help;color:#888;font-size:0.8em;vertical-align:middle;}}"
+            f"#tip{_uid}>span{{visibility:hidden;opacity:0;"
+            f"transition:opacity .15s;transition-delay:.2s;"
+            f"position:absolute;bottom:120%;left:0;"
+            f"background:#222;color:#fff;border-radius:4px;"
+            f"padding:6px 10px;width:{width}px;font-size:12px;line-height:1.6;"
+            f"white-space:normal;pointer-events:none;z-index:9999;}}"
+            f"#tip{_uid}:hover>span{{visibility:visible;opacity:1;}}</style>"
+            f'<span id="tip{_uid}">ⓘ<span>{_body}</span></span>'
         )
-        if len(_selected_targets) > 1 else mo.md("")
-    )
-    _tv_note = (
-        mo.callout(
-            mo.md(
-                f"Transition variable targets (`{'`, `'.join(_tvars_selected)}`) require gradient "
-                "or accept-reject fitting. Make sure these appear in **Transition variables to save** (Step 8)."
-            ),
-            kind="info",
-        )
-        if _tvars_selected else mo.md("")
+
+    def _wtip(widget, tip_text):
+        return mo.hstack([widget, _tip_label(tip_text)], justify="start", align="center")
+
+    _PROPORTION_TIP = (
+        "<b>Proportions mode</b><br><br>"
+        "The <code>value</code> column must be a fraction (0–1) representing the share of the "
+        "target variable in a given group. Each row defines one constraint.<br><br>"
+        "<b>Denominator rule</b><br>"
+        "<code>age=X</code> only → denominator is the grand total across all subpopulations<br>"
+        "<code>age=X, subpop=Y</code> → denominator is the total within subpop Y<br>"
+        "<code>subpop=Y</code> only → denominator is the grand total "
+        "(i.e. the share of all infections attributable to subpop Y)<br>"
+        "<code>risk=Z</code> only → grand total; "
+        "<code>risk=Z, subpop=Y</code> → total within subpop Y<br><br>"
+        "<b>Examples</b> (target = new_infections, 2 age groups, 2 subpops)<br>"
+        "<code>age=0</code> value=0.40 → age 0 accounts for 40% of all infections<br>"
+        "<code>age=0, subpop=city_A</code> value=0.35 → age 0 is 35% of city A's infections<br>"
+        "<code>subpop=city_A</code> value=0.60 → city A has 60% of all infections"
     )
 
-    if _selected_params:
-        _header = mo.hstack(
-            [mo.md("**Parameter**"), mo.md("**Lower bound**"), mo.md("**Upper bound**"), mo.md("**Dimensionality**")],
-            justify="start",
-        )
-        _rows = [_header]
-        for _j, _pn in enumerate(_selected_params):
-            _rows.append(mo.hstack(
-                [mo.md(f"`{_pn}`"), fit_bounds_lo[_j], fit_bounds_hi[_j], fit_param_dims[_j]],
+    # ── target cards ──────────────────────────────────────────────────────────
+    _target_cards = []
+    for _k in range(_n):
+        _src = fit_target_src.value[_k]
+        _mode = fit_target_mode.value[_k]
+
+        _fname_note = mo.md("")
+        if _src == "upload" and fit_target_upload.value[_k]:
+            _fname = fit_target_upload.value[_k][0].name
+            _fname_note = mo.callout(mo.md(f"Loaded: **{_fname}**"), kind="info")
+
+        _data_input = fit_target_upload[_k] if _src == "upload" else fit_target_path[_k]
+
+        _scalar_hint = mo.md("")
+        if _mode == "scalar":
+            _scalar_hint = mo.accordion({
+                "Scalar format reference": mo.callout(
+                    mo.md(
+                        "**Required column:** `value`.\n\n"
+                        "**Optional CSV columns:** `age` (integer index), `risk` (integer index), "
+                        "`subpopulation` (name or integer index). "
+                        "Each row is one group-specific constraint. When a group column is absent, "
+                        "the group selection dropdowns below are used as the target "
+                        "(or sum over all if 'All')."
+                    ),
+                    kind="info",
+                )
+            })
+        elif _mode == "proportion":
+            _scalar_hint = mo.accordion({
+                "Proportions format reference": mo.callout(
+                    mo.md(
+                        "**Required column:** `value` (0–1).\n\n"
+                        "**Optional CSV columns:** `age` (integer index), `risk` (integer index), "
+                        "`subpopulation` (name or integer index).\n\n"
+                        "Each row is **numerator / denominator** over the full simulation:\n\n"
+                        "- **Numerator** — cumulative target variable restricted to the age, risk, "
+                        "and subpopulation specified in the row (falling back to the dropdowns below "
+                        "when a column is absent).\n"
+                        "- **Denominator** — same variable summed over *all age and risk groups*, "
+                        "restricted to the row's subpopulation *only when age or risk is also given*; "
+                        "otherwise the grand total (all subpopulations).\n\n"
+                        "**Examples** (target = `new_infections`, 2 age groups, 2 subpopulations):\n\n"
+                        "| `subpopulation` | `age` | `value` | Meaning |\n"
+                        "|---|---|---|---|\n"
+                        "| *(absent)* | `0` | `0.40` | Age 0 is 40 % of all infections (both subpops) |\n"
+                        "| `city_A` | `0` | `0.35` | Age 0 is 35 % of city A's infections |\n"
+                        "| `city_A` | `1` | `0.65` | Age 1 is 65 % of city A's infections |\n"
+                        "| `city_A` | *(absent)* | `0.60` | city A accounts for 60 % of all infections |\n\n"
+                        "Age rows for the same subpopulation should sum to 1."
+                    ),
+                    kind="info",
+                )
+            })
+
+        _prop_tip_row = mo.md("")
+        if _mode == "proportion":
+            _prop_tip_row = mo.hstack(
+                [mo.md("*Proportions quick reference*"), _tip_label(_PROPORTION_TIP)],
                 justify="start", align="center",
-            ))
+            )
+
+        _slice_items = []
+        if is_metapop:
+            _slice_items.append(fit_target_subpop[_k])
+        if int(num_age_groups) > 1:
+            _slice_items.append(fit_target_age[_k])
+        if int(num_risk_groups) > 1:
+            _slice_items.append(fit_target_risk[_k])
+        _slice_ui = mo.hstack(_slice_items, justify="start") if _slice_items else mo.md("")
+
+        _target_cards.append(mo.vstack([
+            mo.md(f"#### Target {_k + 1}"),
+            fit_target_src[_k],
+            _data_input,
+            _fname_note,
+            fit_target_mode[_k],
+            _prop_tip_row,
+            _scalar_hint,
+            fit_target_vars[_k],
+            mo.hstack([fit_target_weight[_k]], justify="start"),
+            _slice_ui,
+            mo.md("---"),
+        ]))
+
+    # ── parameter bounds ──────────────────────────────────────────────────────
+    if _selected_params:
+        _rows = []
+        for _j, _pn in enumerate(_selected_params):
+            _is_seed_scale = _pn.startswith("seed_scale_")
+            _bound_widgets = [fit_bounds_lo[_j], fit_bounds_hi[_j]]
+            if not _is_seed_scale:
+                _bound_widgets.append(fit_param_dims[_j])
+            _rows.append(mo.vstack([
+                mo.md(f"**`{_pn}`**"),
+                mo.hstack(_bound_widgets, justify="start", align="center"),
+            ]))
         _bounds_section = mo.vstack(_rows)
     else:
         _bounds_section = mo.md("*Select parameters above to configure bounds.*")
 
+    _LR_TIP = (
+        "Step size used by the gradient optimiser.\n\n"
+        "Adam: controls how far each parameter moves per gradient step.\n"
+        "  Too large → unstable loss; too small → slow convergence.\n"
+        "  Typical range: 0.001 – 0.05.\n\n"
+        "L-BFGS: initial step size for the internal line search.\n"
+        "  L-BFGS is less sensitive than Adam; 0.1 – 1.0 usually works.\n"
+        "  The line search can shrink the step automatically."
+    )
+    _ITER_TIP = (
+        "Number of optimisation steps or random draws, depending on method.\n\n"
+        "Adam: exact number of gradient update steps per replication.\n"
+        "  More iterations → better convergence, but more compute.\n\n"
+        "L-BFGS: outer loop runs N ÷ 20 steps; each step performs\n"
+        "  up to 20 internal line-search iterations, so total function\n"
+        "  evaluations ≈ N (per replication).\n\n"
+        "Accept-reject: total number of random parameter sets sampled.\n"
+        "  Higher → better coverage of the parameter space."
+    )
+    _R2_TIP = (
+        "Minimum weighted R² a sample must achieve to be 'accepted'.\n\n"
+        "With multiple targets, R² is computed per-target and averaged\n"
+        "using the target weights (λ).\n\n"
+        "Accepted samples form the ensemble used in the Forecast tab.\n"
+        "  Higher threshold → fewer but better-fitting accepted sets.\n"
+        "  Lower threshold → larger ensemble, more uncertainty.\n\n"
+        "If no samples are accepted, lower this value or increase\n"
+        "the number of samples (Iterations / Max samples).\n\n"
+        "R² = 1 − (SS_res / SS_tot); values above 0.7 are often\n"
+        "considered a reasonable fit."
+    )
+    _REP_TIP = (
+        "Number of independent optimisation runs for gradient methods.\n\n"
+        "Starting points are spread across the parameter bounds using\n"
+        "Latin Hypercube Sampling (LHS) to cover the space evenly and\n"
+        "reduce the risk of converging to a local minimum.\n\n"
+        "The best-fit result is the replication with the lowest final\n"
+        "loss. All replication trajectories and parameter distributions\n"
+        "are shown in the results, similar to the accept-reject method."
+    )
+
+    _method_val = fit_method.value
+    _hyper = [_wtip(fit_n_iter, _ITER_TIP)]
+    if _method_val != "ar":
+        _hyper = [_wtip(fit_lr, _LR_TIP)] + _hyper
+        _hyper.append(_wtip(fit_n_replications, _REP_TIP))
+    if _method_val == "ar":
+        _hyper.append(_wtip(fit_r2_thresh, _R2_TIP))
+
+    _sim_days_widget = mo.md("")
+    if _any_non_ts and not _any_ts:
+        _sim_days_widget = mo.callout(
+            mo.vstack([
+                mo.md(
+                    "All targets are scalar totals or proportions. Set the simulation length below "
+                    "(number of days over which the totals are accumulated)."
+                ),
+                fit_sim_days_input,
+            ]),
+            kind="info",
+        )
+
+    _seed_scale_note = mo.md("")
+    if any(_pn.startswith("seed_scale_") for _pn in _selected_params):
+        _seed_scale_note = mo.callout(
+            mo.md(
+                "**Seed scaling** multiplies the initial count of the selected compartment "
+                "by the fitted scale factor, adjusting the first compartment (susceptibles) "
+                "to keep total population constant. "
+                "Gradient methods optimise the scale alongside rate parameters."
+            ),
+            kind="info",
+        )
+
+    _start_offset_section = mo.vstack([
+        fit_start_offset_enable,
+        mo.hstack([fit_start_offset_lo, fit_start_offset_hi], justify="start")
+        if fit_start_offset_enable.value else mo.md(""),
+    ]) if True else mo.md("")
+
     mo.vstack([
         mo.md("## Fitting"),
-        mo.md("**Step 1 — Observed data**"),
-        mo.hstack([fit_obs_source], justify="start"),
-        _obs_w,
-        mo.md("**Step 2 — Target and parameters**"),
-        fit_target,
-        _target_note,
-        _tv_note,
+        mo.md("### Fit Targets"),
+        *_target_cards,
+        mo.hstack([add_target_btn, del_target_btn], justify="start"),
+        _sim_days_widget,
+        mo.md("### Parameters to Fit"),
         fit_params_multiselect,
+        _seed_scale_note,
         _bounds_section,
-        mo.md("**Step 3 — Method and hyperparameters**"),
+        mo.md("### Epidemic Start Date"),
+        _start_offset_section,
+        mo.md("### Method and Hyperparameters"),
         fit_method,
-        mo.hstack([fit_lr, fit_n_iter, fit_r2_thresh], justify="start"),
-        mo.md("**Step 4 — Run**"),
+        mo.hstack(_hyper, justify="start"),
+        mo.md("### Run"),
         fit_run_button,
     ])
     return
 
 
 @app.cell
-def _fitting_obs_parse(fit_obs_source, fit_obs_upload, fit_obs_path, pd, np, io):
-    fit_obs_df = None
-    fit_obs_array = None
-    fit_obs_n_days = 0
-    try:
-        if fit_obs_source.value == "upload":
-            if fit_obs_upload.value:
-                _raw = fit_obs_upload.value[0].contents
-                fit_obs_df = pd.read_csv(io.BytesIO(_raw))
+def _fitting_obs_parse(
+    get_n_targets,
+    fit_target_src, fit_target_upload, fit_target_path, fit_target_mode,
+    pd, io, Path,
+):
+    _n = get_n_targets()
+    # fit_obs_arrays: list of (np.array | list-of-dicts | None) per target
+    # fit_obs_n_days: list of int (days in timeseries) or 0 for scalar targets
+    fit_obs_arrays = []
+    fit_obs_n_days = []
+
+    for _k in range(_n):
+        _src = fit_target_src.value[_k]
+        _mode = fit_target_mode.value[_k]
+
+        _df = None
+        try:
+            if _src == "upload" and fit_target_upload.value[_k]:
+                _df = pd.read_csv(io.BytesIO(fit_target_upload.value[_k][0].contents))
+            elif _src == "path" and fit_target_path.value[_k].strip():
+                _df = pd.read_csv(Path(fit_target_path.value[_k].strip()).expanduser())
+        except Exception:
+            _df = None
+
+        if _df is None:
+            fit_obs_arrays.append(None)
+            fit_obs_n_days.append(0)
+            continue
+
+        if _mode in ("scalar", "proportion"):
+            if "value" not in _df.columns:
+                fit_obs_arrays.append(None)
+                fit_obs_n_days.append(0)
+                continue
+            _rows = []
+            for _, _row in _df.iterrows():
+                _entry = {"value": float(_row["value"])}
+                for _col in ("age", "risk", "subpopulation"):
+                    if _col in _df.columns and pd.notna(_row.get(_col)):
+                        _entry[_col] = _row[_col]
+                _rows.append(_entry)
+            fit_obs_arrays.append(_rows)
+            fit_obs_n_days.append(0)
         else:
-            _p = fit_obs_path.value.strip()
-            if _p:
-                from pathlib import Path as _Path
-                fit_obs_df = pd.read_csv(_Path(_p).expanduser())
-    except Exception:
-        fit_obs_df = None
-    if fit_obs_df is not None:
-        _non_id = [c for c in fit_obs_df.columns if c.lower() not in ("date", "day", "time", "week")]
-        _val_col = _non_id[0] if _non_id else (fit_obs_df.columns[1] if len(fit_obs_df.columns) >= 2 else None)
-        if _val_col:
-            fit_obs_array = fit_obs_df[_val_col].to_numpy(dtype=float)
-            fit_obs_n_days = len(fit_obs_array)
-    return (fit_obs_df, fit_obs_array, fit_obs_n_days)
+            _META_COLS_TS = {"date", "day", "time", "week", "subpopulation", "age", "risk"}
+            _non_id = [c for c in _df.columns if c.lower() not in _META_COLS_TS]
+            if not _non_id:
+                _non_id = [c for c in _df.columns if c.lower() not in ("date", "day", "time", "week")]
+            _val_col = "value" if "value" in _df.columns else (_non_id[0] if _non_id else None)
+            if _val_col:
+                _arr = _df[_val_col].dropna().to_numpy(dtype=float)
+                fit_obs_arrays.append(_arr)
+                fit_obs_n_days.append(len(_arr))
+            else:
+                fit_obs_arrays.append(None)
+                fit_obs_n_days.append(0)
+
+    return fit_obs_arrays, fit_obs_n_days
 
 
 @app.cell
 def _run_fitting(
-    fit_run_button, fit_obs_array, fit_obs_n_days,
-    fit_target, fit_method, fit_params_multiselect,
+    fit_run_button, fit_obs_arrays, fit_obs_n_days,
+    get_n_targets,
+    fit_target_src, fit_target_upload, fit_target_path,
+    fit_target_vars, fit_target_mode, fit_target_weight,
+    fit_target_subpop, fit_target_age, fit_target_risk,
+    fit_sim_days_input,
+    fit_method, fit_params_multiselect,
     fit_bounds_lo, fit_bounds_hi, fit_param_dims,
-    fit_lr, fit_n_iter, fit_r2_thresh,
+    fit_start_offset_enable, fit_start_offset_lo, fit_start_offset_hi,
+    fit_lr, fit_n_iter, fit_r2_thresh, fit_n_replications,
     config_dict, compartments, is_metapop,
     total_pop_input, seed_inputs,
     start_date_input, timesteps, rng_seed,
     num_age_groups, num_risk_groups,
     metapop_folder_input, metapop_travel_config,
-    make_single_pop_metapop, make_metapop_from_folder, extract_history,
+    make_single_pop_metapop, make_metapop_from_folder,
     build_generic_torch_inputs, generic_torch_simulate_calibration_target, RATE_TEMPLATE_REGISTRY,
-    torch, _F, np, json, mo, compute_rsquared, FitResult, build_scalar_array, Path,
+    torch, np, json, mo, compute_rsquared, FitResult, build_scalar_array, Path,
 ):
     fit_result = None
     if fit_run_button.value:
+        _n = get_n_targets()
         _selected_params = list(fit_params_multiselect.value)
         _lo_vals = list(fit_bounds_lo.value)
         _hi_vals = list(fit_bounds_hi.value)
         _dim_vals = list(fit_param_dims.value)
-        _fit_targets = list(fit_target.value)
         _A = num_age_groups
         _R = num_risk_groups
-
-        mo.stop(
-            not _fit_targets,
-            mo.callout(mo.md("**No fit target selected.**"), kind="warn"),
-        )
-        mo.stop(
-            fit_obs_array is None,
-            mo.callout(mo.md("**No observed data.** Upload a CSV or provide a file path."), kind="warn"),
-        )
+    
+        _target_vars_list = [list(fit_target_vars.value[_k]) for _k in range(_n)]
+        _target_modes = [fit_target_mode.value[_k] for _k in range(_n)]
+        _target_weights = [float(fit_target_weight.value[_k]) for _k in range(_n)]
+        _weight_sum = sum(_target_weights) or 1.0
+    
+        # ── slice-index helpers ────────────────────────────────────────────────────
+        def _parse_idx(val):
+            if val == "All (sum)":
+                return -1
+            return int(str(val).split(":")[0])
+    
+        _sp_idxs = [_parse_idx(fit_target_subpop.value[_k]) for _k in range(_n)]
+        _age_idxs = [_parse_idx(fit_target_age.value[_k]) for _k in range(_n)]
+        _risk_idxs = [_parse_idx(fit_target_risk.value[_k]) for _k in range(_n)]
+    
+        # Target display labels
+        _target_labels = []
+        for _k in range(_n):
+            if fit_target_src.value[_k] == "upload" and fit_target_upload.value[_k]:
+                _target_labels.append(fit_target_upload.value[_k][0].name)
+            elif fit_target_src.value[_k] == "path" and fit_target_path.value[_k].strip():
+                _target_labels.append(Path(fit_target_path.value[_k].strip()).name)
+            else:
+                _target_labels.append(f"Target {_k + 1}")
+    
+        # Subpop name → index map (for scalar CSV rows)
+        _subpop_names_run = []
+        if is_metapop and metapop_folder_input.value.strip():
+            try:
+                with open(Path(metapop_folder_input.value.strip()) / "metapop_config.json") as _f:
+                    _subpop_names_run = json.load(_f).get("subpopulations", [])
+            except Exception:
+                _subpop_names_run = []
+        _subpop_name_to_idx = {str(_nm): _i for _i, _nm in enumerate(_subpop_names_run)}
+    
+        def _parse_scalar_row_idxs(row, sp_fallback=-1, ag_fallback=-1, rk_fallback=-1):
+            _sp = row.get("subpopulation", None)
+            _sp_idx = sp_fallback
+            if _sp is not None:
+                _sp_s = str(_sp).strip()
+                if _sp_s.isdigit():
+                    _sp_idx = int(_sp_s)
+                elif _sp_s in _subpop_name_to_idx:
+                    _sp_idx = _subpop_name_to_idx[_sp_s]
+            _ag_idx = int(row["age"]) if "age" in row else ag_fallback
+            _rk_idx = int(row["risk"]) if "risk" in row else rk_fallback
+            return _sp_idx, _ag_idx, _rk_idx
+    
+        # ── validation ─────────────────────────────────────────────────────────────
+        for _k in range(_n):
+            if fit_obs_arrays[_k] is None:
+                mo.stop(
+                    True,
+                    mo.callout(mo.md(f"**Target {_k + 1}: no observed data loaded.**"), kind="warn"),
+                )
+            if not _target_vars_list[_k]:
+                mo.stop(
+                    True,
+                    mo.callout(mo.md(f"**Target {_k + 1}: no variables selected.**"), kind="warn"),
+                )
         mo.stop(
             not _selected_params,
             mo.callout(mo.md("**No parameters to fit.** Select parameters above."), kind="warn"),
         )
+    
+        _target_tvs = [[t for t in _target_vars_list[_k] if t not in compartments] for _k in range(_n)]
+        _target_comps = [[t for t in _target_vars_list[_k] if t in compartments] for _k in range(_n)]
+    
+        # Determine simulation length
+        _ts_days = [fit_obs_n_days[_k] for _k in range(_n) if _target_modes[_k] == "ts"]
+        _sim_days = max(_ts_days) if _ts_days else int(fit_sim_days_input.value)
         mo.stop(
-            is_metapop and fit_method.value != "ar",
-            mo.callout(mo.md("**Gradient fitting only supports single-population models.** Use accept-reject for metapop."), kind="warn"),
+            len(set(_ts_days)) > 1,
+            mo.callout(
+                mo.md(
+                    "**Timeseries targets have mismatched lengths:** "
+                    + ", ".join(
+                        f"Target {_k + 1}: {fit_obs_n_days[_k]} days"
+                        for _k in range(_n)
+                        if _target_modes[_k] == "ts"
+                    )
+                    + ". All timeseries targets must have the same number of observations."
+                ),
+                kind="danger",
+            ),
         )
-
-        # Build scalar bounds dict used by gradient methods
+        _num_fit_days_per_target = [
+            fit_obs_n_days[_k] if _target_modes[_k] == "ts" else _sim_days
+            for _k in range(_n)
+        ]
+    
+        _start = start_date_input.value.strip() or "2024-01-01"
+        _ts = int(timesteps.value)
+        _seed_b = int(rng_seed.value)
+    
+        _ci = None
+        if not is_metapop:
+            _N = int(total_pop_input.value)
+            _seed_vals = {
+                compartments[_j + 1]: int(seed_inputs.value[_j])
+                for _j in range(len(seed_inputs.value))
+            }
+            _first_comp = compartments[0]
+            _ci = {_first_comp: build_scalar_array(_N - sum(_seed_vals.values()), 1, 1)}
+            _ci.update({_c: build_scalar_array(_v, 1, 1) for _c, _v in _seed_vals.items()})
+            for _c in compartments:
+                _ci.setdefault(_c, build_scalar_array(0.0, 1, 1))
+    
         _bounds_grad = {
             _selected_params[_j]: [float(_lo_vals[_j]), float(_hi_vals[_j])]
             for _j in range(len(_selected_params))
         }
 
-        _num_fit_days = fit_obs_n_days
-        _N = int(total_pop_input.value)
-        _seed_vals = {compartments[_j + 1]: int(seed_inputs.value[_j]) for _j in range(len(seed_inputs.value))}
-        _first_comp = compartments[0]
-        _ci = {_first_comp: build_scalar_array(_N - sum(_seed_vals.values()), 1, 1)}
-        _ci.update({_c: build_scalar_array(_v, 1, 1) for _c, _v in _seed_vals.items()})
-        for _c in compartments:
-            _ci.setdefault(_c, build_scalar_array(0.0, 1, 1))
+        # Identify seed-scale virtual params (scale initial compartment count)
+        _seed_scale_comps = {
+            _pn[len("seed_scale_"):]: _j
+            for _j, _pn in enumerate(_selected_params)
+            if _pn.startswith("seed_scale_") and _pn[len("seed_scale_"):] in compartments
+        }
 
-        _start = start_date_input.value.strip() or "2024-01-01"
-        _ts = int(timesteps.value)
-        _seed_b = int(rng_seed.value)
-        _target_tvs = [t for t in _fit_targets if t not in compartments]
-        _target_comps = [t for t in _fit_targets if t in compartments]
-        _target_is_tv = bool(_target_tvs)
-        _tvs = _target_tvs
-        _obs = fit_obs_array[:_num_fit_days]
+        # Epidemic start date offset settings
+        _fit_start_offset = fit_start_offset_enable.value
+        _offset_lo_val = int(fit_start_offset_lo.value)
+        _offset_hi_val = int(fit_start_offset_hi.value)
+
+        from datetime import datetime as _dt, timedelta as _td
+        def _shift_date(base_str, days):
+            return (
+                _dt.strptime(base_str, "%Y-%m-%d") + _td(days=int(days))
+            ).strftime("%Y-%m-%d")
+
         _loss_curve = []
         _best_params = {}
         _accepted_params_list = []
-
+        _best_trajs = {}
+        _accepted_trajectories = []
+    
         with mo.status.spinner("Running fitting..."):
             try:
+                # ── gradient methods (Adam / L-BFGS) ──────────────────────────────
                 if fit_method.value in ("adam", "lbfgs"):
                     mo.stop(
-                        not _target_tvs,
-                        mo.callout(mo.md("**Gradient fitting requires at least one transition variable as target.** Use accept-reject for compartment-only targets."), kind="warn"),
-                    )
-                    mo.stop(
                         torch is None,
-                        mo.callout(mo.md("**PyTorch not available.** Install torch to use gradient-based fitting."), kind="danger"),
+                        mo.callout(
+                            mo.md("**PyTorch not available.** Install torch to use gradient-based fitting."),
+                            kind="danger",
+                        ),
                     )
-                    _metapop, _mc, _ = make_single_pop_metapop(
-                        config_dict, _start, _num_fit_days, _ci,
-                        ts_per_day=_ts, stochastic=False, tvs=_tvs,
-                        save_daily=False, seed_base=_seed_b,
-                        travel_config=metapop_travel_config,
+                    # Scale compartment values and total population up by this factor.
+                    # PyTorch uses softplus for non-negativity; for small counts it
+                    # diverges from the identity — large values (~10000) make it negligible.
+                    # N must scale with the compartments so I/N (force of infection) is unchanged.
+                    _GRAD_SCALE = 10000.0
+
+                    _all_tvs_union = list(dict.fromkeys(tv for tvs in _target_tvs for tv in tvs))
+                    _all_comps_union = list(dict.fromkeys(c for cs in _target_comps for c in cs))
+
+                    # Build initial model to identify valid regular params
+                    if is_metapop:
+                        _metapop, _mc = make_metapop_from_folder(
+                            metapop_folder_input.value.strip(),
+                            config_dict, _start, _sim_days, list(compartments),
+                            seed_offset=0, seed_base=_seed_b, ts_per_day=_ts,
+                            stochastic=False, tvs=_all_tvs_union, save_daily=False,
+                            travel_config=metapop_travel_config or None,
+                        )
+                    else:
+                        _metapop, _mc, _ = make_single_pop_metapop(
+                            config_dict, _start, _sim_days, _ci,
+                            ts_per_day=_ts, stochastic=False, tvs=_all_tvs_union,
+                            save_daily=False, seed_base=_seed_b,
+                            travel_config=metapop_travel_config,
+                        )
+
+                    _ti = build_generic_torch_inputs(_metapop, _mc, _sim_days)
+                    _ti["params_dict"]["total_pop_age_risk"] = (
+                        _ti["params_dict"]["total_pop_age_risk"] * _GRAD_SCALE
                     )
-                    _ti = build_generic_torch_inputs(_metapop, _mc, _num_fit_days)
-                    _state0 = {k: v.clone().detach() for k, v in _ti["state_dict"].items()}
-                    _opt_tensors = []
-                    for _j, _pn in enumerate(_selected_params):
-                        if _pn not in _ti["params_dict"]:
-                            continue
-                        _dim = _dim_vals[_j] if _dim_vals else "scalar"
-                        _existing = _ti["params_dict"][_pn]
-                        # Scalar initialisation value — use mean if existing tensor is already shaped
-                        _init_val = float(_existing.detach().mean().item())
-                        if _dim == "per age group":
-                            _t = torch.full((_A, 1), _init_val, dtype=torch.float32, requires_grad=True)
-                        elif _dim == "per risk group":
-                            _t = torch.full((1, _R), _init_val, dtype=torch.float32, requires_grad=True)
-                        elif _dim == "per age × risk":
-                            _t = torch.full((_A, _R), _init_val, dtype=torch.float32, requires_grad=True)
-                        else:
-                            _t = _existing.clone().detach().float().requires_grad_(True)
-                        _ti["params_dict"][_pn] = _t
-                        _opt_tensors.append(_t)
+                    _ti["precomputed"].total_pop_LAR_tensor = (
+                        _ti["precomputed"].total_pop_LAR_tensor * _GRAD_SCALE
+                    )
+                    _ti["precomputed"].total_pop_LA = (
+                        _ti["precomputed"].total_pop_LA * _GRAD_SCALE
+                    )
+
+                    # Valid regular params (seed_scale virtual params are excluded)
+                    _valid_pn_idxs = [
+                        _j for _j, _pn in enumerate(_selected_params)
+                        if _pn in _ti["params_dict"]
+                    ]
                     mo.stop(
-                        not _opt_tensors,
-                        mo.callout(mo.md("**None of the specified parameters found in params dict.** Check names."), kind="danger"),
+                        not _valid_pn_idxs and not _seed_scale_comps and not _fit_start_offset,
+                        mo.callout(
+                            mo.md("**None of the specified parameters found in params dict.** Check names."),
+                            kind="danger",
+                        ),
                     )
-                    _obs_t = torch.tensor(_obs, dtype=torch.float32)
+
+                    # Mutable dicts updated per replication so closures see current values
+                    _seed_base_state = {
+                        k: v.clone().detach() * _GRAD_SCALE
+                        for k, v in _ti["state_dict"].items()
+                    }
+                    _scale_tensors = {}  # {comp_name: tensor} — cleared and repopulated per rep
+
+                    # Extended LHS: regular params + seed_scale params + offset
+                    _seed_scale_keys = list(_seed_scale_comps.keys())
+                    _lhs_lo_list = [float(_lo_vals[_j]) for _j in _valid_pn_idxs]
+                    _lhs_hi_list = [float(_hi_vals[_j]) for _j in _valid_pn_idxs]
+                    for _comp_ss in _seed_scale_keys:
+                        _j_ss = _seed_scale_comps[_comp_ss]
+                        _lhs_lo_list.append(float(_lo_vals[_j_ss]))
+                        _lhs_hi_list.append(float(_hi_vals[_j_ss]))
+                    _offset_lhs_col = len(_lhs_lo_list)
+                    if _fit_start_offset:
+                        _lhs_lo_list.append(float(_offset_lo_val))
+                        _lhs_hi_list.append(float(_offset_hi_val))
+
+                    _n_rep = int(fit_n_replications.value)
+                    _n_lhs_total = max(len(_lhs_lo_list), 1)
+                    try:
+                        from scipy.stats.qmc import LatinHypercube as _LHC
+                        _lhs_unit = _LHC(d=_n_lhs_total).random(n=_n_rep)
+                    except Exception:
+                        _lhs_unit = np.random.rand(_n_rep, _n_lhs_total)
+                    _lo_ext = np.array(_lhs_lo_list) if _lhs_lo_list else np.array([0.0])
+                    _hi_ext = np.array(_lhs_hi_list) if _lhs_hi_list else np.array([1.0])
+                    _lhs_scaled = _lo_ext + _lhs_unit[:, :len(_lhs_lo_list)] * (_hi_ext - _lo_ext)
+
+                    def _slice_tensor(sim, sp_idx, ag_idx, rk_idx):
+                        """Slice (days, L, A, R) and sum remaining dims → (days,)."""
+                        _s = sim
+                        if sp_idx >= 0:
+                            _s = _s[:, sp_idx:sp_idx + 1, :, :]
+                        if ag_idx >= 0:
+                            _s = _s[:, :, ag_idx:ag_idx + 1, :]
+                        if rk_idx >= 0:
+                            _s = _s[:, :, :, rk_idx:rk_idx + 1]
+                        return _s.sum(dim=tuple(range(1, _s.dim())))
+
+                    def _build_scaled_state():
+                        """Build initial state tensor dict, applying seed-scale factors."""
+                        _state_run = {}
+                        for _ks, _vs in _seed_base_state.items():
+                            if _ks in _scale_tensors:
+                                _state_run[_ks] = _seed_base_state[_ks] * _scale_tensors[_ks]
+                            elif compartments and _ks == compartments[0] and _scale_tensors:
+                                _delta = sum(
+                                    _seed_base_state[_c] * (_scale_tensors[_c] - 1.0)
+                                    for _c in _scale_tensors
+                                    if _c in _seed_base_state
+                                )
+                                _state_run[_ks] = torch.clamp(
+                                    _seed_base_state[_ks] - _delta, min=0.0
+                                )
+                            else:
+                                _state_run[_ks] = _vs.clone()
+                        return _state_run
+
+                    def _compute_total_loss():
+                        _state_run = _build_scaled_state()
+                        _sim_all = generic_torch_simulate_calibration_target(
+                            _state_run, _ti["params_dict"], _mc, RATE_TEMPLATE_REGISTRY,
+                            _ti["precomputed"], _ti["schedules_dict"],
+                            _sim_days, _ts, _all_tvs_union, _all_comps_union,
+                        )  # dict: {var_name: (days, L, A, R)}
+                        _total = torch.tensor(0.0, dtype=torch.float64)
+                        for _k in range(_n):
+                            _parts = [_sim_all[v] for v in _target_vars_list[_k]]
+                            _sim_k = _parts[0]
+                            for _pt in _parts[1:]:
+                                _sim_k = _sim_k + _pt
+                            _w_k = _target_weights[_k] / _weight_sum
+                            if _target_modes[_k] == "scalar":
+                                _loss_k = torch.tensor(0.0, dtype=torch.float64)
+                                _obs_scalar_sq_sum = sum(
+                                    float(_row["value"]) ** 2 for _row in fit_obs_arrays[_k]
+                                ) + 1e-10
+                                for _row in fit_obs_arrays[_k]:
+                                    _sp_i, _ag_i, _rk_i = _parse_scalar_row_idxs(
+                                        _row, _sp_idxs[_k], _age_idxs[_k], _risk_idxs[_k]
+                                    )
+                                    _sliced = _slice_tensor(_sim_k, _sp_i, _ag_i, _rk_i) / _GRAD_SCALE
+                                    _obs_v = torch.tensor(float(_row["value"]), dtype=torch.float64)
+                                    _loss_k = _loss_k + (_sliced.sum() - _obs_v) ** 2
+                                _loss_k = _loss_k / _obs_scalar_sq_sum
+                            elif _target_modes[_k] == "proportion":
+                                _loss_k = torch.tensor(0.0, dtype=torch.float64)
+                                # Normalise by sum(obs²) so loss ≈ 1 when sim=0, ≈ 0 when perfect,
+                                # keeping it in [0, ~1] regardless of epidemic size or number of rows.
+                                _obs_prop_sq_sum = sum(
+                                    float(_row["value"]) ** 2 for _row in fit_obs_arrays[_k]
+                                ) + 1e-10
+                                for _ri_prop, _row in enumerate(fit_obs_arrays[_k]):
+                                    _sp_i, _ag_i, _rk_i = _parse_scalar_row_idxs(
+                                        _row, _sp_idxs[_k], _age_idxs[_k], _risk_idxs[_k]
+                                    )
+                                    # When no group is specified, treat row order as subpop order
+                                    # so that rows without a "subpopulation" column still compute
+                                    # a meaningful per-subpop proportion instead of always 1.0.
+                                    if _sp_i < 0 and _ag_i < 0 and _rk_i < 0:
+                                        _sp_i = _ri_prop
+                                    # Fix subpop in denominator only when age or risk also given;
+                                    # subpop-only rows compare against grand total (share of all
+                                    # infections attributable to that subpopulation).
+                                    _den_sp = _sp_i if (_sp_i >= 0 and (_ag_i >= 0 or _rk_i >= 0)) else -1
+                                    _den = _slice_tensor(_sim_k, _den_sp, -1, -1).sum()
+                                    _num = _slice_tensor(_sim_k, _sp_i, _ag_i, _rk_i).sum()
+                                    _sim_prop = _num / (_den + 1e-10)
+                                    _obs_prop = torch.tensor(float(_row["value"]), dtype=torch.float64)
+                                    _loss_k = _loss_k + (_sim_prop - _obs_prop) ** 2
+                                _loss_k = _loss_k / _obs_prop_sq_sum
+                            else:
+                                _days_k = _num_fit_days_per_target[_k]
+                                _sliced = _slice_tensor(_sim_k, _sp_idxs[_k], _age_idxs[_k], _risk_idxs[_k]) / _GRAD_SCALE
+                                _obs_t_k = torch.tensor(
+                                    fit_obs_arrays[_k][:_days_k], dtype=torch.float64
+                                )
+                                # Normalise by mean(obs²) so loss ≈ 1 when sim=0, ≈ 0 when perfect,
+                                # matching the [0, ~1] scale of proportion and scalar losses.
+                                _obs_sq_mean_k = float((_obs_t_k ** 2).mean()) + 1e-10
+                                _loss_k = ((_sliced[:_days_k] - _obs_t_k) ** 2).mean() / _obs_sq_mean_k
+                            _total = _total + _w_k * _loss_k
+                        return _total
+
+                    def _record_params_grad():
+                        _out = {}
+                        for _pn in _selected_params:
+                            if _pn.startswith("seed_scale_"):
+                                _comp = _pn[len("seed_scale_"):]
+                                if _comp in _scale_tensors:
+                                    _out[_pn] = float(_scale_tensors[_comp].item())
+                            elif _pn in _ti["params_dict"]:
+                                _v = _ti["params_dict"][_pn].detach()
+                                if _v.ndim == 3 and _v.shape[1] == 1 and _v.shape[2] == 1:
+                                    for _spi in range(_v.shape[0]):
+                                        _out[f"{_pn}_subpop{_spi}"] = float(_v[_spi, 0, 0].item())
+                                else:
+                                    _out[_pn] = _v.tolist()
+                        return _out
+
+                    def _record_trajs_grad():
+                        _trajs = {}
+                        with torch.no_grad():
+                            _state_run = _build_scaled_state()
+                            _sim_all = generic_torch_simulate_calibration_target(
+                                _state_run, _ti["params_dict"], _mc, RATE_TEMPLATE_REGISTRY,
+                                _ti["precomputed"], _ti["schedules_dict"],
+                                _sim_days, _ts, _all_tvs_union, _all_comps_union,
+                            )
+                            for _k in range(_n):
+                                _parts = [_sim_all[v] for v in _target_vars_list[_k]]
+                                _sim_k = _parts[0]
+                                for _pt in _parts[1:]:
+                                    _sim_k = _sim_k + _pt
+                                if _target_modes[_k] == "scalar":
+                                    _row_sims = []
+                                    for _row in fit_obs_arrays[_k]:
+                                        _sp_i, _ag_i, _rk_i = _parse_scalar_row_idxs(
+                                            _row, _sp_idxs[_k], _age_idxs[_k], _risk_idxs[_k]
+                                        )
+                                        _sliced = _slice_tensor(_sim_k, _sp_i, _ag_i, _rk_i)
+                                        _row_sims.append(float(_sliced.sum().item()) / _GRAD_SCALE)
+                                    _trajs[f"target_{_k}"] = _row_sims
+                                elif _target_modes[_k] == "proportion":
+                                    _row_sims = []
+                                    for _ri_prop, _row in enumerate(fit_obs_arrays[_k]):
+                                        _sp_i, _ag_i, _rk_i = _parse_scalar_row_idxs(
+                                            _row, _sp_idxs[_k], _age_idxs[_k], _risk_idxs[_k]
+                                        )
+                                        if _sp_i < 0 and _ag_i < 0 and _rk_i < 0:
+                                            _sp_i = _ri_prop
+                                        _den_sp = _sp_i if (_sp_i >= 0 and (_ag_i >= 0 or _rk_i >= 0)) else -1
+                                        _den = _slice_tensor(_sim_k, _den_sp, -1, -1).sum()
+                                        _num = _slice_tensor(_sim_k, _sp_i, _ag_i, _rk_i).sum()
+                                        _row_sims.append(float((_num / (_den + 1e-10)).item()))
+                                    _trajs[f"target_{_k}"] = _row_sims
+                                else:
+                                    _days_k = _num_fit_days_per_target[_k]
+                                    _sliced = _slice_tensor(
+                                        _sim_k, _sp_idxs[_k], _age_idxs[_k], _risk_idxs[_k]
+                                    )
+                                    _trajs[f"target_{_k}"] = (_sliced[:_days_k] / _GRAD_SCALE).numpy().tolist()
+                        return _trajs
+
                     _n_it = int(fit_n_iter.value)
                     _lr_val = float(fit_lr.value)
                     _best_loss = float("inf")
+                    _all_rep_params = []
+                    _all_rep_trajs = []
+                    _n_regular_lhs = len(_valid_pn_idxs)
 
-                    def _record_best_params_grad():
-                        return {
-                            _pn: _ti["params_dict"][_pn].detach().tolist()
-                            for _pn in _selected_params if _pn in _ti["params_dict"]
-                        }
-
-                    if fit_method.value == "adam":
-                        _opt = torch.optim.Adam(_opt_tensors, lr=_lr_val)
-                        for _ in range(_n_it):
-                            _opt.zero_grad()
-                            _state = {k: v.clone() for k, v in _state0.items()}
-                            _sim = generic_torch_simulate_calibration_target(
-                                _state, _ti["params_dict"], _mc, RATE_TEMPLATE_REGISTRY,
-                                _ti["precomputed"], _ti["schedules_dict"],
-                                _num_fit_days, _ts, _target_tvs,
+                    for _rep_idx in range(_n_rep):
+                        # ── Extract seed-scale and offset from extended LHS ────────
+                        _scale_tensors.clear()
+                        _sampled_offset = 0
+                        for _ssi, _comp_ss in enumerate(_seed_scale_keys):
+                            _sval = float(_lhs_scaled[_rep_idx, _n_regular_lhs + _ssi])
+                            _scale_tensors[_comp_ss] = torch.tensor(
+                                _sval, dtype=torch.float64, requires_grad=True,
                             )
-                            _sim_agg = _sim.sum(dim=tuple(range(1, _sim.dim())))
-                            _loss = _F.mse_loss(_sim_agg, _obs_t)
-                            _loss.backward()
-                            _opt.step()
-                            for _pn, (_pmin, _pmax) in _bounds_grad.items():
-                                if _pn in _ti["params_dict"]:
-                                    _ti["params_dict"][_pn].data.clamp_(_pmin, _pmax)
-                            _lv = float(_loss.item())
-                            _loss_curve.append(_lv)
-                            if _lv < _best_loss:
-                                _best_loss = _lv
-                                _best_params = _record_best_params_grad()
-                    else:  # lbfgs
-                        _opt = torch.optim.LBFGS(_opt_tensors, lr=_lr_val, max_iter=20)
-                        _best_loss = float("inf")
-                        for _ in range(max(1, _n_it // 20)):
-                            def _closure(_s0=_state0, _t=_ti, _ot=_obs_t):
-                                _opt.zero_grad()
-                                _s = {k: v.clone() for k, v in _s0.items()}
-                                _sim = generic_torch_simulate_calibration_target(
-                                    _s, _t["params_dict"], _mc, RATE_TEMPLATE_REGISTRY,
-                                    _t["precomputed"], _t["schedules_dict"],
-                                    _num_fit_days, _ts, _target_tvs,
-                                )
-                                _l = _F.mse_loss(_sim.sum(dim=tuple(range(1, _sim.dim()))), _ot)
-                                _l.backward()
-                                return _l
-                            _opt.step(_closure)
-                            with torch.no_grad():
-                                _s2 = {k: v.clone() for k, v in _state0.items()}
-                                _out2 = generic_torch_simulate_calibration_target(
-                                    _s2, _ti["params_dict"], _mc, RATE_TEMPLATE_REGISTRY,
-                                    _ti["precomputed"], _ti["schedules_dict"],
-                                    _num_fit_days, _ts, _target_tvs,
-                                )
-                                _lv2 = float(_F.mse_loss(_out2.sum(dim=tuple(range(1, _out2.dim()))), _obs_t).item())
-                            for _pn, (_pmin, _pmax) in _bounds_grad.items():
-                                if _pn in _ti["params_dict"]:
-                                    _ti["params_dict"][_pn].data.clamp_(_pmin, _pmax)
-                            _loss_curve.append(_lv2)
-                            if _lv2 < _best_loss:
-                                _best_loss = _lv2
-                                _best_params = _record_best_params_grad()
+                        if _fit_start_offset and len(_lhs_lo_list) > _offset_lhs_col:
+                            _sampled_offset = int(round(
+                                float(_lhs_scaled[_rep_idx, _offset_lhs_col])
+                            ))
+                        _start_rep = _shift_date(_start, _sampled_offset) if _fit_start_offset else _start
 
-                else:  # accept-reject
-                    # Determine number of subpops for "per subpopulation" sampling
+                        # ── Per-replication model rebuild when start date varies ──
+                        if _fit_start_offset:
+                            if is_metapop:
+                                _metapop, _mc = make_metapop_from_folder(
+                                    metapop_folder_input.value.strip(),
+                                    config_dict, _start_rep, _sim_days, list(compartments),
+                                    seed_offset=_rep_idx, seed_base=_seed_b, ts_per_day=_ts,
+                                    stochastic=False, tvs=_all_tvs_union, save_daily=False,
+                                    travel_config=metapop_travel_config or None,
+                                )
+                            else:
+                                _metapop, _mc, _ = make_single_pop_metapop(
+                                    config_dict, _start_rep, _sim_days, _ci,
+                                    ts_per_day=_ts, stochastic=False, tvs=_all_tvs_union,
+                                    save_daily=False, seed_base=_seed_b + _rep_idx,
+                                    travel_config=metapop_travel_config,
+                                )
+                            _ti = build_generic_torch_inputs(_metapop, _mc, _sim_days)
+                            _ti["params_dict"]["total_pop_age_risk"] = (
+                                _ti["params_dict"]["total_pop_age_risk"] * _GRAD_SCALE
+                            )
+                            _ti["precomputed"].total_pop_LAR_tensor = (
+                                _ti["precomputed"].total_pop_LAR_tensor * _GRAD_SCALE
+                            )
+                            _ti["precomputed"].total_pop_LA = (
+                                _ti["precomputed"].total_pop_LA * _GRAD_SCALE
+                            )
+                            _seed_base_state.clear()
+                            _seed_base_state.update(
+                                {k: v.clone().detach() * _GRAD_SCALE for k, v in _ti["state_dict"].items()}
+                            )
+
+                        # ── Initialise regular param tensors from LHS ─────────────
+                        _opt_tensors = list(_scale_tensors.values())
+                        _lhs_col = 0
+                        for _j, _pn in enumerate(_selected_params):
+                            if _pn not in _ti["params_dict"]:
+                                continue
+                            _dims = _dim_vals[_j] if _dim_vals else []
+                            _has_age = "age groups" in _dims
+                            _has_risk = "risk groups" in _dims
+                            _init_val = float(_lhs_scaled[_rep_idx, _lhs_col])
+                            _lhs_col += 1
+                            if _has_age and _has_risk:
+                                _t = torch.full((_A, _R), _init_val, dtype=torch.float64, requires_grad=True)
+                            elif _has_age:
+                                _t = torch.full((_A, 1), _init_val, dtype=torch.float64, requires_grad=True)
+                            elif _has_risk:
+                                _t = torch.full((1, _R), _init_val, dtype=torch.float64, requires_grad=True)
+                            elif "subpopulation" in _dims:
+                                _L = list(_ti["state_dict"].values())[0].shape[0]
+                                _t = torch.full((_L, 1, 1), _init_val, dtype=torch.float64, requires_grad=True)
+                            else:
+                                _t = torch.tensor(_init_val, dtype=torch.float64, requires_grad=True)
+                            _ti["params_dict"][_pn] = _t
+                            _opt_tensors.append(_t)
+
+                        _rep_best_loss = float("inf")
+                        _rep_best_params = {}
+                        _rep_best_trajs = {}
+
+                        _rep_loss_curve = []
+                        if not _opt_tensors:
+                            # Only start-offset is being searched; evaluate once
+                            with torch.no_grad():
+                                _lv0 = float(_compute_total_loss().item())
+                            _rep_loss_curve = [_lv0]
+                            _rep_best_loss = _lv0
+                            _rep_best_params = _record_params_grad()
+                            _rep_best_trajs = _record_trajs_grad()
+                        elif fit_method.value == "adam":
+                            _opt = torch.optim.Adam(_opt_tensors, lr=_lr_val)
+                            for _ in range(_n_it):
+                                _opt.zero_grad()
+                                _loss = _compute_total_loss()
+                                _loss.backward()
+                                _opt.step()
+                                for _pn, (_pmin, _pmax) in _bounds_grad.items():
+                                    if _pn in _ti["params_dict"]:
+                                        _ti["params_dict"][_pn].data.clamp_(_pmin, _pmax)
+                                for _comp_ss in _seed_scale_keys:
+                                    _j_ss = _seed_scale_comps[_comp_ss]
+                                    _scale_tensors[_comp_ss].data.clamp_(
+                                        float(_lo_vals[_j_ss]), float(_hi_vals[_j_ss])
+                                    )
+                                _lv = float(_loss.item())
+                                _rep_loss_curve.append(_lv)
+                                if _lv < _rep_best_loss:
+                                    _rep_best_loss = _lv
+                                    _rep_best_params = _record_params_grad()
+                                    _rep_best_trajs = _record_trajs_grad()
+
+                        else:  # lbfgs
+                            _opt = torch.optim.LBFGS(_opt_tensors, lr=_lr_val, max_iter=20)
+                            for _ in range(max(1, _n_it // 20)):
+                                def _closure():
+                                    _opt.zero_grad()
+                                    _l = _compute_total_loss()
+                                    _l.backward()
+                                    return _l
+                                _opt.step(_closure)
+                                for _pn, (_pmin, _pmax) in _bounds_grad.items():
+                                    if _pn in _ti["params_dict"]:
+                                        _ti["params_dict"][_pn].data.clamp_(_pmin, _pmax)
+                                for _comp_ss in _seed_scale_keys:
+                                    _j_ss = _seed_scale_comps[_comp_ss]
+                                    _scale_tensors[_comp_ss].data.clamp_(
+                                        float(_lo_vals[_j_ss]), float(_hi_vals[_j_ss])
+                                    )
+                                with torch.no_grad():
+                                    _lv2 = float(_compute_total_loss().item())
+                                _rep_loss_curve.append(_lv2)
+                                if _lv2 < _rep_best_loss:
+                                    _rep_best_loss = _lv2
+                                    _rep_best_params = _record_params_grad()
+                                    _rep_best_trajs = _record_trajs_grad()
+                        _loss_curve.append(_rep_loss_curve)
+
+                        if _fit_start_offset:
+                            _rep_best_params["epidemic_start_offset_days"] = _sampled_offset
+                            _rep_best_params["epidemic_start_date"] = _start_rep
+
+                        _all_rep_params.append(_rep_best_params)
+                        _all_rep_trajs.append(_rep_best_trajs)
+                        if _rep_best_loss < _best_loss:
+                            _best_loss = _rep_best_loss
+                            _best_params = _rep_best_params
+                            _best_trajs = _rep_best_trajs
+
+                    _accepted_params_list = _all_rep_params
+                    _accepted_trajectories = _all_rep_trajs
+    
+                # ── accept-reject ──────────────────────────────────────────────────
+                else:
+                    _all_tvs_ar = list(dict.fromkeys(tv for tvs in _target_tvs for tv in tvs))
+                    _all_comps_ar = list(dict.fromkeys(c for cs in _target_comps for c in cs))
+                    _has_any_comp_ar = bool(_all_comps_ar)
+
                     _n_subpops = 1
-                    if is_metapop and any(_dim_vals[_j] == "per subpopulation" for _j in range(len(_selected_params))):
+                    if is_metapop and any(
+                        "subpopulation" in (_dim_vals[_j] if _dim_vals else [])
+                        for _j in range(len(_selected_params))
+                    ):
                         try:
-                            _mp_cfg_p = Path(metapop_folder_input.value.strip()) / "metapop_config.json"
-                            with open(_mp_cfg_p) as _f:
+                            with open(Path(metapop_folder_input.value.strip()) / "metapop_config.json") as _f:
                                 _n_subpops = len(json.load(_f).get("subpopulations", []))
                         except Exception:
                             _n_subpops = 1
+
+                    # Pre-load metapop base ICs once for seed scaling
+                    _metapop_base_inits = []
+                    if _seed_scale_comps and is_metapop and metapop_folder_input.value.strip():
+                        _folder_ar = Path(metapop_folder_input.value.strip())
+                        for _sp_nm_ar in _subpop_names_run:
+                            _ic_path_ar = _folder_ar / f"initial_conditions_{_sp_nm_ar}.json"
+                            _comp_base_ar = {_c: build_scalar_array(0.0, _A, _R) for _c in compartments}
+                            _epi_base_ar = {}
+                            if _ic_path_ar.exists():
+                                try:
+                                    with open(_ic_path_ar) as _f:
+                                        _ic_data_ar = json.load(_f)
+                                    for _c, _arr in _ic_data_ar.get("compartments", {}).items():
+                                        if _c in compartments:
+                                            _comp_base_ar[_c] = np.array(_arr, dtype=float)
+                                    for _em, _arr in _ic_data_ar.get("epi_metrics", {}).items():
+                                        _epi_base_ar[_em] = np.array(_arr, dtype=float)
+                                except Exception:
+                                    pass
+                            _metapop_base_inits.append((_comp_base_ar, _epi_base_ar))
+
+                    def _extract_ts_sliced(metapop_obj, target_vars_k, sp_idx, ag_idx, rk_idx, n_days):
+                        """Extract timeseries array with optional subpop/age/risk slicing."""
+                        _sps = list(metapop_obj.subpop_models.values())
+                        _sp_list = [_sps[sp_idx]] if sp_idx >= 0 else _sps
+                        _result = None
+                        for _sp_m in _sp_list:
+                            for _var in target_vars_k:
+                                if _var in _sp_m.transition_variables:
+                                    _h = np.array(
+                                        _sp_m.transition_variables[_var].history_vals_list
+                                    )[:n_days]
+                                elif _var in _sp_m.compartments:
+                                    _h = np.array(
+                                        _sp_m.compartments[_var].history_vals_list
+                                    )[:n_days]
+                                else:
+                                    continue
+                                if ag_idx >= 0:
+                                    _h = _h[:, ag_idx:ag_idx + 1, :]
+                                if rk_idx >= 0:
+                                    _h = _h[:, :, rk_idx:rk_idx + 1]
+                                _hv = _h.sum(axis=(1, 2))
+                                _result = _hv if _result is None else _result + _hv
+                        return _result if _result is not None else np.zeros(n_days)
+
+                    def _extract_scalar_rows(metapop_obj, target_vars_k, scalar_rows, n_days,
+                                             sp_fallback=-1, ag_fallback=-1, rk_fallback=-1):
+                        """Extract per-row scalar totals for scalar-mode targets."""
+                        _sps = list(metapop_obj.subpop_models.values())
+                        _row_sims = []
+                        for _row in scalar_rows:
+                            _sp_i, _ag_i, _rk_i = _parse_scalar_row_idxs(
+                                _row, sp_fallback, ag_fallback, rk_fallback
+                            )
+                            _sp_list = [_sps[_sp_i]] if _sp_i >= 0 else _sps
+                            _total = 0.0
+                            for _sp_m in _sp_list:
+                                for _var in target_vars_k:
+                                    if _var in _sp_m.transition_variables:
+                                        _h = np.array(
+                                            _sp_m.transition_variables[_var].history_vals_list
+                                        )[:n_days]
+                                    elif _var in _sp_m.compartments:
+                                        _h = np.array(
+                                            _sp_m.compartments[_var].history_vals_list
+                                        )[:n_days]
+                                    else:
+                                        continue
+                                    if _ag_i >= 0:
+                                        _h = _h[:, _ag_i:_ag_i + 1, :]
+                                    if _rk_i >= 0:
+                                        _h = _h[:, :, _rk_i:_rk_i + 1]
+                                    _total += float(_h.sum())
+                            _row_sims.append(_total)
+                        return _row_sims
+
+                    def _extract_proportion_rows(metapop_obj, target_vars_k, scalar_rows, n_days,
+                                                 sp_fallback=-1, ag_fallback=-1, rk_fallback=-1):
+                        """Extract per-row proportions for proportion-mode targets.
+
+                        Denominator subpop: fixed to the row's subpop only when age or risk is
+                        also specified; otherwise grand total (all subpops). This allows
+                        subpop-only rows to express the share of infections attributable to
+                        that subpopulation.
+                        """
+                        _sps = list(metapop_obj.subpop_models.values())
+                        _row_sims = []
+                        for _ri_prop, _row in enumerate(scalar_rows):
+                            _sp_i, _ag_i, _rk_i = _parse_scalar_row_idxs(
+                                _row, sp_fallback, ag_fallback, rk_fallback
+                            )
+                            # When no group is specified, treat row order as subpop order
+                            if _sp_i < 0 and _ag_i < 0 and _rk_i < 0:
+                                _sp_i = _ri_prop
+                            _den_sp = _sp_i if (_sp_i >= 0 and (_ag_i >= 0 or _rk_i >= 0)) else -1
+                            _sp_list_num = [_sps[_sp_i]] if (0 <= _sp_i < len(_sps)) else _sps
+                            _sp_list_den = [_sps[_den_sp]] if _den_sp >= 0 else _sps
+                            _num = 0.0
+                            _den = 0.0
+                            for _sp_m in _sp_list_den:
+                                for _var in target_vars_k:
+                                    if _var in _sp_m.transition_variables:
+                                        _h_full = np.array(
+                                            _sp_m.transition_variables[_var].history_vals_list
+                                        )[:n_days]
+                                    elif _var in _sp_m.compartments:
+                                        _h_full = np.array(
+                                            _sp_m.compartments[_var].history_vals_list
+                                        )[:n_days]
+                                    else:
+                                        continue
+                                    _den += float(_h_full.sum())
+                            for _sp_m in _sp_list_num:
+                                for _var in target_vars_k:
+                                    if _var in _sp_m.transition_variables:
+                                        _h_full = np.array(
+                                            _sp_m.transition_variables[_var].history_vals_list
+                                        )[:n_days]
+                                    elif _var in _sp_m.compartments:
+                                        _h_full = np.array(
+                                            _sp_m.compartments[_var].history_vals_list
+                                        )[:n_days]
+                                    else:
+                                        continue
+                                    _h_sliced = _h_full
+                                    if _ag_i >= 0:
+                                        _h_sliced = _h_sliced[:, _ag_i:_ag_i + 1, :]
+                                    if _rk_i >= 0:
+                                        _h_sliced = _h_sliced[:, :, _rk_i:_rk_i + 1]
+                                    _num += float(_h_sliced.sum())
+                            _row_sims.append(_num / _den if _den > 1e-10 else 0.0)
+                        return _row_sims
 
                     _rng = np.random.default_rng(_seed_b)
                     _n_samples = int(fit_n_iter.value)
@@ -3410,77 +4303,216 @@ def _run_fitting(
                     for _s_idx in range(_n_samples):
                         _sampled = {}
                         _per_subpop = [{} for _ in range(_n_subpops)]
+                        _sampled_scales = {}  # {comp: scale_value}
+                        _sampled_offset = 0
 
                         for _j, _pn in enumerate(_selected_params):
                             _lo = float(_lo_vals[_j])
                             _hi = float(_hi_vals[_j])
-                            _dim = _dim_vals[_j] if _dim_vals else "scalar"
-                            if _dim == "per age group":
-                                _sampled[_pn] = _rng.uniform(_lo, _hi, size=(_A, 1)).tolist()
-                            elif _dim == "per risk group":
-                                _sampled[_pn] = _rng.uniform(_lo, _hi, size=(1, _R)).tolist()
-                            elif _dim == "per age × risk":
-                                _sampled[_pn] = _rng.uniform(_lo, _hi, size=(_A, _R)).tolist()
-                            elif _dim == "per subpopulation":
-                                _sp_vals = _rng.uniform(_lo, _hi, size=_n_subpops)
+                            if _pn.startswith("seed_scale_"):
+                                _comp_ss = _pn[len("seed_scale_"):]
+                                if _comp_ss in compartments:
+                                    _sampled_scales[_comp_ss] = float(_rng.uniform(_lo, _hi))
+                                continue
+                            _dims = _dim_vals[_j] if _dim_vals else []
+                            _has_age = "age groups" in _dims
+                            _has_risk = "risk groups" in _dims
+                            _has_meta = "subpopulation" in _dims
+                            if _has_age and _has_risk:
+                                _inner_shape = (_A, _R)
+                            elif _has_age:
+                                _inner_shape = (_A, 1)
+                            elif _has_risk:
+                                _inner_shape = (1, _R)
+                            else:
+                                _inner_shape = None
+                            if _has_meta:
                                 for _spi in range(_n_subpops):
-                                    _per_subpop[_spi][_pn] = float(_sp_vals[_spi])
+                                    _per_subpop[_spi][_pn] = (
+                                        _rng.uniform(_lo, _hi, size=_inner_shape).tolist()
+                                        if _inner_shape else float(_rng.uniform(_lo, _hi))
+                                    )
+                            elif _inner_shape:
+                                _sampled[_pn] = _rng.uniform(_lo, _hi, size=_inner_shape).tolist()
                             else:
                                 _sampled[_pn] = float(_rng.uniform(_lo, _hi))
+
+                        # Sample start date offset (integer)
+                        if _fit_start_offset:
+                            _sampled_offset = int(_rng.integers(_offset_lo_val, _offset_hi_val + 1))
+                        _start_iter = _shift_date(_start, _sampled_offset) if _fit_start_offset else _start
+
+                        # Build scaled initial conditions for this iteration
+                        _ci_iter = None
+                        _init_override = None
+                        if _sampled_scales:
+                            if is_metapop and _metapop_base_inits:
+                                _init_override = []
+                                for _comp_base_sp, _epi_base_sp in _metapop_base_inits:
+                                    _scaled_comp = {}
+                                    _delta_sp = np.zeros_like(
+                                        _comp_base_sp.get(
+                                            compartments[0],
+                                            build_scalar_array(0.0, _A, _R),
+                                        )
+                                    ) if compartments else None
+                                    for _c in compartments:
+                                        _base_arr = _comp_base_sp.get(_c, build_scalar_array(0.0, _A, _R))
+                                        if _c in _sampled_scales and _c != (compartments[0] if compartments else None):
+                                            _sc = _sampled_scales[_c]
+                                            _scaled_comp[_c] = _base_arr * _sc
+                                            if _delta_sp is not None:
+                                                _delta_sp += _base_arr * (_sc - 1.0)
+                                        else:
+                                            _scaled_comp[_c] = _base_arr.copy()
+                                    if compartments and _delta_sp is not None:
+                                        _first_arr = _comp_base_sp.get(
+                                            compartments[0], build_scalar_array(0.0, _A, _R)
+                                        )
+                                        _scaled_comp[compartments[0]] = np.maximum(
+                                            _first_arr - _delta_sp, 0.0
+                                        )
+                                    _init_override.append((_scaled_comp, _epi_base_sp))
+                            elif not is_metapop and _ci is not None:
+                                _ci_iter = {}
+                                for _c in compartments:
+                                    if _c in _sampled_scales and _c != (compartments[0] if compartments else None):
+                                        _base_val = float(np.sum(_ci[_c]))
+                                        _ci_iter[_c] = build_scalar_array(_base_val * _sampled_scales[_c], 1, 1)
+                                    else:
+                                        _ci_iter[_c] = _ci[_c]
+                                if compartments:
+                                    _total_non_first = sum(
+                                        float(np.sum(_ci_iter[_c])) for _c in compartments[1:]
+                                    )
+                                    _ci_iter[compartments[0]] = build_scalar_array(
+                                        max(0.0, _N - _total_non_first), 1, 1
+                                    )
 
                         _has_per_subpop = any(_per_subpop)
                         if is_metapop:
                             _m, _ = make_metapop_from_folder(
                                 metapop_folder_input.value.strip(),
-                                config_dict, _start, _num_fit_days, list(compartments),
+                                config_dict, _start_iter, _sim_days, list(compartments),
                                 seed_offset=_s_idx, seed_base=_seed_b, ts_per_day=_ts,
                                 stochastic=False,
-                                tvs=_tvs if _target_is_tv else [],
-                                save_daily=bool(_target_comps),
+                                tvs=_all_tvs_ar,
+                                save_daily=_has_any_comp_ar,
                                 param_overrides=_sampled or None,
                                 param_overrides_per_subpop=_per_subpop if _has_per_subpop else None,
                                 travel_config=metapop_travel_config or None,
+                                init_states_override=_init_override,
                             )
                         else:
+                            _ci_run = _ci_iter if _ci_iter is not None else _ci
                             _m, _, _ = make_single_pop_metapop(
-                                config_dict, _start, _num_fit_days, _ci,
+                                config_dict, _start_iter, _sim_days, _ci_run,
                                 seed_offset=_s_idx, seed_base=_seed_b, ts_per_day=_ts,
                                 stochastic=False,
-                                tvs=_tvs if _target_is_tv else [],
-                                save_daily=bool(_target_comps),
+                                tvs=_all_tvs_ar,
+                                save_daily=_has_any_comp_ar,
                                 param_overrides=_sampled or None,
                                 travel_config=metapop_travel_config,
                             )
-                        _m.simulate_until_day(_num_fit_days)
-                        _hist = extract_history(_m, list(compartments), tvs=_tvs if _target_is_tv else None)
-                        _parts = [_hist[_t][:_num_fit_days] for _t in _fit_targets if _t in _hist]
-                        if not _parts:
+                        _m.simulate_until_day(_sim_days)
+
+                        _weighted_r2 = 0.0
+                        _per_target_trajs = {}
+                        _skip = False
+                        for _k in range(_n):
+                            _mode_k = _target_modes[_k]
+                            _w_k = _target_weights[_k] / _weight_sum
+                            _n_days_k = _num_fit_days_per_target[_k]
+
+                            if _mode_k == "scalar":
+                                _row_sims = _extract_scalar_rows(
+                                    _m, _target_vars_list[_k], fit_obs_arrays[_k], _n_days_k,
+                                    sp_fallback=_sp_idxs[_k], ag_fallback=_age_idxs[_k],
+                                    rk_fallback=_risk_idxs[_k],
+                                )
+                                _obs_vals = [_row["value"] for _row in fit_obs_arrays[_k]]
+                                _r2_k = compute_rsquared(_obs_vals, _row_sims)
+                                _per_target_trajs[f"target_{_k}"] = _row_sims
+                            elif _mode_k == "proportion":
+                                _row_sims = _extract_proportion_rows(
+                                    _m, _target_vars_list[_k], fit_obs_arrays[_k], _n_days_k,
+                                    sp_fallback=_sp_idxs[_k], ag_fallback=_age_idxs[_k],
+                                    rk_fallback=_risk_idxs[_k],
+                                )
+                                _obs_vals = [_row["value"] for _row in fit_obs_arrays[_k]]
+                                _r2_k = compute_rsquared(_obs_vals, _row_sims)
+                                _per_target_trajs[f"target_{_k}"] = _row_sims
+                            else:
+                                _sim_ts = _extract_ts_sliced(
+                                    _m, _target_vars_list[_k],
+                                    _sp_idxs[_k], _age_idxs[_k], _risk_idxs[_k],
+                                    _n_days_k,
+                                )
+                                _obs_k = fit_obs_arrays[_k][:_n_days_k]
+                                if len(_sim_ts) != len(_obs_k):
+                                    _skip = True
+                                    break
+                                _r2_k = compute_rsquared(list(_obs_k), _sim_ts.tolist())
+                                _per_target_trajs[f"target_{_k}"] = _sim_ts.tolist()
+
+                            _weighted_r2 += _w_k * _r2_k
+
+                        if _skip:
                             continue
-                        _sim_s = np.array(_parts).sum(axis=0)
-                        if len(_sim_s) != len(_obs):
-                            continue
-                        _r2 = compute_rsquared(list(_obs), _sim_s.tolist())
-                        _loss_curve.append(float(_r2))
-                        if _r2 > _best_r2:
-                            _best_r2 = _r2
-                            # Flatten best params: scalars and per-subpop combined
+
+                        _loss_curve.append(float(_weighted_r2))
+                        if _weighted_r2 > _best_r2:
+                            _best_r2 = _weighted_r2
                             _best_params = dict(_sampled)
                             for _spi, _sp_d in enumerate(_per_subpop):
-                                for _k, _v in _sp_d.items():
-                                    _best_params[f"{_k}_subpop{_spi}"] = _v
-                        if _r2 >= _r2_thresh:
-                            _accepted_params_list.append(dict(_sampled))
-
+                                for _kk, _vv in _sp_d.items():
+                                    _best_params[f"{_kk}_subpop{_spi}"] = _vv
+                            _best_params.update({f"seed_scale_{_c}": _v for _c, _v in _sampled_scales.items()})
+                            if _fit_start_offset:
+                                _best_params["epidemic_start_offset_days"] = _sampled_offset
+                                _best_params["epidemic_start_date"] = _start_iter
+                            _best_trajs = dict(_per_target_trajs)
+                        if _weighted_r2 >= _r2_thresh:
+                            _acc = dict(_sampled)
+                            for _spi, _sp_d in enumerate(_per_subpop):
+                                for _kk, _vv in _sp_d.items():
+                                    _acc[f"{_kk}_subpop{_spi}"] = _vv
+                            _acc.update({f"seed_scale_{_c}": _v for _c, _v in _sampled_scales.items()})
+                            if _fit_start_offset:
+                                _acc["epidemic_start_offset_days"] = _sampled_offset
+                                _acc["epidemic_start_date"] = _start_iter
+                            _accepted_params_list.append(_acc)
+                            _accepted_trajectories.append(dict(_per_target_trajs))
+    
             except Exception as _exc:
-                mo.stop(True, mo.callout(mo.md(f"**Fitting error:** {_exc}"), kind="danger"))
-
+                import traceback as _tb
+                mo.stop(
+                    True,
+                    mo.callout(
+                        mo.md(f"**Fitting error:** {_exc}\n\n```\n{_tb.format_exc()}\n```"),
+                        kind="danger",
+                    ),
+                )
+    
+        _sim_trajectories = (
+            _accepted_trajectories if _accepted_trajectories
+            else ([_best_trajs] if _best_trajs else [])
+        )
+        _is_ar = fit_method.value == "ar"
         fit_result = FitResult(
             best_params=_best_params,
             loss_curve=_loss_curve,
-            num_days=_num_fit_days,
-            observed=list(_obs),
+            num_days=_sim_days,
+            observed=[list(o) if isinstance(o, np.ndarray) else o for o in fit_obs_arrays],
             method=fit_method.value,
             accepted_params=_accepted_params_list if _accepted_params_list else [_best_params],
+            sim_trajectories=_sim_trajectories,
+            fit_targets=_target_vars_list,
+            target_labels=_target_labels,
+            target_weights=_target_weights,
+            target_modes=_target_modes,
+            r2_threshold=_r2_thresh if _is_ar else None,
+            n_ar_accepted=len(_accepted_params_list) if _is_ar else None,
         )
     return (fit_result,)
 
@@ -3494,41 +4526,356 @@ def _fitting_autosave(fit_result, output_dir, json):
 
 
 @app.cell
-def _fitting_results_display(fit_result, np, plt, mo, main_tab):
+def _fitting_results_display(fit_result, np, plt, mo, main_tab, json):
     mo.stop(main_tab.value != "Fitting", None)
     mo.stop(fit_result is None, mo.md("*Run fitting to see results.*"))
     _lc = fit_result.loss_curve
     _bp = fit_result.best_params
     _method = fit_result.method
-    _fig, _axes = plt.subplots(1, 2, figsize=(13, 4))
-    _axes[0].plot(_lc, linewidth=1.5)
-    _axes[0].set_xlabel("Iteration / Sample")
-    _axes[0].set_ylabel("R²" if _method == "ar" else "MSE loss")
+    _accepted = fit_result.accepted_params or []
+    _n_runs = len(_accepted)
+
+    def _fmt_val(v):
+        if isinstance(v, (int, float)):
+            return f"{v:.6g}"
+        return str(v)
+
+    # Loss / progress plot
+    _fig, _axes = plt.subplots(1, 2, figsize=(14, 4))
+    if _method == "ar":
+        _axes[0].plot(_lc, linewidth=1.5, label="Weighted R²")
+        _r2_thr = fit_result.r2_threshold
+        if _r2_thr is not None:
+            _axes[0].axhline(
+                y=_r2_thr, color="red", linestyle="--", linewidth=1.2,
+                alpha=0.8, label=f"Threshold ({_r2_thr:.2f})",
+            )
+            _axes[0].legend(fontsize=8)
+        _axes[0].set_ylabel("Weighted R²")
+    else:
+        # _lc is list of lists — one per replication, each starting at iteration 0
+        _n_rep_lc = len(_lc)
+        _alpha = min(0.9, max(0.3, 3.0 / max(_n_rep_lc, 1)))
+        for _ri, _rep_lc in enumerate(_lc):
+            _axes[0].plot(
+                _rep_lc,
+                linewidth=1.2,
+                alpha=_alpha,
+                label=f"Rep {_ri + 1}" if _n_rep_lc <= 10 else None,
+            )
+        if 1 < _n_rep_lc <= 10:
+            _axes[0].legend(fontsize=8)
+        _axes[0].set_ylabel("Weighted MSE loss")
+    _axes[0].set_xlabel("Iterations / Max samples")
     _axes[0].set_title(f"Fitting progress ({_method})")
     _axes[0].grid(True, alpha=0.3)
+
+    # Parameter table — two columns when multiple runs available
     _axes[1].axis("off")
     if _bp:
-        _rows = [[_pn, f"{_v:.6g}"] for _pn, _v in _bp.items()]
+        if _n_runs > 1:
+            _rows = []
+            for _pn, _bv in _bp.items():
+                _all_vals = [_s.get(_pn) for _s in _accepted if isinstance(_s.get(_pn), (int, float))]
+                if _all_vals:
+                    _arr = np.array(_all_vals, dtype=float)
+                    _med = np.median(_arr)
+                    _lo95 = np.percentile(_arr, 2.5)
+                    _hi95 = np.percentile(_arr, 97.5)
+                    _stat_str = f"{_med:.4g} [{_lo95:.4g}, {_hi95:.4g}]"
+                else:
+                    _stat_str = "—"
+                _rows.append([_pn, _fmt_val(_bv), _stat_str])
+            _col_labels = ["Parameter", "Best-fit", "Median [2.5%, 97.5%]"]
+        else:
+            _rows = [[_pn, _fmt_val(_v)] for _pn, _v in _bp.items()]
+            _col_labels = ["Parameter", "Best-fit value"]
         _tbl = _axes[1].table(
-            cellText=_rows, colLabels=["Parameter", "Best-fit value"],
+            cellText=_rows, colLabels=_col_labels,
             loc="center", cellLoc="left",
         )
         _tbl.auto_set_font_size(True)
         _tbl.scale(1.2, 1.5)
         _axes[1].set_title("Best-fit parameters")
     plt.tight_layout()
-    _params_md = "\n".join(f"- `{k}` = **{v:.6g}**" for k, v in _bp.items())
+
+    _params_md = "\n".join(f"- `{k}` = **{_fmt_val(v)}**" for k, v in _bp.items())
+
     _accepted_note = mo.md("")
+    _ar_multi_note = mo.md("")
     if _method == "ar":
-        _n_acc = len(fit_result.accepted_params)
+        _n_acc = fit_result.n_ar_accepted if fit_result.n_ar_accepted is not None else _n_runs
+        if _n_acc == 0:
+            _accepted_note = mo.callout(
+                mo.md(
+                    f"**No parameter sets passed the weighted R² threshold "
+                    f"({fit_result.r2_threshold:.2f}).** Showing best-fit only. "
+                    "Lower the threshold or increase the number of samples."
+                ),
+                kind="warn",
+            )
+        else:
+            _accepted_note = mo.callout(
+                mo.md(
+                    f"**{_n_acc} accepted parameter set(s)** passed the weighted R² threshold. "
+                    "Enable **Start forecast from fitted end-state** in the Forecast tab to run an ensemble."
+                ),
+                kind="success" if _n_acc > 1 else "info",
+            )
+        if len(fit_result.target_modes or []) > 1:
+            _ar_multi_note = mo.callout(
+                mo.md(
+                    "**Accept-reject with multiple targets:** AR samples parameters randomly and "
+                    "accepts only those where the *combined* weighted R² clears the threshold. "
+                    "With multiple targets the joint probability of a random sample satisfying all "
+                    "objectives simultaneously is low — acceptance rates drop sharply. "
+                    "Use **Adam** or **L-BFGS** for reliable multi-target fitting."
+                ),
+                kind="warn",
+            )
+    elif _method in ("adam", "lbfgs") and _n_runs > 1:
         _accepted_note = mo.callout(
             mo.md(
-                f"**{_n_acc} accepted parameter set(s)** passed the R² threshold. "
+                f"**{_n_runs} replications** completed with LHS starting points. "
+                "Best-fit is the replication with lowest final loss. "
                 "Enable **Start forecast from fitted end-state** in the Forecast tab to run an ensemble."
             ),
-            kind="success" if _n_acc > 1 else "info",
+            kind="info",
         )
-    mo.vstack([mo.md("## Fitting Results"), _fig, mo.md(_params_md), _accepted_note])
+
+    _download = mo.download(
+        data=json.dumps({
+            "best_params": fit_result.best_params,
+            "num_days": fit_result.num_days,
+            "method": fit_result.method,
+            "accepted_params": fit_result.accepted_params,
+        }, indent=2).encode(),
+        filename="fitted_params.json",
+        mimetype="application/json",
+        label="Download fitted_params.json",
+    )
+    mo.vstack([mo.md("## Fitting Results"), _fig, mo.md(_params_md), _accepted_note, _ar_multi_note, _download])
+    return
+
+
+@app.cell
+def _fitting_comparison_ui(mo):
+    fit_comparison_style = mo.ui.radio(
+        options={"Spaghetti lines": "spaghetti", "Median + 95% CI": "band"},
+        value="Median + 95% CI",
+        label="Display accepted parameter sets as",
+    )
+    return (fit_comparison_style,)
+
+
+@app.cell
+def _fitting_comparison_display(
+    fit_result, fit_comparison_style,
+    np, plt, mo, main_tab,
+):
+    mo.stop(main_tab.value != "Fitting", None)
+    mo.stop(fit_result is None, mo.md(""))
+
+    _method = fit_result.method
+    _trajs = fit_result.sim_trajectories
+    _n_tgts = len(fit_result.fit_targets)
+    _labels = fit_result.target_labels if fit_result.target_labels else [f"Target {_k+1}" for _k in range(_n_tgts)]
+    _modes = list(fit_result.target_modes) if fit_result.target_modes else []
+    if not _modes:
+        for _k in range(_n_tgts):
+            _obs_k = fit_result.observed[_k]
+            _is_dict_rows = isinstance(_obs_k, list) and _obs_k and isinstance(_obs_k[0], dict)
+            _modes.append("scalar" if _is_dict_rows else "ts")
+
+    _style_ui = mo.md("")
+    if _method == "ar" or (_method in ("adam", "lbfgs") and len(_trajs) > 1):
+        _style_ui = mo.hstack([fit_comparison_style], justify="start")
+
+    _figs = []
+    for _k in range(_n_tgts):
+        _label = _labels[_k]
+        _obs_k = fit_result.observed[_k]
+        _mode_k = _modes[_k]
+        _traj_key = f"target_{_k}"
+
+        if _mode_k in ("scalar", "proportion"):
+            # Bar chart: observed vs simulated per row
+            _obs_vals = [_row["value"] for _row in _obs_k]
+            _sim_vals = [
+                _traj[_traj_key][_ri] if _traj_key in _traj and _ri < len(_traj[_traj_key]) else 0.0
+                for _traj in (_trajs[:1] if _trajs else [{}])
+                for _ri in range(len(_obs_vals))
+            ]
+            # For AR with multiple accepted: show range
+            if _method == "ar" and len(_trajs) > 1:
+                _all_sim = np.array([
+                    [_t[_traj_key][_ri] if _traj_key in _t and _ri < len(_t[_traj_key]) else 0.0
+                     for _ri in range(len(_obs_vals))]
+                    for _t in _trajs
+                ])
+                _sim_med = np.median(_all_sim, axis=0)
+                _sim_lo = np.percentile(_all_sim, 2.5, axis=0)
+                _sim_hi = np.percentile(_all_sim, 97.5, axis=0)
+            else:
+                _sim_med = np.array(_sim_vals[:len(_obs_vals)])
+                _sim_lo = _sim_med
+                _sim_hi = _sim_med
+
+            _row_labels = []
+            for _ri, _row in enumerate(_obs_k):
+                _parts = []
+                for _col in ("subpopulation", "age", "risk"):
+                    if _col in _row:
+                        _parts.append(f"{_col}={_row[_col]}")
+                _row_labels.append(", ".join(_parts) if _parts else f"row {_ri}")
+
+            _x = np.arange(len(_obs_vals))
+            _w = 0.35
+            _fig_k, _ax_k = plt.subplots(figsize=(max(6, len(_obs_vals) * 1.2 + 1), 4))
+            _ax_k.bar(_x - _w / 2, _obs_vals, _w, label="Observed", color="k", alpha=0.7)
+            _ax_k.bar(_x + _w / 2, _sim_med, _w, label="Simulated", color="steelblue", alpha=0.8)
+            if _method == "ar" and len(_trajs) > 1:
+                _ax_k.errorbar(
+                    _x + _w / 2, _sim_med,
+                    yerr=[_sim_med - _sim_lo, _sim_hi - _sim_med],
+                    fmt="none", color="steelblue", capsize=4,
+                )
+            _ax_k.set_xticks(_x)
+            _ax_k.set_xticklabels(_row_labels, rotation=30, ha="right", fontsize=9)
+            _ax_k.set_ylabel("Proportion" if _mode_k == "proportion" else "Total count")
+            _ax_k.set_title(f"{_label} ({'proportion' if _mode_k == 'proportion' else 'scalar total'})")
+            _ax_k.legend()
+            _ax_k.grid(True, alpha=0.3, axis="y")
+            plt.tight_layout()
+            _figs.append(_fig_k)
+
+        else:
+            # Timeseries plot
+            _obs_arr = np.array(_obs_k)
+            _num_days = len(_obs_arr)
+            _days = np.arange(_num_days)
+            _fig_k, _ax_k = plt.subplots(figsize=(10, 4))
+
+            _valid_trajs = [_t[_traj_key] for _t in _trajs if _traj_key in _t]
+            _n_valid = len(_valid_trajs)
+            if _method in ("adam", "lbfgs") and _n_valid <= 1:
+                # Single replication: just draw the fitted curve
+                if _valid_trajs:
+                    _sim = np.array(_valid_trajs[0])
+                    _ax_k.plot(_days, _sim[:_num_days], color="steelblue", linewidth=2, label="Fitted")
+                _ax_k.plot(_days, _obs_arr, "ko", markersize=4, label="Observed", zorder=5)
+                _ax_k.set_title(f"{_label} — Fitted vs Observed")
+            else:
+                # Multiple replications or AR accepted runs: spaghetti or band
+                _style = fit_comparison_style.value
+                _run_label = "accepted" if _method == "ar" else "replication"
+                if _valid_trajs:
+                    _trajs_arr = np.array([_t[:_num_days] for _t in _valid_trajs])
+                    if _style == "spaghetti":
+                        for _traj in _trajs_arr:
+                            _ax_k.plot(
+                                _days, _traj,
+                                color="steelblue",
+                                alpha=min(1.0, 3.0 / len(_trajs_arr)),
+                                linewidth=1,
+                            )
+                        _ax_k.plot([], [], color="steelblue", alpha=0.6, linewidth=1.5,
+                                   label=f"{_n_valid} {_run_label}(s)")
+                    else:
+                        _med = np.median(_trajs_arr, axis=0)
+                        _lo = np.percentile(_trajs_arr, 2.5, axis=0)
+                        _hi = np.percentile(_trajs_arr, 97.5, axis=0)
+                        _ax_k.fill_between(_days, _lo, _hi, color="steelblue", alpha=0.25, label="95% CI")
+                        _ax_k.plot(_days, _med, color="steelblue", linewidth=2, label="Median")
+                _ax_k.plot(_days, _obs_arr, "ko", markersize=4, label="Observed", zorder=5)
+                _ax_k.set_title(f"{_label} ({_n_valid} {_run_label}(s))")
+
+            _ax_k.set_xlabel("Day")
+            _ax_k.set_ylabel(_label)
+            _ax_k.legend()
+            _ax_k.grid(True, alpha=0.3)
+            plt.tight_layout()
+            _figs.append(_fig_k)
+
+    mo.vstack([
+        mo.md("### Fitted vs Observed"),
+        _style_ui,
+        *_figs,
+    ])
+    return
+
+
+@app.cell
+def _fitting_pairplot(fit_result, np, plt, mo, main_tab):
+    mo.stop(main_tab.value != "Fitting", None)
+    mo.stop(fit_result is None, mo.md(""))
+
+    _accepted = fit_result.accepted_params
+    mo.stop(not _accepted or len(_accepted) <= 1, mo.md(""))
+
+    _first = _accepted[0]
+    _scalar_keys = [_k for _k, _v in _first.items() if isinstance(_v, (int, float))]
+    mo.stop(not _scalar_keys, mo.md(""))
+
+    _data = np.array([[float(_s.get(_k, float("nan"))) for _k in _scalar_keys] for _s in _accepted])
+    _n = len(_scalar_keys)
+
+    def _draw_density(_ax, _vals):
+        _vals = _vals[np.isfinite(_vals)]
+        if len(_vals) < 2:
+            return
+        _ax.hist(_vals, bins=max(10, len(_vals) // 5), density=True,
+                 color="steelblue", alpha=0.65, edgecolor="white", linewidth=0.4)
+        try:
+            from scipy.stats import gaussian_kde as _kde
+            _xs = np.linspace(_vals.min(), _vals.max(), 300)
+            _ax.plot(_xs, _kde(_vals)(_xs), color="navy", linewidth=1.8)
+        except Exception:
+            pass
+
+    if _n == 1:
+        _fig, _ax = plt.subplots(figsize=(5, 4))
+        _draw_density(_ax, _data[:, 0])
+        _ax.set_xlabel(_scalar_keys[0])
+        _ax.set_ylabel("Density")
+        _run_noun = "accepted" if fit_result.method == "ar" else "replication"
+        _ax.set_title(f"Parameter distribution ({len(_accepted)} {_run_noun}(s))")
+        _ax.grid(True, alpha=0.3)
+        plt.tight_layout()
+    else:
+        _run_noun = "accepted" if fit_result.method == "ar" else "replication"
+        _fig, _axs = plt.subplots(_n, _n, figsize=(3 * _n, 3 * _n))
+        _alpha_sc = min(0.8, 30.0 / max(len(_accepted), 1))
+        for _row in range(_n):
+            for _col in range(_n):
+                _ax = _axs[_row, _col]
+                if _row == _col:
+                    _draw_density(_ax, _data[:, _row])
+                else:
+                    _ax.scatter(
+                        _data[:, _col], _data[:, _row],
+                        alpha=_alpha_sc, s=14,
+                        color="steelblue", edgecolors="none",
+                    )
+                _ax.grid(True, alpha=0.2)
+                if _row == _n - 1:
+                    _ax.set_xlabel(_scalar_keys[_col], fontsize=9)
+                else:
+                    _ax.tick_params(labelbottom=False)
+                if _col == 0:
+                    _ax.set_ylabel(_scalar_keys[_row], fontsize=9)
+                else:
+                    _ax.tick_params(labelleft=False)
+        _fig.suptitle(
+            f"Parameter distributions ({len(_accepted)} {_run_noun}(s))",
+            y=1.01, fontsize=11,
+        )
+        plt.tight_layout()
+
+    mo.vstack([
+        mo.md("### Accepted Parameter Distributions"),
+        _fig,
+    ])
     return
 
 
@@ -3562,25 +4909,78 @@ def _forecast_ui(mo):
 def _forecast_display(
     forecast_use_fitted, forecast_params_path, forecast_from_fitted_state,
     forecast_horizon, forecast_n_reps, forecast_stochastic, forecast_run_button,
-    fit_result, mo, main_tab,
+    fit_result, mo, main_tab, json, Path,
 ):
     mo.stop(main_tab.value != "Forecast", None)
     _path_w = forecast_params_path if not forecast_use_fitted.value else mo.md("")
 
+    # Multi-set note — shown when AR or gradient replications produced multiple param sets
+    _ar_note = mo.md("")
+    _is_ar_fitted = False
+    _n_accepted = 0
+    _fit_method_display = "ar"
+    if forecast_use_fitted.value:
+        _is_ar_fitted = (
+            fit_result is not None
+            and len(fit_result.accepted_params) > 1
+        )
+        if _is_ar_fitted:
+            _n_accepted = len(fit_result.accepted_params)
+            _fit_method_display = fit_result.method
+    else:
+        _pp = forecast_params_path.value.strip()
+        if _pp:
+            try:
+                with open(Path(_pp).expanduser()) as _f:
+                    _loaded_preview = json.load(_f)
+                _loaded_accepted = _loaded_preview.get("accepted_params", [])
+                if len(_loaded_accepted) > 1:
+                    _is_ar_fitted = True
+                    _n_accepted = len(_loaded_accepted)
+                    _fit_method_display = _loaded_preview.get("method", "ar")
+            except Exception:
+                pass
+
+    if _is_ar_fitted:
+        _reps_val = int(forecast_n_reps.value)
+        _set_noun = (
+            "accepted parameter set(s)" if _fit_method_display == "ar"
+            else "fitted replication(s)"
+        )
+        _method_label = (
+            "accept-reject" if _fit_method_display == "ar"
+            else _fit_method_display
+        )
+        _set_header = f"**{_n_accepted} {_set_noun}** from {_method_label} fitting."
+        if _reps_val < _n_accepted:
+            _ar_note = mo.callout(
+                mo.md(
+                    f"{_set_header} "
+                    f"Replicates ({_reps_val}) < {_n_accepted} sets — **{_reps_val}** sets will be "
+                    "sampled without replacement, each seeding one trajectory."
+                ),
+                kind="success",
+            )
+        else:
+            _base = _reps_val // _n_accepted
+            _extra = _reps_val % _n_accepted
+            if _extra == 0:
+                _ar_note_text = (
+                    f"{_set_header} "
+                    f"Each will seed **{_base}** replicate(s) — **{_reps_val}** trajectories total."
+                )
+            else:
+                _ar_note_text = (
+                    f"{_set_header} "
+                    f"Each will seed **{_base}** replicate(s); **{_extra}** set(s) sampled without "
+                    f"replacement will run one extra — **{_reps_val}** trajectories total."
+                )
+            _ar_note = mo.callout(mo.md(_ar_note_text), kind="success")
+
     _fitted_state_note = mo.md("")
     if forecast_from_fitted_state.value:
         if fit_result is not None and forecast_use_fitted.value:
-            _n_accepted = len(fit_result.accepted_params)
-            _method = fit_result.method
-            if _method == "ar" and _n_accepted > 1:
-                _fitted_state_note = mo.callout(
-                    mo.md(
-                        f"**{_n_accepted} accepted parameter set(s)** from accept-reject fitting. "
-                        "Each will warm-up through the fit period and seed a separate forecast trajectory."
-                    ),
-                    kind="success",
-                )
-            else:
+            if not _is_ar_fitted:
                 _fitted_state_note = mo.callout(
                     mo.md(
                         "Will run a deterministic warm-up through the fit period, then launch "
@@ -3591,8 +4991,10 @@ def _forecast_display(
         else:
             _fitted_state_note = mo.callout(
                 mo.md(
-                    "**Start from fitted end-state** requires **Use fitted params from Fitting tab** "
-                    "to be enabled and fitting to have been run."
+                    "**Start from fitted end-state** requires either:\n\n"
+                    "- **Use fitted params from Fitting tab** enabled with fitting already run, or\n"
+                    "- A JSON file (via the path field) exported from the Fitting tab, "
+                    "which includes `num_days`, `method`, and `accepted_params`."
                 ),
                 kind="warn",
             )
@@ -3606,6 +5008,7 @@ def _forecast_display(
         mo.hstack([forecast_horizon, forecast_n_reps], justify="start"),
         forecast_stochastic,
         forecast_from_fitted_state,
+        _ar_note,
         _fitted_state_note,
         mo.md("**Step 3 — Run**"),
         forecast_run_button,
@@ -3628,22 +5031,37 @@ def _run_forecast(
     forecast_result = None
     if forecast_run_button.value:
         _fitted_params = {}
+        _fit_meta = {"num_days": 0, "method": "ar", "accepted_params": []}
         if forecast_use_fitted.value:
             mo.stop(
                 fit_result is None,
                 mo.callout(mo.md("**No fitting results.** Run fitting first or disable 'Use fitted params'."), kind="warn"),
             )
             _fitted_params = dict(fit_result.best_params)
+            _fit_meta = {
+                "num_days": fit_result.num_days,
+                "method": fit_result.method,
+                "accepted_params": list(fit_result.accepted_params),
+            }
         else:
             _pp = forecast_params_path.value.strip()
             if _pp:
                 try:
                     with open(Path(_pp).expanduser()) as _f:
-                        _fitted_params = json.load(_f)
+                        _loaded = json.load(_f)
+                    if "best_params" in _loaded:
+                        _fitted_params = _loaded["best_params"]
+                        _fit_meta = {
+                            "num_days": _loaded.get("num_days", 0),
+                            "method": _loaded.get("method", "ar"),
+                            "accepted_params": _loaded.get("accepted_params", []),
+                        }
+                    else:
+                        _fitted_params = _loaded
                 except Exception as _exc:
                     mo.stop(True, mo.callout(mo.md(f"**Could not load fitted params:** {_exc}"), kind="danger"))
 
-        _fit_n = fit_result.num_days if (fit_result is not None and forecast_use_fitted.value) else 0
+        _fit_n = _fit_meta["num_days"]
         _horizon = int(forecast_horizon.value)
         _total_days = _fit_n + _horizon
         _reps = int(forecast_n_reps.value)
@@ -3665,19 +5083,31 @@ def _run_forecast(
 
         _histories = []
 
+        # Build param sets and run schedule (shared by both forecast paths)
+        _param_sets = _fit_meta["accepted_params"] if _fit_meta["accepted_params"] else [_fitted_params]
+        _n_accepted = len(_param_sets)
+        _is_ar = _n_accepted > 1  # distribute across AR accepted sets OR gradient replications
+        _rng_sched = np.random.default_rng(_seed_b)
+        if _is_ar and _reps < _n_accepted:
+            _selected = _rng_sched.choice(_n_accepted, size=_reps, replace=False)
+            _run_schedule = [(int(_i), 0) for _i in _selected]
+        elif _is_ar:
+            _base = _reps // _n_accepted
+            _extra = _reps % _n_accepted
+            _run_schedule = [(_i, _r) for _i in range(_n_accepted) for _r in range(_base)]
+            if _extra > 0:
+                _extra_idx = _rng_sched.choice(_n_accepted, size=_extra, replace=False)
+                _run_schedule += [(int(_i), _base) for _i in _extra_idx]
+        else:
+            _run_schedule = [(0, _r) for _r in range(_reps)]
+
         if forecast_from_fitted_state.value:
             # Two-phase: warmup through fit period → extract end-state → run forecast
             mo.stop(
-                not forecast_use_fitted.value or fit_result is None,
-                mo.callout(mo.md("**Start from fitted end-state** requires 'Use fitted params from Fitting tab' to be enabled."), kind="warn"),
-            )
-            mo.stop(
                 _fit_n == 0,
-                mo.callout(mo.md("**Start from fitted end-state** requires a non-zero fit period. Run fitting first."), kind="warn"),
+                mo.callout(mo.md("**Start from fitted end-state** requires a non-zero fit period. Run fitting first, or load a JSON exported from the Fitting tab (which includes `num_days`)."), kind="warn"),
             )
 
-            # Ensemble of param sets: all accepted for AR, otherwise just best params
-            _param_sets = fit_result.accepted_params if fit_result.accepted_params else [_fitted_params]
             _metric_names = [_m["name"] for _m in config_dict.get("epi_metrics", [])]
             _fcast_start = (
                 datetime.datetime.strptime(_start, "%Y-%m-%d")
@@ -3685,7 +5115,6 @@ def _run_forecast(
             ).strftime("%Y-%m-%d")
 
             def _extract_end_states(metapop_model, comps, metric_names):
-                """Return list of (comp_init, epi_init) per subpop from the last simulated day."""
                 _states = []
                 for _sp in metapop_model.subpop_models.values():
                     _comp = {
@@ -3705,35 +5134,42 @@ def _run_forecast(
 
             with mo.status.spinner("Running warmup + forecast from fitted state..."):
                 try:
-                    for _pset_idx, _pset in enumerate(_param_sets):
-                        # Phase 1: deterministic warmup through the fit period
-                        if not is_metapop:
-                            _wm, _, _ = make_single_pop_metapop(
-                                config_dict, _start, _fit_n, _ci,
-                                seed_offset=_pset_idx, seed_base=_seed_b, ts_per_day=_ts,
-                                stochastic=False, tvs=_tvs, save_daily=True,
-                                param_overrides=_pset or None,
-                                travel_config=metapop_travel_config,
-                            )
-                        else:
-                            _wm, _ = make_metapop_from_folder(
-                                metapop_folder_input.value, config_dict, _start, _fit_n,
-                                list(compartments),
-                                seed_offset=_pset_idx, seed_base=_seed_b, ts_per_day=_ts,
-                                stochastic=False, tvs=_tvs, save_daily=True,
-                                param_overrides=_pset or None,
-                                travel_config=metapop_travel_config,
-                            )
-                        _wm.simulate_until_day(_fit_n)
-                        _warmup_hist = extract_history(_wm, list(compartments), tvs=_tvs)
-                        _end_states = _extract_end_states(_wm, list(compartments), _metric_names)
+                    _warmup_cache = {}
+                    for _traj_idx, (_pset_idx, _rep) in enumerate(_run_schedule):
+                        _pset = _param_sets[_pset_idx]
 
-                        # Phase 2: stochastic forecast from end-state, one rep per param set
+                        # Phase 1: deterministic warmup — cached per param set
+                        if _pset_idx not in _warmup_cache:
+                            if not is_metapop:
+                                _wm, _, _ = make_single_pop_metapop(
+                                    config_dict, _start, _fit_n, _ci,
+                                    seed_offset=_pset_idx, seed_base=_seed_b, ts_per_day=_ts,
+                                    stochastic=False, tvs=_tvs, save_daily=True,
+                                    param_overrides=_pset or None,
+                                    travel_config=metapop_travel_config,
+                                )
+                            else:
+                                _wm, _ = make_metapop_from_folder(
+                                    metapop_folder_input.value, config_dict, _start, _fit_n,
+                                    list(compartments),
+                                    seed_offset=_pset_idx, seed_base=_seed_b, ts_per_day=_ts,
+                                    stochastic=False, tvs=_tvs, save_daily=True,
+                                    param_overrides=_pset or None,
+                                    travel_config=metapop_travel_config,
+                                )
+                            _wm.simulate_until_day(_fit_n)
+                            _warmup_cache[_pset_idx] = (
+                                extract_history(_wm, list(compartments), tvs=_tvs),
+                                _extract_end_states(_wm, list(compartments), _metric_names),
+                            )
+                        _warmup_hist, _end_states = _warmup_cache[_pset_idx]
+
+                        # Phase 2: stochastic forecast from end-state
                         if not is_metapop:
                             _end_comp, _end_epi = _end_states[0]
                             _fm, _, _ = make_single_pop_metapop(
                                 config_dict, _fcast_start, _horizon, _end_comp,
-                                seed_offset=_pset_idx, seed_base=_seed_b, ts_per_day=_ts,
+                                seed_offset=_traj_idx, seed_base=_seed_b, ts_per_day=_ts,
                                 stochastic=_stoch, tvs=_tvs, save_daily=True,
                                 epi_metric_init=_end_epi or None,
                                 param_overrides=_pset or None,
@@ -3743,7 +5179,7 @@ def _run_forecast(
                             _fm, _ = make_metapop_from_folder(
                                 metapop_folder_input.value, config_dict, _fcast_start, _horizon,
                                 list(compartments),
-                                seed_offset=_pset_idx, seed_base=_seed_b, ts_per_day=_ts,
+                                seed_offset=_traj_idx, seed_base=_seed_b, ts_per_day=_ts,
                                 stochastic=_stoch, tvs=_tvs, save_daily=True,
                                 param_overrides=_pset or None,
                                 travel_config=metapop_travel_config,
@@ -3762,24 +5198,25 @@ def _run_forecast(
                     mo.stop(True, mo.callout(mo.md(f"**Forecast error:** {_exc}"), kind="danger"))
 
         else:
-            # Original path: single simulation from Step 7 initial conditions
+            # Standard path: run from Step 7 initial conditions, using run schedule for param sets
             with mo.status.spinner("Running forecast..."):
                 try:
-                    for _rep in range(_reps):
+                    for _traj_idx, (_pset_idx, _rep) in enumerate(_run_schedule):
+                        _pset = _param_sets[_pset_idx]
                         if not is_metapop:
                             _m, _, _ = make_single_pop_metapop(
                                 config_dict, _start, _total_days, _ci,
-                                seed_offset=_rep, seed_base=_seed_b, ts_per_day=_ts,
+                                seed_offset=_traj_idx, seed_base=_seed_b, ts_per_day=_ts,
                                 stochastic=_stoch, tvs=_tvs, save_daily=True,
-                                param_overrides=_fitted_params or None,
+                                param_overrides=_pset or None,
                                 travel_config=metapop_travel_config,
                             )
                         else:
                             _m, _ = make_metapop_from_folder(
                                 metapop_folder_input.value, config_dict, _start, _total_days, list(compartments),
-                                seed_offset=_rep, seed_base=_seed_b, ts_per_day=_ts,
+                                seed_offset=_traj_idx, seed_base=_seed_b, ts_per_day=_ts,
                                 stochastic=_stoch, tvs=_tvs, save_daily=True,
-                                param_overrides=_fitted_params or None,
+                                param_overrides=_pset or None,
                                 travel_config=metapop_travel_config,
                             )
                         _m.simulate_until_day(_total_days)
@@ -3817,7 +5254,17 @@ def _forecast_autosave(forecast_result, output_dir, json):
 
 
 @app.cell
-def _forecast_results_display(forecast_result, np, plt, mo, main_tab):
+def _forecast_chart_style_ui(mo):
+    forecast_chart_style = mo.ui.radio(
+        options={"Median + 95% CI": "band", "Spaghetti lines": "spaghetti"},
+        value="Median + 95% CI",
+        label="Chart style",
+    )
+    return (forecast_chart_style,)
+
+
+@app.cell
+def _forecast_results_display(forecast_result, forecast_chart_style, np, plt, mo, main_tab):
     mo.stop(main_tab.value != "Forecast", None)
     mo.stop(forecast_result is None, mo.md("*Run forecast to see results.*"))
     _hists = forecast_result["histories"]
@@ -3826,6 +5273,7 @@ def _forecast_results_display(forecast_result, np, plt, mo, main_tab):
     _total = forecast_result["total_days"]
     _days = np.arange(1, _total + 1)
     _colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+    _style = forecast_chart_style.value
     _fig, _ax = plt.subplots(figsize=(12, 5))
     for _ci, _comp in enumerate(_comps):
         _color = _colors[_ci % len(_colors)]
@@ -3834,11 +5282,17 @@ def _forecast_results_display(forecast_result, np, plt, mo, main_tab):
             continue
         _mat = np.stack(_arrays, axis=0)
         _n = min(len(_days), _mat.shape[1])
-        _med = np.median(_mat[:, :_n], axis=0)
-        _lo = np.percentile(_mat[:, :_n], 2.5, axis=0)
-        _hi = np.percentile(_mat[:, :_n], 97.5, axis=0)
-        _ax.plot(_days[:_n], _med, color=_color, linewidth=2, label=f"{_comp} (median)")
-        _ax.fill_between(_days[:_n], _lo, _hi, color=_color, alpha=0.2)
+        if _style == "spaghetti":
+            for _row in _mat:
+                _ax.plot(_days[:_n], _row[:_n], color=_color, linewidth=0.8, alpha=0.4)
+            _med = np.median(_mat[:, :_n], axis=0)
+            _ax.plot(_days[:_n], _med, color=_color, linewidth=2, label=f"{_comp} (median)")
+        else:
+            _med = np.median(_mat[:, :_n], axis=0)
+            _lo = np.percentile(_mat[:, :_n], 2.5, axis=0)
+            _hi = np.percentile(_mat[:, :_n], 97.5, axis=0)
+            _ax.plot(_days[:_n], _med, color=_color, linewidth=2, label=f"{_comp} (median)")
+            _ax.fill_between(_days[:_n], _lo, _hi, color=_color, alpha=0.2)
     if _fit_n > 0:
         _ax.axvline(_fit_n, color="black", linestyle="--", alpha=0.6, label=f"Fit end (day {_fit_n})")
         _ax.axvspan(0, _fit_n, alpha=0.05, color="gray")
@@ -3860,6 +5314,7 @@ def _forecast_results_display(forecast_result, np, plt, mo, main_tab):
         )
     mo.vstack([
         mo.md("## Forecast Results"),
+        forecast_chart_style,
         _fig,
         mo.md(
             "### Summary\n\n"
@@ -3875,7 +5330,7 @@ def _forecast_results_display(forecast_result, np, plt, mo, main_tab):
 # ============================================================
 
 @app.cell
-def _export_display(config_dict, fit_result, output_dir, json, mo, main_tab):
+def _export_display(config_dict, fit_result, output_dir, json, mo, main_tab, num_age_groups, num_risk_groups, sim_days, sim_mode, n_reps, timesteps, start_date_input, analysis_scenarios):
     mo.stop(main_tab.value != "Export", None)
     _config_str = json.dumps(config_dict, indent=2)
     _fitted_str = json.dumps(fit_result.best_params if fit_result is not None else {}, indent=2)
@@ -3908,11 +5363,9 @@ START_DATE = "2024-01-01"
 NUM_AGE_GROUPS = 1
 NUM_RISK_GROUPS = 1
 
-# Define scenarios: {name: {param: value}}
-SCENARIOS = {
-    "baseline": {},
-    # "high_beta": {"beta_baseline": 0.4},
-}
+# <<<SCENARIOS_BLOCK>>>
+
+# <<<SUBPOP_OVERRIDES_BLOCK>>>
 
 # ---- Setup ----
 _HERE = Path(__file__).parent
@@ -3954,7 +5407,8 @@ def _build_schedules(start_date, num_days):
     )
 
 
-def build_model(cfg, param_overrides, rep):
+def build_model(cfg, param_overrides, rep, subpop_overrides=None):
+    # subpop_overrides: list of {param: value} indexed by subpop order (metapop only)
     _cfg = copy.deepcopy(cfg)
     if param_overrides:
         _cfg["params"] = {**_cfg.get("params", {}), **param_overrides}
@@ -3986,9 +5440,10 @@ def build_model(cfg, param_overrides, rep):
 all_results = {}
 for scenario_name, overrides in SCENARIOS.items():
     print(f"Running scenario: {scenario_name}")
+    _sp_overrides = SUBPOP_PARAM_OVERRIDES.get(scenario_name)
     _reps_data = []
     for _rep in range(NUM_REPS):
-        _m = build_model(config_dict, overrides, _rep)
+        _m = build_model(config_dict, overrides, _rep, subpop_overrides=_sp_overrides)
         _m.simulate_until_day(NUM_DAYS)
         _sps = list(_m.subpop_models.values())
         _h = {}
@@ -4018,6 +5473,54 @@ _con.close()
 print(f"Results saved to {_db}")
 """
 
+    _scen_lines = [
+        "# Define scenarios: {name: {param: value}}",
+        "SCENARIOS = {",
+        '    "baseline": {},',
+    ]
+    _subpop_lines = [
+        "# Per-subpopulation parameter overrides per scenario (metapop only)",
+        "# Format: {scenario_name: [override_dict_or_None, ...]} indexed by subpop order",
+        "SUBPOP_PARAM_OVERRIDES = {",
+    ]
+    for _scen_tuple in analysis_scenarios:
+        _sn, _ov = _scen_tuple[0], _scen_tuple[1]
+        _sp_list = _scen_tuple[2] if len(_scen_tuple) > 2 else None
+        if _ov and _sn != "baseline":
+            _inner = ", ".join(f'"{_k}": {repr(_v)}' for _k, _v in _ov.items())
+            _scen_lines.append(f"    {repr(_sn)}: {{{_inner}}},")
+        if _sp_list and any(_r for _r in _sp_list):
+            _subpop_lines.append(f"    {repr(_sn)}: {repr(_sp_list)},")
+    _scen_lines.append("}")
+    _subpop_lines.append("}")
+    _scenarios_block = "\n".join(_scen_lines)
+    _subpop_block = "\n".join(_subpop_lines)
+
+    _script = _script.replace("# <<<SCENARIOS_BLOCK>>>", _scenarios_block).replace(
+        "# <<<SUBPOP_OVERRIDES_BLOCK>>>", _subpop_block,
+    ).replace(
+        "NUM_DAYS = 100\n",
+        f"NUM_DAYS = {int(sim_days.value)}\n",
+    ).replace(
+        "NUM_REPS = 1\n",
+        f"NUM_REPS = {int(n_reps.value)}\n",
+    ).replace(
+        "STOCHASTIC = False\n",
+        f"STOCHASTIC = {sim_mode.value == 'Stochastic'}\n",
+    ).replace(
+        "TIMESTEPS_PER_DAY = 7\n",
+        f"TIMESTEPS_PER_DAY = {int(timesteps.value)}\n",
+    ).replace(
+        'START_DATE = "2024-01-01"\n',
+        f'START_DATE = "{start_date_input.value}"\n',
+    ).replace(
+        "NUM_AGE_GROUPS = 1\n",
+        f"NUM_AGE_GROUPS = {num_age_groups}\n",
+    ).replace(
+        "NUM_RISK_GROUPS = 1\n",
+        f"NUM_RISK_GROUPS = {num_risk_groups}\n",
+    )
+
     _config_dl = mo.download(
         data=_config_str.encode(), filename="model_config.json",
         label="Download model_config.json", mimetype="application/json",
@@ -4030,9 +5533,37 @@ print(f"Results saved to {_db}")
         data=_fitted_str.encode(), filename="fitted_params.json",
         label="Download fitted_params.json", mimetype="application/json",
     )
+    _n_analysis = len(analysis_scenarios)
+    _n_sp_overrides = sum(
+        1 for _t in analysis_scenarios
+        if len(_t) > 2 and _t[2] and any(_r for _r in _t[2])
+    )
+    if _n_analysis:
+        _sp_note_extra = (
+            f" `SUBPOP_PARAM_OVERRIDES` includes **{_n_sp_overrides}** scenario(s) with per-subpop overrides."
+            if _n_sp_overrides else ""
+        )
+        _scen_note = mo.callout(
+            mo.md(
+                f"`SCENARIOS` pre-populated from the Analysis tab "
+                f"(**{_n_analysis}** scenario(s) + baseline). "
+                f"Edit the script to add or change scenarios.{_sp_note_extra}"
+            ),
+            kind="info",
+        )
+    else:
+        _scen_note = mo.callout(
+            mo.md(
+                "No Analysis scenarios defined — only `baseline` is included in `SCENARIOS`. "
+                "Define scenarios in the Analysis tab to pre-populate this block."
+            ),
+            kind="info",
+        )
+
     mo.vstack([
         mo.md("## Export"),
         mo.md("### Generated script  *(edit `SCENARIOS` and top constants before running)*"),
+        _scen_note,
         mo.accordion({"run_simulation.py": mo.md(f"```python\n{_script}\n```")}),
         mo.md("### Downloads"),
         mo.hstack([_config_dl, _script_dl, _fitted_dl], justify="start"),
@@ -4076,6 +5607,22 @@ def _analysis_param_catalog(scalar_param_names, params_inputs, array_param_names
 
     ANALYSIS_SCALAR_RANGES = {k: _slider_range(v) for k, v in ANALYSIS_SCALAR_PARAMS.items()}
     return ANALYSIS_SCALAR_PARAMS, ANALYSIS_ARRAY_PARAMS, ANALYSIS_SCALAR_RANGES
+
+
+@app.cell
+def _analysis_subpop_names(is_metapop, metapop_folder_input, Path, json):
+    _sp_names = []
+    if is_metapop and metapop_folder_input.value.strip():
+        _mc_path = Path(metapop_folder_input.value.strip()) / "metapop_config.json"
+        if _mc_path.exists():
+            try:
+                with open(_mc_path) as _f:
+                    _mc_cfg = json.load(_f)
+                _sp_names = list(_mc_cfg.get("subpopulations", []))
+            except Exception:
+                pass
+    analysis_sp_names = _sp_names
+    return (analysis_sp_names,)
 
 
 @app.cell
@@ -4142,8 +5689,7 @@ def _analysis_scenario_controls(mo, ANALYSIS_SCALAR_PARAMS, ANALYSIS_ARRAY_PARAM
     def _make_scalar_input(pname):
         _base = float(ANALYSIS_SCALAR_PARAMS.get(pname, 1.0))
         _stop = max(10.0, _base * 20) if _base > 0 else 10.0
-        _step = max(1e-5, round(_base / 1000, 6)) if _base > 0 else 0.001
-        return mo.ui.number(start=0.0, stop=_stop, step=_step, value=_base)
+        return mo.ui.number(start=0.0, stop=_stop, step=None, value=_base)
 
     analysis_scenario_scalar_inputs = mo.ui.array([
         mo.ui.array([_make_scalar_input(pname) for _ in range(_MAX_SC)])
@@ -4151,13 +5697,96 @@ def _analysis_scenario_controls(mo, ANALYSIS_SCALAR_PARAMS, ANALYSIS_ARRAY_PARAM
     ]) if _scalar_names else mo.ui.array([])
 
     analysis_scenario_array_scales = mo.ui.array([
-        mo.ui.array([mo.ui.number(start=0.0, stop=10.0, step=0.01, value=1.0) for _ in range(_MAX_SC)])
+        mo.ui.array([mo.ui.number(start=0.0, stop=10.0, step=None, value=1.0) for _ in range(_MAX_SC)])
         for _ in _array_names
     ]) if _array_names else mo.ui.array([])
 
     return (
         analysis_n_scenarios, analysis_scenario_names,
         analysis_scenario_scalar_inputs, analysis_scenario_array_scales,
+    )
+
+
+@app.cell
+def _analysis_param_subpop_controls(
+    mo, is_metapop, analysis_sp_names,
+    ANALYSIS_SCALAR_PARAMS, ANALYSIS_ARRAY_PARAMS, ANALYSIS_SCALAR_RANGES,
+    analysis_scalar_param_sel, analysis_array_param_sel, analysis_param_type,
+):
+    _MAX_SC = 5
+    _MAX_SENS = 6
+    _scalar_names = list(ANALYSIS_SCALAR_PARAMS.keys())
+    _array_names = list(ANALYSIS_ARRAY_PARAMS.keys())
+    _sp_opts = list(analysis_sp_names) if analysis_sp_names else []
+
+    # Scenario sub-tab: per-param subpop multiselects
+    analysis_scalar_subpop_sels = mo.ui.array([
+        mo.ui.multiselect(options=_sp_opts, value=[], label=f"Subpops for {pname}")
+        for pname in _scalar_names
+    ]) if is_metapop and _scalar_names and _sp_opts else mo.ui.array([])
+
+    analysis_array_subpop_sels = mo.ui.array([
+        mo.ui.multiselect(options=_sp_opts, value=[], label=f"Subpops for {pname}")
+        for pname in _array_names
+    ]) if is_metapop and _array_names and _sp_opts else mo.ui.array([])
+
+    # Scenario sub-tab: per-param × per-subpop × per-scenario number inputs [param][subpop][scenario]
+    def _make_sp_scalar_input(pname):
+        _base = float(ANALYSIS_SCALAR_PARAMS.get(pname, 1.0))
+        _lo, _hi, _step = ANALYSIS_SCALAR_RANGES.get(pname, (0.0, 10.0, 0.001))
+        return mo.ui.number(start=_lo, stop=_hi, step=None, value=_base)
+
+    analysis_scalar_subpop_inputs = mo.ui.array([
+        mo.ui.array([
+            mo.ui.array([_make_sp_scalar_input(pname) for _ in range(_MAX_SC)])
+            for _ in _sp_opts
+        ])
+        for pname in _scalar_names
+    ]) if is_metapop and _scalar_names and _sp_opts else mo.ui.array([])
+
+    analysis_array_subpop_scales = mo.ui.array([
+        mo.ui.array([
+            mo.ui.array([mo.ui.number(start=0.0, stop=10.0, step=None, value=1.0) for _ in range(_MAX_SC)])
+            for _ in _sp_opts
+        ])
+        for _ in _array_names
+    ]) if is_metapop and _array_names and _sp_opts else mo.ui.array([])
+
+    # Sensitivity sub-tab: one subpop multiselect for the active parameter
+    analysis_sens_subpop_sel = mo.ui.multiselect(
+        options=_sp_opts if _sp_opts else ["(none)"],
+        value=[],
+        label="Apply to subpopulations (empty = all subpops)",
+    ) if is_metapop else mo.ui.multiselect(options=["(none)"], value=[], label="")
+
+    # Sensitivity sub-tab: per-subpop sliders [subpop][value_index], pre-allocated _MAX_SENS per subpop
+    _is_arr = analysis_param_type.value == "Array (scale factor)"
+    _pname_s = analysis_array_param_sel.value if _is_arr else analysis_scalar_param_sel.value
+
+    if is_metapop and _sp_opts:
+        if _is_arr:
+            _sp_sliders_inner = [
+                mo.ui.array([mo.ui.slider(start=0.1, stop=3.0, step=0.05, value=1.0) for _ in range(_MAX_SENS)])
+                for _ in _sp_opts
+            ]
+        else:
+            if _pname_s in ANALYSIS_SCALAR_RANGES:
+                _lo_s, _hi_s, _step_s = ANALYSIS_SCALAR_RANGES[_pname_s]
+                _base_s = float(ANALYSIS_SCALAR_PARAMS.get(_pname_s, 1.0))
+            else:
+                _lo_s, _hi_s, _step_s, _base_s = 0.0, 10.0, 0.01, 1.0
+            _sp_sliders_inner = [
+                mo.ui.array([mo.ui.slider(start=_lo_s, stop=_hi_s, step=_step_s, value=_base_s) for _ in range(_MAX_SENS)])
+                for _ in _sp_opts
+            ]
+        analysis_sens_subpop_sliders = mo.ui.array(_sp_sliders_inner)
+    else:
+        analysis_sens_subpop_sliders = mo.ui.array([])
+
+    return (
+        analysis_scalar_subpop_sels, analysis_array_subpop_sels,
+        analysis_scalar_subpop_inputs, analysis_array_subpop_scales,
+        analysis_sens_subpop_sel, analysis_sens_subpop_sliders,
     )
 
 
@@ -4218,11 +5847,17 @@ def _analysis_display(
     analysis_sim_days, analysis_n_reps, analysis_timesteps, analysis_stochastic, analysis_run_button,
     analysis_comp_checkboxes,
     ANALYSIS_SCALAR_PARAMS, ANALYSIS_ARRAY_PARAMS,
+    is_metapop, analysis_sp_names,
+    analysis_sens_subpop_sel, analysis_sens_subpop_sliders,
+    analysis_scalar_subpop_sels, analysis_array_subpop_sels,
+    analysis_scalar_subpop_inputs, analysis_array_subpop_scales,
 ):
     mo.stop(main_tab.value != "Analysis", None)
     _n_sc = int(analysis_n_scenarios.value)
+    _n_values = int(analysis_n_values.value)
     _scalar_names = list(ANALYSIS_SCALAR_PARAMS.keys())
     _array_names = list(ANALYSIS_ARRAY_PARAMS.keys())
+    _use_subpop = is_metapop and bool(analysis_sp_names)
 
     # --- Sensitivity sub-tab ---
     _is_array = analysis_param_type.value == "Array (scale factor)"
@@ -4260,33 +5895,78 @@ def _analysis_display(
             kind="success",
         )
 
-    _sens_ui = mo.vstack([
+    _sens_parts = [
         mo.md("**Vary one parameter across N values — each value becomes a scenario.**"),
         mo.hstack([analysis_param_type, _param_w, analysis_n_values], justify="start"),
-        mo.md(f"Varying `{_pname}` ({_fmt}):"),
-        mo.hstack(list(analysis_sens_sliders), wrap=True),
-        _sens_preview,
-    ])
+    ]
+    if _use_subpop:
+        _sens_parts.append(mo.hstack([analysis_sens_subpop_sel], justify="start"))
+        _sel_sens_sps = list(analysis_sens_subpop_sel.value or [])
+        if _sel_sens_sps:
+            _sens_parts.append(mo.callout(
+                mo.md(
+                    "**Global sliders** (below) apply to all subpops not listed above. "
+                    "**Per-subpop sliders** override those subpops for each scenario index i."
+                ),
+                kind="info",
+            ))
+
+    _sens_parts.append(mo.md(f"Varying `{_pname}` ({_fmt}):"))
+    _sens_parts.append(mo.hstack(list(analysis_sens_sliders), wrap=True))
+
+    if _use_subpop:
+        _sel_sens_sps = list(analysis_sens_subpop_sel.value or [])
+        for _sp in _sel_sens_sps:
+            if _sp in analysis_sp_names:
+                _sp_idx = analysis_sp_names.index(_sp)
+                if _sp_idx < len(analysis_sens_subpop_sliders):
+                    _sp_slides = list(analysis_sens_subpop_sliders[_sp_idx])[:_n_values]
+                    _sens_parts.append(mo.md(f"↳ `{_pname}` for **{_sp}**:"))
+                    _sens_parts.append(mo.hstack(_sp_slides, wrap=True))
+
+    _sens_parts.append(_sens_preview)
+    _sens_ui = mo.vstack(_sens_parts)
 
     # --- Scenario sub-tab ---
-    _header = mo.hstack(
-        [mo.md("**Parameter**")] + [analysis_scenario_names[j] for j in range(_n_sc)],
-        widths="equal",
-    )
-    _scalar_rows = [
-        mo.hstack(
-            [mo.md(f"`{_pn}`")] + [analysis_scenario_scalar_inputs[_i][j] for j in range(_n_sc)],
-            widths="equal",
-        )
-        for _i, _pn in enumerate(_scalar_names)
-    ]
-    _array_rows = [
-        mo.hstack(
-            [mo.md(f"`{_pn}` ×scale")] + [analysis_scenario_array_scales[_k][j] for j in range(_n_sc)],
-            widths="equal",
-        )
-        for _k, _pn in enumerate(_array_names)
-    ]
+    _show_sp_col = _use_subpop
+
+    _header_items = [mo.md("**Parameter**")] + [analysis_scenario_names[j] for j in range(_n_sc)]
+    if _show_sp_col:
+        _header_items.append(mo.md("**Subpopulations**"))
+    _header = mo.hstack(_header_items, justify="start")
+
+    _scalar_rows = []
+    for _i, _pn in enumerate(_scalar_names):
+        _row_items = [mo.md(f"`{_pn}`")] + [analysis_scenario_scalar_inputs[_i][j] for j in range(_n_sc)]
+        if _show_sp_col and _i < len(analysis_scalar_subpop_sels):
+            _row_items.append(analysis_scalar_subpop_sels[_i])
+        _scalar_rows.append(mo.hstack(_row_items, justify="start"))
+        if _show_sp_col and _i < len(analysis_scalar_subpop_sels):
+            _sel_sps_i = list(analysis_scalar_subpop_sels.value[_i]) if _i < len(analysis_scalar_subpop_sels.value) else []
+            for _sp in _sel_sps_i:
+                if _sp in analysis_sp_names:
+                    _sp_idx = analysis_sp_names.index(_sp)
+                    if _i < len(analysis_scalar_subpop_inputs) and _sp_idx < len(analysis_scalar_subpop_inputs[_i]):
+                        _sp_inputs = [analysis_scalar_subpop_inputs[_i][_sp_idx][j] for j in range(_n_sc)]
+                        _sp_row_items = [mo.md(f"  ↳ *{_sp}*")] + _sp_inputs + [mo.md("")]
+                        _scalar_rows.append(mo.hstack(_sp_row_items, justify="start"))
+
+    _array_rows = []
+    for _k, _pn in enumerate(_array_names):
+        _arr_row_items = [mo.md(f"`{_pn}` ×scale")] + [analysis_scenario_array_scales[_k][j] for j in range(_n_sc)]
+        if _show_sp_col and _k < len(analysis_array_subpop_sels):
+            _arr_row_items.append(analysis_array_subpop_sels[_k])
+        _array_rows.append(mo.hstack(_arr_row_items, justify="start"))
+        if _show_sp_col and _k < len(analysis_array_subpop_sels):
+            _sel_sps_k = list(analysis_array_subpop_sels.value[_k]) if _k < len(analysis_array_subpop_sels.value) else []
+            for _sp in _sel_sps_k:
+                if _sp in analysis_sp_names:
+                    _sp_idx = analysis_sp_names.index(_sp)
+                    if _k < len(analysis_array_subpop_scales) and _sp_idx < len(analysis_array_subpop_scales[_k]):
+                        _sp_scale_inputs = [analysis_array_subpop_scales[_k][_sp_idx][j] for j in range(_n_sc)]
+                        _arr_sp_row = [mo.md(f"  ↳ *{_sp}* ×scale")] + _sp_scale_inputs + [mo.md("")]
+                        _array_rows.append(mo.hstack(_arr_sp_row, justify="start"))
+
     _scen_body = [mo.md("**Define N scenarios with per-parameter overrides.**"), analysis_n_scenarios, _header]
     if _scalar_rows:
         _scen_body += [mo.md("*Scalar parameters:*")] + _scalar_rows
@@ -4323,25 +6003,58 @@ def _analysis_define_scenarios(
     analysis_n_scenarios, analysis_scenario_names,
     analysis_scenario_scalar_inputs, analysis_scenario_array_scales,
     ANALYSIS_SCALAR_PARAMS, ANALYSIS_ARRAY_PARAMS, np,
+    is_metapop, analysis_sp_names,
+    analysis_sens_subpop_sel, analysis_sens_subpop_sliders,
+    analysis_scalar_subpop_sels, analysis_array_subpop_sels,
+    analysis_scalar_subpop_inputs, analysis_array_subpop_scales,
 ):
     _scalar_names = list(ANALYSIS_SCALAR_PARAMS.keys())
     _array_names = list(ANALYSIS_ARRAY_PARAMS.keys())
+    _use_subpop = is_metapop and bool(analysis_sp_names)
     analysis_scenarios = []
+
+    def _make_per_subpop_list(sp_names, sp_to_override_dict):
+        if not sp_to_override_dict:
+            return None
+        _result = [sp_to_override_dict.get(_sp) for _sp in sp_names]
+        return _result if any(_r for _r in _result) else None
 
     if analysis_sub_tab.value == "Sensitivity":
         _is_array = analysis_param_type.value == "Array (scale factor)"
         if _is_array:
             _pname = analysis_array_param_sel.value
             _base_arr = np.asarray(ANALYSIS_ARRAY_PARAMS.get(_pname, [1.0]))
-            for _v in list(dict.fromkeys(analysis_sens_sliders.value)):
-                analysis_scenarios.append((
-                    f"{_pname} ×{_v:.3g}",
-                    {_pname: (_base_arr * _v).tolist()},
-                ))
+            for _i, _v in enumerate(list(dict.fromkeys(analysis_sens_sliders.value))):
+                _global_ov = {_pname: (_base_arr * _v).tolist()}
+                _per_subpop = None
+                if _use_subpop:
+                    _sel_sps = list(analysis_sens_subpop_sel.value or [])
+                    _sp_ov = {}
+                    for _sp in _sel_sps:
+                        if _sp in analysis_sp_names:
+                            _sp_idx = analysis_sp_names.index(_sp)
+                            _sp_vals = list(analysis_sens_subpop_sliders.value)
+                            if _sp_idx < len(_sp_vals) and _i < len(_sp_vals[_sp_idx]):
+                                _sp_scale = float(_sp_vals[_sp_idx][_i])
+                                _sp_ov[_sp] = {_pname: (_base_arr * _sp_scale).tolist()}
+                    _per_subpop = _make_per_subpop_list(analysis_sp_names, _sp_ov)
+                analysis_scenarios.append((f"{_pname} ×{_v:.3g}", _global_ov, _per_subpop))
         else:
             _pname = analysis_scalar_param_sel.value
-            for _v in list(dict.fromkeys(analysis_sens_sliders.value)):
-                analysis_scenarios.append((f"{_pname}={_v:.4g}", {_pname: float(_v)}))
+            for _i, _v in enumerate(list(dict.fromkeys(analysis_sens_sliders.value))):
+                _global_ov = {_pname: float(_v)}
+                _per_subpop = None
+                if _use_subpop:
+                    _sel_sps = list(analysis_sens_subpop_sel.value or [])
+                    _sp_ov = {}
+                    for _sp in _sel_sps:
+                        if _sp in analysis_sp_names:
+                            _sp_idx = analysis_sp_names.index(_sp)
+                            _sp_vals = list(analysis_sens_subpop_sliders.value)
+                            if _sp_idx < len(_sp_vals) and _i < len(_sp_vals[_sp_idx]):
+                                _sp_ov[_sp] = {_pname: float(_sp_vals[_sp_idx][_i])}
+                    _per_subpop = _make_per_subpop_list(analysis_sp_names, _sp_ov)
+                analysis_scenarios.append((f"{_pname}={_v:.4g}", _global_ov, _per_subpop))
     else:
         _n = int(analysis_n_scenarios.value)
         for j in range(_n):
@@ -4354,7 +6067,30 @@ def _analysis_define_scenarios(
                 if _scale != 1.0:
                     _base = np.asarray(ANALYSIS_ARRAY_PARAMS[_pn])
                     _overrides[_pn] = (_base * _scale).tolist()
-            analysis_scenarios.append((_name, _overrides))
+            _per_subpop = None
+            if _use_subpop:
+                _sp_ov_by_name = {}
+                for _i, _pn in enumerate(_scalar_names):
+                    _sel_sps = list(analysis_scalar_subpop_sels.value[_i]) if _i < len(analysis_scalar_subpop_sels.value) else []
+                    for _sp in _sel_sps:
+                        if _sp in analysis_sp_names:
+                            _sp_idx = analysis_sp_names.index(_sp)
+                            _sp_vals = list(analysis_scalar_subpop_inputs.value)
+                            if _i < len(_sp_vals) and _sp_idx < len(_sp_vals[_i]) and j < len(_sp_vals[_i][_sp_idx]):
+                                _sp_ov_by_name.setdefault(_sp, {})[_pn] = float(_sp_vals[_i][_sp_idx][j])
+                for _k, _pn in enumerate(_array_names):
+                    _sel_sps = list(analysis_array_subpop_sels.value[_k]) if _k < len(analysis_array_subpop_sels.value) else []
+                    for _sp in _sel_sps:
+                        if _sp in analysis_sp_names:
+                            _sp_idx = analysis_sp_names.index(_sp)
+                            _sp_vals = list(analysis_array_subpop_scales.value)
+                            if _k < len(_sp_vals) and _sp_idx < len(_sp_vals[_k]) and j < len(_sp_vals[_k][_sp_idx]):
+                                _sp_scale = float(_sp_vals[_k][_sp_idx][j])
+                                if _sp_scale != 1.0:
+                                    _base = np.asarray(ANALYSIS_ARRAY_PARAMS[_pn])
+                                    _sp_ov_by_name.setdefault(_sp, {})[_pn] = (_base * _sp_scale).tolist()
+                _per_subpop = _make_per_subpop_list(analysis_sp_names, _sp_ov_by_name)
+            analysis_scenarios.append((_name, _overrides, _per_subpop))
 
     return (analysis_scenarios,)
 
@@ -4432,7 +6168,9 @@ def _run_analysis(
     _all = {}
     with mo.status.spinner(f"Running {len(analysis_scenarios)} scenario(s) × {_n_reps} rep(s)..."):
         try:
-            for _scen_name, _overrides in analysis_scenarios:
+            for _scen_tuple in analysis_scenarios:
+                _scen_name, _overrides = _scen_tuple[0], _scen_tuple[1]
+                _per_subpop = _scen_tuple[2] if len(_scen_tuple) > 2 else None
                 _reps_hists = []
                 for _rep in range(_n_reps):
                     if not is_metapop:
@@ -4449,6 +6187,7 @@ def _run_analysis(
                             seed_offset=_rep, seed_base=_seed_b, ts_per_day=_ts,
                             stochastic=_stoch, tvs=_tvs, save_daily=True,
                             param_overrides=_overrides or None,
+                            param_overrides_per_subpop=_per_subpop,
                             travel_config=metapop_travel_config,
                         )
                     _m.simulate_until_day(_num_days)
@@ -4559,6 +6298,78 @@ def _analysis_plot_compartments(
     _fig.autofmt_xdate()
     plt.tight_layout()
     mo.vstack([mo.md("## Analysis — Compartment Histories"), _fig])
+    return
+
+
+@app.cell
+def _analysis_detailed_download(
+    analysis_results, np, pd, mo, main_tab,
+):
+    mo.stop(main_tab.value != "Analysis", None)
+    mo.stop(analysis_results is None, mo.md(""))
+
+    _scens = analysis_results["scenarios"]
+    _sp_names = analysis_results["subpop_names"]
+    _all_keys = analysis_results["compartments"] + analysis_results["tvs"]
+    _start = analysis_results.get("start_date", "2024-01-01")
+
+    _rows = []
+    for _scen_name, _reps in _scens.items():
+        for _rep_idx, _rep_data in enumerate(_reps):
+            # Aggregate across subpops for each key: shape (days, A, R)
+            _agg_by_key = {}
+            for _key in _all_keys:
+                _arrays = [_rep_data[_sp][_key] for _sp in _sp_names if _key in _rep_data.get(_sp, {})]
+                if _arrays:
+                    _agg_by_key[_key] = np.stack(_arrays, axis=0).sum(axis=0)
+
+            for _sp in _sp_names + ["aggregated"]:
+                for _key in _all_keys:
+                    if _sp == "aggregated":
+                        _arr = _agg_by_key.get(_key)
+                    else:
+                        _arr = _rep_data.get(_sp, {}).get(_key)
+                    if _arr is None:
+                        continue
+                    _arr = np.array(_arr)  # (days, A, R)
+                    _n_days, _n_ages, _n_risks = _arr.shape
+                    _dates = pd.date_range(start=_start, periods=_n_days, freq="D")
+
+                    for _age_idx in range(_n_ages):
+                        _series = _arr[:, _age_idx, :].sum(axis=1)
+                        for _day_i, (_date, _val) in enumerate(zip(_dates, _series)):
+                            _rows.append({
+                                "date": _date.date().isoformat(),
+                                "scenario": _scen_name,
+                                "subpopulation": _sp,
+                                "age_group": _age_idx,
+                                "replicate": _rep_idx,
+                                "metric": _key,
+                                "value": float(_val),
+                            })
+
+                    # Aggregated age group (sum over all ages and risks)
+                    _series_agg = _arr.sum(axis=(1, 2))
+                    for _day_i, (_date, _val) in enumerate(zip(_dates, _series_agg)):
+                        _rows.append({
+                            "date": _date.date().isoformat(),
+                            "scenario": _scen_name,
+                            "subpopulation": _sp,
+                            "age_group": "aggregated",
+                            "replicate": _rep_idx,
+                            "metric": _key,
+                            "value": float(_val),
+                        })
+
+    _detail_df = pd.DataFrame(_rows) if _rows else pd.DataFrame(
+        columns=["date", "scenario", "subpopulation", "age_group", "replicate", "metric", "value"]
+    )
+    _detail_csv_dl = mo.download(
+        data=_detail_df.to_csv(index=False).encode(),
+        filename="analysis_detailed_timeseries.csv",
+        label="Download detailed timeseries CSV",
+    )
+    mo.vstack([_detail_csv_dl])
     return
 
 
@@ -5003,10 +6814,9 @@ any setting changes, so you never lose your work.
      loss landscapes.  **Requires a transition variable as the target** (not a compartment).
    - *LBFGS (gradient)* — Second-order gradient method.  Often converges in fewer steps
      than Adam but each step is more expensive.  Same target constraint applies.
-   - *Accept-reject* — Parameter-space random search that runs all samples and collects
-     every draw whose R² meets the threshold.  Works with any target (compartment or
-     transition) and does not require PyTorch.  All accepted sets are stored and can be
-     used as an ensemble in the Forecast tab.
+   - *Accept-reject* — Parameter-space random search that accepts samples with R² above
+     a threshold.  Works with any target (compartment or transition) and does not require
+     PyTorch.
 5. Click **Run fitting**.
 
 ### Results
@@ -5054,37 +6864,6 @@ Auto-saved to `{output_dir}/forecast_ensemble.json`.
   days in a single pass.
 - Stochastic replicates use independent random seeds; increase replicates for smoother
   confidence intervals.
-
-### Starting from the fitted end-state
-
-Enable **Start forecast from fitted end-state** to anchor the forecast at the model
-state reached at the *end* of the fitted period rather than at the fixed initial
-conditions from Step 7 of Model Builder.
-
-When this switch is on, the notebook runs in two phases:
-
-1. **Warm-up** — A deterministic simulation is run forward from the original initial
-   conditions through the entire fit period using the fitted parameters.  This recovers
-   the compartment counts *and* the immunity metrics (M, MV) that the model would have
-   at the moment the observed time series ends.
-2. **Forecast** — A new simulation is started from that end-state, using the correct
-   calendar date as its start, and runs forward for the chosen horizon.
-
-**Accept-reject ensemble:** When the Fitting tab has found multiple accepted parameter
-sets (any sample whose R² met the threshold), each set drives a separate warm-up and
-produces a separate forecast trajectory.  This gives you a proper ensemble that reflects
-both parameter uncertainty and stochastic noise.  The number of accepted sets is shown
-in the Fitting tab after running.
-
-For gradient-based methods (Adam, LBFGS), there is only one solution, so the warm-up
-uses that single parameter set; you can still run multiple stochastic replicates from
-the fitted end-state by increasing "Replicates".
-
-> **When to use this:** If you are fitting mid-season (e.g. the observed series ends
-> partway through a flu wave), this option ensures the forecast trajectory begins at a
-> state the model actually passed through — with the correct levels of susceptibles,
-> exposed individuals, and accumulated immunity — rather than projecting forward from an
-> artificial starting point.
 
 ---
 
