@@ -370,6 +370,7 @@ def generic_advance_timestep(
     save_calibration_targets: bool = False,
     save_tvar_history: bool = False,
     calibration_transition_names: list | None = None,
+    timestep_idx: int = 0,
 ) -> Tuple[dict, dict, dict]:
     """
     Advance the model one dt-sized timestep.
@@ -401,11 +402,18 @@ def generic_advance_timestep(
     calibration_transition_names : list[str] | None
         Transition names to include in calibration_targets when
         save_calibration_targets is True.
+    timestep_idx : int
+        Index of this timestep within the current simulation day (0-based).
+        Used by 'scheduled_exact' transitions, which apply their full
+        scheduled count only on the first timestep of each day (mirroring
+        ScheduledTransferVariable in generic_model.py) and 0 otherwise.
 
     Returns
     -------
     (new_state_dict, calibration_targets, tvar_history)
     """
+    is_first_timestep_of_day = timestep_idx == 0
+
     # Names that belong to a jointly-distributed group
     jointly_grouped: set = {
         name
@@ -447,6 +455,20 @@ def generic_advance_timestep(
     # -------------------------------------------------------------------
     for tc in model_config.transitions:
         if tc.name in jointly_grouped:
+            continue
+        if tc.rate_template == "scheduled_exact":
+            schedule_name = tc.rate_config["schedule"]
+            # schedule value is a proportion of the origin population
+            # vaccinated that day, not an absolute count (matches the
+            # existing vaccine_schedule input format) -- convert before
+            # clamping to the available population.
+            origin = state_dict[tc.origin]
+            scheduled_count = state_dict[schedule_name] * origin
+            transition_amounts[tc.name] = (
+                torch.minimum(scheduled_count, origin)
+                if is_first_timestep_of_day
+                else torch.zeros_like(origin)
+            )
             continue
         template = rate_registry[tc.rate_template]
         rc = _build_torch_rate_config(tc, precomputed)
@@ -597,6 +619,7 @@ def generic_torch_simulate_full_history(
                 precomputed,
                 dt,
                 save_tvar_history=save_last,
+                timestep_idx=timestep,
             )
             if save_last:
                 for tname, val in step_tvars.items():
@@ -665,7 +688,7 @@ def generic_torch_simulate_calibration_target(
             )
 
         day_tv_accum: dict = {t: None for t in calibration_transition_names}
-        for _ in range(timesteps_per_day):
+        for timestep in range(timesteps_per_day):
             state_dict, cal_targets, _ = generic_advance_timestep(
                 state_dict,
                 params_dict,
@@ -675,6 +698,7 @@ def generic_torch_simulate_calibration_target(
                 dt,
                 save_calibration_targets=bool(calibration_transition_names),
                 calibration_transition_names=calibration_transition_names,
+                timestep_idx=timestep,
             )
             for tname in calibration_transition_names:
                 val = cal_targets[tname]

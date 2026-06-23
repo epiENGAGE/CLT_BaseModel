@@ -292,6 +292,7 @@ def parse_model_config_from_dict(
     transition_names = {t.name for t in transitions}
 
     # --- 5. Transition groups ---
+    transitions_by_name = {t.name: t for t in transitions}
     groups_raw = raw.get("transition_groups", [])
     groups = []
     for i, g in enumerate(groups_raw):
@@ -303,6 +304,12 @@ def parse_model_config_from_dict(
             if m not in transition_names:
                 raise ValueError(
                     f"{loc} ('{name}'): member '{m}' is not a declared transition name"
+                )
+            if transitions_by_name[m].rate_template == "scheduled_exact":
+                raise ValueError(
+                    f"{loc} ('{name}'): member '{m}' is a 'scheduled_exact' transition, "
+                    "which cannot belong to a transition group (it is a deterministic, "
+                    "exact flow, not a competing stochastic branch)"
                 )
         groups.append(TransitionGroupConfig(name=name, transition_type=ttype, members=members))
 
@@ -400,6 +407,12 @@ def _validate_jointly_distributed(transitions: list[TransitionConfig]) -> None:
         jd = t.jointly_distributed_with
         if jd is None:
             continue
+        if t.rate_template == "scheduled_exact":
+            raise ValueError(
+                f"Transition '{t.name}': 'scheduled_exact' transitions cannot use "
+                "jointly_distributed_with (they are deterministic, exact flows, not "
+                "competing stochastic branches)"
+            )
         if jd not in by_name:
             raise ValueError(
                 f"Transition '{t.name}': jointly_distributed_with references "

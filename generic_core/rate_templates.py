@@ -640,6 +640,51 @@ class ForceOfInfectionTravelRate(RateTemplate):
 
 
 # ---------------------------------------------------------------------------
+# 7. ScheduledExactTransferRate  (validation-only marker)
+# ---------------------------------------------------------------------------
+
+class ScheduledExactTransferRate(RateTemplate):
+    """
+    Validation-only marker for 'scheduled_exact' transitions.
+
+    numpy_rate/torch_rate are never called at simulation time --
+    ConfigDrivenSubpopModel.create_transition_variables (numpy) and
+    generic_advance_timestep (torch) special-case transitions with this
+    rate_template name and apply the exact scheduled transfer directly,
+    bypassing the RateTemplate machinery entirely. This class exists only
+    so 'scheduled_exact' can be validated and looked up uniformly wherever
+    other rate templates are (e.g. parse_model_config_from_dict).
+
+    rate_config keys
+    -----------------
+    schedule : str
+        Name of the schedule (e.g. a vaccine_schedule instance) providing
+        the daily count of individuals to move from origin to destination.
+    """
+
+    def validate_config(self, rate_config, param_names, compartment_names, schedule_names):
+        if "schedule" not in rate_config:
+            raise ValueError("ScheduledExactTransferRate: rate_config must contain 'schedule'")
+        sname = rate_config["schedule"]
+        if sname not in schedule_names:
+            raise ValueError(
+                f"ScheduledExactTransferRate: schedule '{sname}' not in model schedules"
+            )
+
+    def numpy_rate(self, state, params, rate_config):
+        raise NotImplementedError(
+            "scheduled_exact transitions bypass RateTemplate.numpy_rate; "
+            "see ConfigDrivenSubpopModel.create_transition_variables"
+        )
+
+    def torch_rate(self, state_dict, params_dict, rate_config):
+        raise NotImplementedError(
+            "scheduled_exact transitions bypass RateTemplate.torch_rate; "
+            "see generic_advance_timestep"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
 
@@ -663,3 +708,4 @@ register_rate_template("immunity_modulated", ImmunityModulatedRate())
 register_rate_template("force_of_infection", ForceOfInfectionRate())
 register_rate_template("force_of_infection_optional", ForceOfInfectionOptionalRate())
 register_rate_template("force_of_infection_travel", ForceOfInfectionTravelRate())
+register_rate_template("scheduled_exact", ScheduledExactTransferRate())

@@ -64,6 +64,49 @@ class ConfigDrivenTransitionVariable(clt.TransitionVariable):
 
 
 # ---------------------------------------------------------------------------
+# ScheduledTransferVariable
+# ---------------------------------------------------------------------------
+
+class ScheduledTransferVariable(clt.TransitionVariable):
+    """
+    Moves an exact, rounded count of people from origin to destination on
+    the first timestep of each simulation day (0 on subsequent timesteps
+    within the same day).
+
+    The count comes from a Schedule (e.g. a vaccine_schedule instance)
+    that already encodes any delay/backfill -- this class only applies
+    that schedule's current value as an exact compartment transfer,
+    bypassing the rate-to-probability machinery used by every other
+    TransitionVariable in this codebase.
+    """
+
+    def __init__(self, origin: clt.Compartment, destination: clt.Compartment, schedule_name: str):
+        super().__init__(origin, destination, "scheduled_exact", is_jointly_distributed=False)
+        self.schedule_name = schedule_name
+        self._timestep_in_day = 0
+
+    def get_current_rate(self, state, params) -> np.ndarray:
+        # NOTE: this is a proportion of the origin compartment's population
+        # vaccinated that day (matching the existing vaccine_schedule input
+        # format, e.g. FluSubpopState.daily_vaccines), not an absolute count.
+        # It is converted to a count in get_scheduled_exact_realization.
+        return state.schedules[self.schedule_name]  # type: ignore[attr-defined]
+
+    def get_scheduled_exact_realization(self, RNG, num_timesteps) -> np.ndarray:
+        is_first_timestep = self._timestep_in_day == 0
+        self._timestep_in_day = (self._timestep_in_day + 1) % num_timesteps
+        origin_val = np.asarray(self.origin.current_val)
+        if not is_first_timestep:
+            return np.zeros_like(origin_val)
+        scheduled_count = np.rint(np.asarray(self.current_rate) * origin_val)
+        return np.minimum(scheduled_count, origin_val)
+
+    def reset(self) -> None:
+        super().reset()
+        self._timestep_in_day = 0
+
+
+# ---------------------------------------------------------------------------
 # ConfigDrivenSubpopModel
 # ---------------------------------------------------------------------------
 
@@ -150,6 +193,15 @@ class ConfigDrivenSubpopModel(clt.SubpopModel):
         for tc in self.model_config.transitions:
             origin = self.compartments[tc.origin]
             dest = self.compartments[tc.destination]
+
+            if tc.rate_template == "scheduled_exact":
+                tvars[tc.name] = ScheduledTransferVariable(
+                    origin=origin,
+                    destination=dest,
+                    schedule_name=tc.rate_config["schedule"],
+                )
+                continue
+
             template = self._rate_registry[tc.rate_template]
             is_joint = tc.jointly_distributed_with is not None
             tvars[tc.name] = ConfigDrivenTransitionVariable(
