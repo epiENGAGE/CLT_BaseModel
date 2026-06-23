@@ -79,7 +79,8 @@
   },
   "total_population": 250000,
   "input_files": {
-    "mobility_csv": "generic_core/examples/example_metapop_inputs/mobility_modifier.csv",
+    "input_folder": "generic_core/examples/example_metapop_inputs",
+    "mobility_csv": "mobility_modifier.csv",
     "metapop_folder": "generic_core/examples/example_metapop_inputs"
   }
 }

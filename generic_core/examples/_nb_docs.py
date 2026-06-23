@@ -273,3 +273,11 @@ Arrays are shape `[age_groups][risk_groups]`.
 if __name__ == "__main__":
     app.run()
 
+
+if __name__ == "__main__":
+    app.run()
+
+
+if __name__ == "__main__":
+    app.run()
+

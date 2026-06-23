@@ -13,7 +13,6 @@ def _shared_model_factory(
     build_params_from_config,
     clt, flu, np, json, pd, Path,
     loaded_schedule_dfs,
-    absolute_humidity_input,
     mobility_input,
     daily_vaccines_input,
     num_age_groups,
@@ -25,7 +24,7 @@ def _shared_model_factory(
     def _sched_builder(start_date, num_days, ah_df=None, cal_df=None, mob_df=None, vax_df=None):
         return build_notebook_schedules_input(
             start_date=start_date, num_days=num_days,
-            absolute_humidity=float(absolute_humidity_input.value),
+            absolute_humidity=0.0,  # CSV-only: the humidity df is always supplied when used
             mobility_value=float(mobility_input.value),
             daily_vaccines_value=float(daily_vaccines_input.value),
             num_age_groups=_A, num_risk_groups=_R,

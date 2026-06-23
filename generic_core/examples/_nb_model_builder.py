@@ -315,7 +315,8 @@ The downloaded `model_config.json` contains everything needed to restore the ses
 
 - Compartment names, transition definitions, parameter values
 - Age/risk group counts (`age_risk` section)
-- File paths for all CSV schedules (`input_files` section)
+- CSV schedule files (`input_files` section): a shared `input_folder` plus the
+  filename of each CSV used (humidity, calendar, mobility, vaccines, contact matrices)
 - Total population
 - Per-subpopulation parameter overrides (`subpop_params` section, if present)
 
@@ -341,6 +342,7 @@ per-subpop values. They are preserved across save/load cycles.
 | `immunity_modulated` | Rate that scales down as population immunity (M/MV) accumulates | S→E exposure rate suppressed by prior infection/vaccine immunity | `base_rate`, `proportion`, `is_complement`; optionally `inf_reduce_param`, `vax_reduce_param` |
 | `force_of_infection` | Standard frequency-dependent incidence with a contact matrix | S→E infection driven by `beta`, contact patterns, and infectious compartments I/A | `beta_param`, `contact_matrix_schedule`, `infectious_compartments`, `relative_susceptibility_param`; optionally humidity/immunity fields |
 | `force_of_infection_travel` | FOI with commuter mixing across subpopulations *(metapop only)* | S→E where residents of subpop A contact infectious individuals from subpop B during work hours | Same as above plus `travel_config` with `immobile_compartments`, `mobility_schedule` |
+| `scheduled_exact` | Deterministic, exact transfer of a scheduled daily count (not a stochastic rate) | S→Vaccinated moving exactly the (rounded, delay-shifted) vaccinated count each day | `schedule` (name of a schedule, e.g. a `vaccine_schedule` instance) |
 
 **Infectious compartments field** uses the format `CompartmentName:relative_infectivity_param`
 (or just `CompartmentName` if all compartments are equally infectious), comma-separated.
@@ -510,6 +512,7 @@ def _transition_forms_ui(compartments, loaded_config, mo):
         "immunity_modulated",
         "force_of_infection",
         "force_of_infection_travel",
+        "scheduled_exact",
     ]
     _t_cfgs = loaded_config.get("transitions", [])
 
@@ -558,6 +561,13 @@ def _transition_forms_ui(compartments, loaded_config, mo):
 
     t_param = mo.ui.array([
         mo.ui.text(value=_rcget(_i, "param", f"param_{_i+1}"), label="Param name")
+        for _i in range(_max_t)
+    ])
+    t_schedule_name = mo.ui.array([
+        mo.ui.text(
+            value=_rcget(_i, "schedule", "vaccinated_transfer_schedule"),
+            label="Schedule name",
+        )
         for _i in range(_max_t)
     ])
     t_factors = mo.ui.array([
@@ -668,7 +678,7 @@ def _transition_forms_ui(compartments, loaded_config, mo):
 
     return (
         t_name, t_origin, t_dest, t_template,
-        t_param, t_factors, t_complements,
+        t_param, t_schedule_name, t_factors, t_complements,
         t_base_rate, t_proportion, t_is_complement, t_inf_reduce, t_vax_reduce,
         t_beta, t_rel_sus, t_infectious, t_use_humidity, t_humidity_impact,
         t_use_foi_immunity, t_immobile,
@@ -681,7 +691,7 @@ def _transition_show(
     main_tab,
     n_transitions,
     t_name, t_origin, t_dest, t_template,
-    t_param, t_factors, t_complements,
+    t_param, t_schedule_name, t_factors, t_complements,
     t_base_rate, t_proportion, t_is_complement, t_inf_reduce, t_vax_reduce,
     t_beta, t_rel_sus, t_infectious, t_use_humidity, t_humidity_impact,
     t_use_foi_immunity, t_immobile,
@@ -793,6 +803,21 @@ def _transition_show(
             if t_use_foi_immunity.value[_i]:
                 _foi_items.extend([t_inf_reduce[_i], t_vax_reduce[_i]])
             _rate_ui = mo.vstack(_foi_items)
+        elif _template == "scheduled_exact":
+            _rate_ui = mo.vstack([
+                _with_tip(
+                    "Schedule name",
+                    "Name of the schedule providing the exact daily count of\n"
+                    "individuals to move from origin to destination (e.g. a\n"
+                    "vaccine_schedule instance backed by a per-subpop CSV with\n"
+                    "one AxR array per day).\n\n"
+                    "The count is rounded to the nearest integer and capped at\n"
+                    "the origin compartment's current population -- this is a\n"
+                    "deterministic, exact transfer, not a stochastic rate.\n\n"
+                    "Configure the underlying data source and delay in Step 5.",
+                    t_schedule_name[_i],
+                ),
+            ])
         else:
             _foit_items = [
                 t_beta[_i],
@@ -841,6 +866,8 @@ def _transition_show(
                     "  e.g. S→E driven by beta, contact patterns, and infectious compartments\n\n"
                     "force_of_infection_travel — FOI with commuter mixing across subpopulations (metapop only)\n"
                     "  e.g. S→E where residents of subpop A contact infectious people from subpop B\n\n"
+                    "scheduled_exact — exact, deterministic transfer of a scheduled daily count\n"
+                    "  e.g. S→Vaccinated moving exactly the vaccinated count each day (not stochastic)\n\n"
                     "See the ⚡ Rate template quick reference accordion above for full details.",
                     t_template[_i],
                 ),
@@ -866,6 +893,7 @@ def _template_requirements(
     _uses_absolute_humidity = False
     _uses_mobility = False
     _requires_immunity_metrics = False
+    _uses_scheduled_transfer = False
 
     for _i in range(_n):
         _template = t_template.value[_i]
@@ -880,12 +908,18 @@ def _template_requirements(
             _uses_absolute_humidity = _uses_absolute_humidity or bool(t_use_humidity.value[_i])
             _uses_mobility = True
             _requires_immunity_metrics = _requires_immunity_metrics or bool(t_use_foi_immunity.value[_i])
+        elif _template == "scheduled_exact":
+            _uses_scheduled_transfer = True
 
     uses_absolute_humidity = _uses_absolute_humidity
     uses_contact_matrix = _uses_contact_matrix
     uses_mobility = _uses_mobility
     requires_immunity_metrics = _requires_immunity_metrics
-    return uses_absolute_humidity, uses_contact_matrix, uses_mobility, requires_immunity_metrics
+    uses_scheduled_transfer = _uses_scheduled_transfer
+    return (
+        uses_absolute_humidity, uses_contact_matrix, uses_mobility,
+        requires_immunity_metrics, uses_scheduled_transfer,
+    )
 
 
 @app.cell
@@ -1025,9 +1059,6 @@ def _schedule_and_immunity_ui(mo, loaded_config):
         label="Include vaccine-induced immunity metric (MV)",
         value="MV" in _epi_names,
     )
-    absolute_humidity_input = mo.ui.number(
-        start=0.0, stop=1.0, step=None, value=0.006, label="Absolute humidity",
-    )
     total_contact_input = mo.ui.number(
         start=0.0, stop=100.0, step=None, value=1.0, label="Total contact matrix value",
     )
@@ -1043,15 +1074,20 @@ def _schedule_and_immunity_ui(mo, loaded_config):
     daily_vaccines_input = mo.ui.number(
         start=0.0, stop=1e9, step=1.0, value=0.0, label="Daily vaccines",
     )
+    vax_transfer_delay_input = mo.ui.number(
+        start=0, stop=60, step=1,
+        value=int(loaded_config.get("params", {}).get("vax_transfer_delay_days", 0)),
+        label="vax_transfer_delay_days",
+    )
     return (
         include_inf_immunity,
         include_vax_immunity,
-        absolute_humidity_input,
         total_contact_input,
         school_contact_input,
         work_contact_input,
         mobility_input,
         daily_vaccines_input,
+        vax_transfer_delay_input,
     )
 
 
@@ -1119,22 +1155,34 @@ def _schedule_csv_ui(
     _inf = loaded_config.get("input_files", {})
     _multi = (num_age_groups > 1) or (num_risk_groups > 1)
 
-    # Auto-detect absolute_humidity.csv from metapop folder when not explicitly saved
-    _ah_csv_saved = _inf.get("absolute_humidity_csv", "")
-    if not _ah_csv_saved and is_metapop and metapop_folder_input.value.strip():
-        _candidate = Path(metapop_folder_input.value.strip()) / "absolute_humidity.csv"
-        if _candidate.exists():
-            _ah_csv_saved = str(_candidate)
+    # Single shared folder holding every CSV below. The file fields are bare
+    # filenames resolved against it (like the metapop folder). Legacy configs
+    # that stored full paths leave this empty — the resolver passes them through.
+    _folder_saved = _inf.get("input_folder", "")
 
-    ah_mode = mo.ui.radio(
-        options=["constant", "csv"],
-        value="csv" if _ah_csv_saved else "constant",
-        label="Absolute humidity source",
+    input_folder = mo.ui.text(
+        value=_folder_saved,
+        placeholder="/path/to/input_folder",
+        label="Input folder (all CSV files below live here)",
+        full_width=True,
     )
+
+    # Humidity is CSV-only: a constant humidity modifier just scales beta by a
+    # constant, which is a no-op. Auto-detect absolute_humidity.csv in the shared
+    # folder (bare name), else the metapop folder (full path) for old layouts.
+    _ah_csv_saved = _inf.get("absolute_humidity_csv", "")
+    if not _ah_csv_saved:
+        if _folder_saved and (Path(_folder_saved) / "absolute_humidity.csv").exists():
+            _ah_csv_saved = "absolute_humidity.csv"
+        elif is_metapop and metapop_folder_input.value.strip():
+            _candidate = Path(metapop_folder_input.value.strip()) / "absolute_humidity.csv"
+            if _candidate.exists():
+                _ah_csv_saved = str(_candidate)
+
     ah_path = mo.ui.text(
         value=_ah_csv_saved,
-        placeholder="/path/to/absolute_humidity.csv",
-        label="Absolute humidity CSV",
+        placeholder="absolute_humidity.csv",
+        label="Absolute humidity CSV (filename, required for humidity modifier)",
         full_width=True,
     )
     cal_mode = mo.ui.radio(
@@ -1144,8 +1192,8 @@ def _schedule_csv_ui(
     )
     cal_path = mo.ui.text(
         value=_inf.get("school_work_calendar_csv", ""),
-        placeholder="/path/to/school_work_calendar.csv",
-        label="School/work calendar CSV",
+        placeholder="school_work_calendar.csv",
+        label="School/work calendar CSV (filename)",
         full_width=True,
     )
     mob_mode = mo.ui.radio(
@@ -1155,8 +1203,8 @@ def _schedule_csv_ui(
     )
     mob_path = mo.ui.text(
         value=_inf.get("mobility_csv", ""),
-        placeholder="/path/to/mobility_modifier.csv",
-        label="Mobility CSV",
+        placeholder="mobility_modifier.csv",
+        label="Mobility CSV (filename)",
         full_width=True,
     )
     vax_mode = mo.ui.radio(
@@ -1166,30 +1214,31 @@ def _schedule_csv_ui(
     )
     vax_path = mo.ui.text(
         value=_inf.get("vaccines_csv", ""),
-        placeholder="/path/to/daily_vaccines.csv",
-        label="Vaccines CSV",
+        placeholder="daily_vaccines.csv",
+        label="Vaccines CSV (filename)",
         full_width=True,
     )
     total_contact_csv_path = mo.ui.text(
         value=_inf.get("total_contact_matrix_csv", ""),
-        placeholder="/path/to/total_contact_matrix.csv",
-        label="Total contact matrix CSV (A×A plain floats)",
+        placeholder="total_contact_matrix.csv",
+        label="Total contact matrix CSV (filename, A×A plain floats)",
         full_width=True,
     )
     school_contact_csv_path = mo.ui.text(
         value=_inf.get("school_contact_matrix_csv", ""),
-        placeholder="/path/to/school_contact_matrix.csv",
-        label="School contact matrix CSV (A×A plain floats)",
+        placeholder="school_contact_matrix.csv",
+        label="School contact matrix CSV (filename, A×A plain floats)",
         full_width=True,
     )
     work_contact_csv_path = mo.ui.text(
         value=_inf.get("work_contact_matrix_csv", ""),
-        placeholder="/path/to/work_contact_matrix.csv",
-        label="Work contact matrix CSV (A×A plain floats)",
+        placeholder="work_contact_matrix.csv",
+        label="Work contact matrix CSV (filename, A×A plain floats)",
         full_width=True,
     )
     return (
-        ah_mode, ah_path,
+        input_folder,
+        ah_path,
         cal_mode, cal_path,
         mob_mode, mob_path,
         vax_mode, vax_path,
@@ -1202,33 +1251,41 @@ def _schedule_csv_show(
     mo,
     num_age_groups, num_risk_groups,
     uses_absolute_humidity, uses_contact_matrix, uses_mobility, include_vax_immunity,
-    ah_mode, ah_path,
+    uses_scheduled_transfer,
+    input_folder,
+    ah_path,
     cal_mode, cal_path,
     mob_mode, mob_path,
     vax_mode, vax_path,
     total_contact_csv_path, school_contact_csv_path, work_contact_csv_path,
-    load_csv_validated, load_contact_matrix_csv,
+    load_csv_validated, load_contact_matrix_csv, resolve_input_path,
     SimpleNamespace,
 ):
     _multi = (num_age_groups > 1) or (num_risk_groups > 1)
     _parts = [mo.md("#### Schedule File Inputs")]
+    _parts.append(input_folder)
 
-    # Absolute humidity
+    # Absolute humidity — CSV-only (no constant option)
     _ah_df = None
     if uses_absolute_humidity:
-        _parts.append(ah_mode)
-        if ah_mode.value == "csv":
-            _parts.append(ah_path)
-            if ah_path.value.strip():
-                _ah_df, _ah_err = load_csv_validated(
-                    ah_path.value, ["date", "absolute_humidity"]
-                )
-                if _ah_err:
-                    _parts.append(mo.callout(mo.md(f"**Humidity CSV:** {_ah_err}"), kind="danger"))
-                else:
-                    _parts.append(mo.callout(
-                        mo.md(f"Humidity CSV: {len(_ah_df)} rows loaded."), kind="success"
-                    ))
+        _parts.append(ah_path)
+        if ah_path.value.strip():
+            _ah_df, _ah_err = load_csv_validated(
+                resolve_input_path(input_folder.value, ah_path.value),
+                ["date", "absolute_humidity"],
+            )
+            if _ah_err:
+                _parts.append(mo.callout(mo.md(f"**Humidity CSV:** {_ah_err}"), kind="danger"))
+            else:
+                _parts.append(mo.callout(
+                    mo.md(f"Humidity CSV: {len(_ah_df)} rows loaded."), kind="success"
+                ))
+        else:
+            _parts.append(mo.callout(
+                mo.md("**Humidity modifier is on but no CSV is set.** "
+                      "Provide an absolute-humidity CSV filename above."),
+                kind="warn",
+            ))
 
     # School/work calendar
     _cal_df = None
@@ -1238,7 +1295,8 @@ def _schedule_csv_show(
             _parts.append(cal_path)
             if cal_path.value.strip():
                 _cal_df, _cal_err = load_csv_validated(
-                    cal_path.value, ["date", "is_school_day", "is_work_day"]
+                    resolve_input_path(input_folder.value, cal_path.value),
+                    ["date", "is_school_day", "is_work_day"],
                 )
                 if _cal_err:
                     _parts.append(mo.callout(mo.md(f"**Calendar CSV:** {_cal_err}"), kind="danger"))
@@ -1254,7 +1312,9 @@ def _schedule_csv_show(
         if mob_mode.value == "csv":
             _parts.append(mob_path)
             if mob_path.value.strip():
-                _mob_df, _mob_err = load_csv_validated(mob_path.value, [])
+                _mob_df, _mob_err = load_csv_validated(
+                    resolve_input_path(input_folder.value, mob_path.value), []
+                )
                 if _mob_err:
                     _parts.append(mo.callout(mo.md(f"**Mobility CSV:** {_mob_err}"), kind="danger"))
                 else:
@@ -1280,13 +1340,14 @@ def _schedule_csv_show(
 
     # Vaccines
     _vax_df = None
-    if include_vax_immunity.value:
+    if include_vax_immunity.value or uses_scheduled_transfer:
         _parts.append(vax_mode)
         if vax_mode.value == "csv":
             _parts.append(vax_path)
             if vax_path.value.strip():
                 _vax_df, _vax_err = load_csv_validated(
-                    vax_path.value, ["date", "daily_vaccines"]
+                    resolve_input_path(input_folder.value, vax_path.value),
+                    ["date", "daily_vaccines"],
                 )
                 if _vax_err:
                     _parts.append(mo.callout(mo.md(f"**Vaccines CSV:** {_vax_err}"), kind="danger"))
@@ -1312,7 +1373,8 @@ def _schedule_csv_show(
         _parts.append(total_contact_csv_path)
         if total_contact_csv_path.value.strip():
             _total_contact_mat, _tc_err = load_contact_matrix_csv(
-                total_contact_csv_path.value, num_age_groups
+                resolve_input_path(input_folder.value, total_contact_csv_path.value),
+                num_age_groups,
             )
             if _tc_err:
                 _parts.append(mo.callout(mo.md(f"**Total contact matrix:** {_tc_err}"), kind="danger"))
@@ -1334,7 +1396,8 @@ def _schedule_csv_show(
         _parts.append(school_contact_csv_path)
         if school_contact_csv_path.value.strip():
             _school_contact_mat, _sc_err = load_contact_matrix_csv(
-                school_contact_csv_path.value, num_age_groups
+                resolve_input_path(input_folder.value, school_contact_csv_path.value),
+                num_age_groups,
             )
             if _sc_err:
                 _parts.append(mo.callout(mo.md(f"**School contact matrix:** {_sc_err}"), kind="danger"))
@@ -1347,7 +1410,8 @@ def _schedule_csv_show(
         _parts.append(work_contact_csv_path)
         if work_contact_csv_path.value.strip():
             _work_contact_mat, _wc_err = load_contact_matrix_csv(
-                work_contact_csv_path.value, num_age_groups
+                resolve_input_path(input_folder.value, work_contact_csv_path.value),
+                num_age_groups,
             )
             if _wc_err:
                 _parts.append(mo.callout(mo.md(f"**Work contact matrix:** {_wc_err}"), kind="danger"))
@@ -1377,12 +1441,12 @@ def _schedule_and_immunity_show(
     main_tab,
     include_inf_immunity,
     include_vax_immunity,
-    absolute_humidity_input,
     total_contact_input,
     school_contact_input,
     work_contact_input,
     mobility_input,
     daily_vaccines_input,
+    vax_transfer_delay_input,
     r_to_s_picker,
     inf_sat_input,
     vax_sat_input,
@@ -1396,7 +1460,7 @@ def _schedule_and_immunity_show(
     uses_contact_matrix,
     uses_mobility,
     requires_immunity_metrics,
-    ah_mode,
+    uses_scheduled_transfer,
     cal_mode,
     mob_mode,
     vax_mode,
@@ -1453,8 +1517,6 @@ def _schedule_and_immunity_show(
     ]
 
     _scalar_schedule_inputs = []
-    if uses_absolute_humidity and ah_mode.value == "constant":
-        _scalar_schedule_inputs.append(absolute_humidity_input)
     if uses_contact_matrix:
         if num_age_groups == 1:
             if cal_mode.value == "constant":
@@ -1469,6 +1531,19 @@ def _schedule_and_immunity_show(
         _parts.append(mo.hstack(_scalar_schedule_inputs, wrap=True))
     elif not uses_absolute_humidity and not uses_contact_matrix and not uses_mobility:
         _parts.append(mo.md("*No schedule-backed rate templates selected.*"))
+
+    _vax_data_active = include_vax_immunity.value or uses_scheduled_transfer
+    if _vax_data_active and vax_mode.value == "constant":
+        _parts.append(daily_vaccines_input)
+
+    if uses_scheduled_transfer:
+        _parts.append(_wtip(
+            vax_transfer_delay_input,
+            "Days between the scheduled date (e.g. vaccination date) and the\n"
+            "date individuals actually move from origin to destination in a\n"
+            "'scheduled_exact' transition.\n\n"
+            "0 = transfer happens on the scheduled date itself.",
+        ))
 
     if requires_immunity_metrics:
         _parts.append(mo.callout(
@@ -1535,8 +1610,6 @@ def _schedule_and_immunity_show(
                     )
                 )
             _metric_inputs.extend([vax_delay_input, vax_reset_date_input])
-            if vax_mode.value == "constant":
-                _metric_inputs.append(daily_vaccines_input)
         _parts.append(mo.hstack(_metric_inputs, wrap=True))
     else:
         _parts.append(mo.md("*Dynamic immunity metrics disabled.*"))
@@ -1729,7 +1802,7 @@ def _build_config(
     compartments,
     n_transitions,
     t_name, t_origin, t_dest, t_template,
-    t_param, t_factors, t_complements,
+    t_param, t_schedule_name, t_factors, t_complements,
     t_base_rate, t_proportion, t_is_complement, t_inf_reduce, t_vax_reduce,
     t_beta, t_rel_sus, t_infectious, t_use_humidity, t_humidity_impact,
     t_use_foi_immunity, t_immobile,
@@ -1738,13 +1811,16 @@ def _build_config(
     r_to_s_picker, inf_sat_input, vax_sat_input, inf_wane_input,
     vax_wane_input, vax_wane_is_array, vax_wane_loaded_val,
     vax_delay_input, vax_reset_date_input,
+    vax_transfer_delay_input,
     uses_absolute_humidity, uses_contact_matrix, uses_mobility, requires_immunity_metrics,
+    uses_scheduled_transfer,
     parse_csv_list, parse_infectious_mapping,
     total_contact_input, school_contact_input, work_contact_input,
     num_age_groups, num_risk_groups,
     is_metapop, metapop_folder_input,
     loaded_schedule_dfs,
-    ah_mode, cal_mode, mob_mode, vax_mode,
+    input_folder,
+    cal_mode, mob_mode, vax_mode,
     ah_path, cal_path, mob_path, vax_path,
     total_contact_csv_path, school_contact_csv_path, work_contact_csv_path,
     total_pop_input,
@@ -1804,6 +1880,8 @@ def _build_config(
                     _rate_config["inf_reduce_param"] = _inf_r
                 if _vax_r:
                     _rate_config["vax_reduce_param"] = _vax_r
+        elif _template == "scheduled_exact":
+            _rate_config = {"schedule": t_schedule_name.value[_i].strip()}
         else:
             _travel_config = {
                 "infectious_compartments": parse_infectious_mapping(t_infectious.value[_i]),
@@ -1897,6 +1975,16 @@ def _build_config(
                 "df_attribute": "daily_vaccines_df",
             },
         })
+    if uses_scheduled_transfer:
+        _transfer_schedule_config = {"df_attribute": "daily_vaccines_df"}
+        if int(vax_transfer_delay_input.value) > 0:
+            params_dict["vax_transfer_delay_days"] = int(vax_transfer_delay_input.value)
+            _transfer_schedule_config["vax_protection_delay_days_param"] = "vax_transfer_delay_days"
+        _schedules.append({
+            "name": "vaccinated_transfer_schedule",
+            "schedule_template": "vaccine_schedule",
+            "schedule_config": _transfer_schedule_config,
+        })
     if include_inf_immunity.value:
         params_dict.update({
             "inf_induced_saturation": float(inf_sat_input.value),
@@ -1932,15 +2020,18 @@ def _build_config(
             },
         })
 
-    # Build input_files section (only non-empty paths)
+    # Build input_files section. The shared folder is recorded once and the CSV
+    # entries below are bare filenames resolved against it. Humidity is CSV-only.
     _input_files = {}
-    if uses_absolute_humidity and ah_mode.value == "csv" and ah_path.value.strip():
+    if input_folder.value.strip():
+        _input_files["input_folder"] = input_folder.value.strip()
+    if uses_absolute_humidity and ah_path.value.strip():
         _input_files["absolute_humidity_csv"] = ah_path.value.strip()
     if uses_contact_matrix and cal_mode.value == "csv" and cal_path.value.strip():
         _input_files["school_work_calendar_csv"] = cal_path.value.strip()
     if uses_mobility and mob_mode.value == "csv" and mob_path.value.strip():
         _input_files["mobility_csv"] = mob_path.value.strip()
-    if include_vax_immunity.value and vax_mode.value == "csv" and vax_path.value.strip():
+    if (include_vax_immunity.value or uses_scheduled_transfer) and vax_mode.value == "csv" and vax_path.value.strip():
         _input_files["vaccines_csv"] = vax_path.value.strip()
     if uses_contact_matrix and _A > 1:
         if total_contact_csv_path.value.strip():
@@ -2049,7 +2140,6 @@ def _run_sim(
     timesteps,
     start_date_input,
     transition_vars_input,
-    absolute_humidity_input,
     mobility_input,
     daily_vaccines_input,
     build_notebook_schedules_input,
@@ -2099,7 +2189,7 @@ def _run_sim(
         return build_notebook_schedules_input(
             start_date=start_real_date,
             num_days=_num_days,
-            absolute_humidity=float(absolute_humidity_input.value),
+            absolute_humidity=0.0,  # CSV-only: the humidity df is always supplied when used
             mobility_value=float(mobility_input.value),
             daily_vaccines_value=float(daily_vaccines_input.value),
             num_age_groups=_A,
@@ -2426,13 +2516,14 @@ def _summary_stats(histories, compartments, np, mo, main_tab):
         _vals = np.stack([_h[_comp] for _h in histories], axis=0)
         _peak = np.median(np.max(_vals, axis=1))
         _peak_day = int(np.median(np.argmax(_vals, axis=1))) + 1
-        _rows.append(f"| `{_comp}` | {_peak:,.0f} | {_peak_day} |")
+        _final = np.median(_vals[:, -1])
+        _rows.append(f"| `{_comp}` | {_peak:,.0f} | {_peak_day} | {_final:,.0f} |")
     _table = "\n".join(_rows)
     mo.vstack([
         mo.md("### Results — Summary"),
         mo.md(
-            "| Compartment | Peak value (median) | Peak day (median) |\n"
-            "|---|---|---|\n"
+            "| Compartment | Peak value (median) | Peak day (median) | Final value (median) |\n"
+            "|---|---|---|---|\n"
             f"{_table}"
         ),
     ])

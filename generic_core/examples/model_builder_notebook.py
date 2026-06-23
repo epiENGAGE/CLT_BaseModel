@@ -279,6 +279,19 @@ def _helpers(Path, SimpleNamespace, json, np, pd):
         except Exception as _exc:
             return {}, f"JSON parse error: {_exc}"
 
+    def resolve_input_path(folder_str, name_str):
+        """Resolve a CSV entry against the shared input folder.
+
+        ``name_str`` is normally a bare filename living in ``folder_str``.
+        An absolute path in ``name_str`` overrides the folder (pathlib join
+        semantics), so configs that still store full paths keep working.
+        Returns "" when ``name_str`` is empty."""
+        if not name_str or not name_str.strip():
+            return ""
+        if not folder_str or not folder_str.strip():
+            return name_str.strip()
+        return str(Path(folder_str.strip()) / name_str.strip())
+
     def validate_metapop_folder(folder_path_str):
         """Check that a metapop folder has the required files.
         Returns (is_valid, status_dict)."""
@@ -326,6 +339,7 @@ def _helpers(Path, SimpleNamespace, json, np, pd):
         load_csv_validated,
         load_contact_matrix_csv,
         load_config_json,
+        resolve_input_path,
         validate_metapop_folder,
         infectious_mapping_to_str,
         is_array_param,
@@ -741,7 +755,8 @@ The downloaded `model_config.json` contains everything needed to restore the ses
 
 - Compartment names, transition definitions, parameter values
 - Age/risk group counts (`age_risk` section)
-- File paths for all CSV schedules (`input_files` section)
+- CSV schedule files (`input_files` section): a shared `input_folder` plus the
+  filename of each CSV used (humidity, calendar, mobility, vaccines, contact matrices)
 - Total population
 - Per-subpopulation parameter overrides (`subpop_params` section, if present)
 
@@ -1484,9 +1499,6 @@ def _schedule_and_immunity_ui(mo, loaded_config):
         label="Include vaccine-induced immunity metric (MV)",
         value="MV" in _epi_names,
     )
-    absolute_humidity_input = mo.ui.number(
-        start=0.0, stop=1.0, step=None, value=0.006, label="Absolute humidity",
-    )
     total_contact_input = mo.ui.number(
         start=0.0, stop=100.0, step=None, value=1.0, label="Total contact matrix value",
     )
@@ -1510,7 +1522,6 @@ def _schedule_and_immunity_ui(mo, loaded_config):
     return (
         include_inf_immunity,
         include_vax_immunity,
-        absolute_humidity_input,
         total_contact_input,
         school_contact_input,
         work_contact_input,
@@ -1584,22 +1595,34 @@ def _schedule_csv_ui(
     _inf = loaded_config.get("input_files", {})
     _multi = (num_age_groups > 1) or (num_risk_groups > 1)
 
-    # Auto-detect absolute_humidity.csv from metapop folder when not explicitly saved
-    _ah_csv_saved = _inf.get("absolute_humidity_csv", "")
-    if not _ah_csv_saved and is_metapop and metapop_folder_input.value.strip():
-        _candidate = Path(metapop_folder_input.value.strip()) / "absolute_humidity.csv"
-        if _candidate.exists():
-            _ah_csv_saved = str(_candidate)
+    # Single shared folder holding every CSV below. The file fields are bare
+    # filenames resolved against it (like the metapop folder). Legacy configs
+    # that stored full paths leave this empty — the resolver passes them through.
+    _folder_saved = _inf.get("input_folder", "")
 
-    ah_mode = mo.ui.radio(
-        options=["constant", "csv"],
-        value="csv" if _ah_csv_saved else "constant",
-        label="Absolute humidity source",
+    input_folder = mo.ui.text(
+        value=_folder_saved,
+        placeholder="/path/to/input_folder",
+        label="Input folder (all CSV files below live here)",
+        full_width=True,
     )
+
+    # Humidity is CSV-only: a constant humidity modifier just scales beta by a
+    # constant, which is a no-op. Auto-detect absolute_humidity.csv in the shared
+    # folder (bare name), else the metapop folder (full path) for old layouts.
+    _ah_csv_saved = _inf.get("absolute_humidity_csv", "")
+    if not _ah_csv_saved:
+        if _folder_saved and (Path(_folder_saved) / "absolute_humidity.csv").exists():
+            _ah_csv_saved = "absolute_humidity.csv"
+        elif is_metapop and metapop_folder_input.value.strip():
+            _candidate = Path(metapop_folder_input.value.strip()) / "absolute_humidity.csv"
+            if _candidate.exists():
+                _ah_csv_saved = str(_candidate)
+
     ah_path = mo.ui.text(
         value=_ah_csv_saved,
-        placeholder="/path/to/absolute_humidity.csv",
-        label="Absolute humidity CSV",
+        placeholder="absolute_humidity.csv",
+        label="Absolute humidity CSV (filename, required for humidity modifier)",
         full_width=True,
     )
     cal_mode = mo.ui.radio(
@@ -1609,8 +1632,8 @@ def _schedule_csv_ui(
     )
     cal_path = mo.ui.text(
         value=_inf.get("school_work_calendar_csv", ""),
-        placeholder="/path/to/school_work_calendar.csv",
-        label="School/work calendar CSV",
+        placeholder="school_work_calendar.csv",
+        label="School/work calendar CSV (filename)",
         full_width=True,
     )
     mob_mode = mo.ui.radio(
@@ -1620,8 +1643,8 @@ def _schedule_csv_ui(
     )
     mob_path = mo.ui.text(
         value=_inf.get("mobility_csv", ""),
-        placeholder="/path/to/mobility_modifier.csv",
-        label="Mobility CSV",
+        placeholder="mobility_modifier.csv",
+        label="Mobility CSV (filename)",
         full_width=True,
     )
     vax_mode = mo.ui.radio(
@@ -1631,30 +1654,31 @@ def _schedule_csv_ui(
     )
     vax_path = mo.ui.text(
         value=_inf.get("vaccines_csv", ""),
-        placeholder="/path/to/daily_vaccines.csv",
-        label="Vaccines CSV",
+        placeholder="daily_vaccines.csv",
+        label="Vaccines CSV (filename)",
         full_width=True,
     )
     total_contact_csv_path = mo.ui.text(
         value=_inf.get("total_contact_matrix_csv", ""),
-        placeholder="/path/to/total_contact_matrix.csv",
-        label="Total contact matrix CSV (A×A plain floats)",
+        placeholder="total_contact_matrix.csv",
+        label="Total contact matrix CSV (filename, A×A plain floats)",
         full_width=True,
     )
     school_contact_csv_path = mo.ui.text(
         value=_inf.get("school_contact_matrix_csv", ""),
-        placeholder="/path/to/school_contact_matrix.csv",
-        label="School contact matrix CSV (A×A plain floats)",
+        placeholder="school_contact_matrix.csv",
+        label="School contact matrix CSV (filename, A×A plain floats)",
         full_width=True,
     )
     work_contact_csv_path = mo.ui.text(
         value=_inf.get("work_contact_matrix_csv", ""),
-        placeholder="/path/to/work_contact_matrix.csv",
-        label="Work contact matrix CSV (A×A plain floats)",
+        placeholder="work_contact_matrix.csv",
+        label="Work contact matrix CSV (filename, A×A plain floats)",
         full_width=True,
     )
     return (
-        ah_mode, ah_path,
+        input_folder,
+        ah_path,
         cal_mode, cal_path,
         mob_mode, mob_path,
         vax_mode, vax_path,
@@ -1668,33 +1692,40 @@ def _schedule_csv_show(
     num_age_groups, num_risk_groups,
     uses_absolute_humidity, uses_contact_matrix, uses_mobility, include_vax_immunity,
     uses_scheduled_transfer,
-    ah_mode, ah_path,
+    input_folder,
+    ah_path,
     cal_mode, cal_path,
     mob_mode, mob_path,
     vax_mode, vax_path,
     total_contact_csv_path, school_contact_csv_path, work_contact_csv_path,
-    load_csv_validated, load_contact_matrix_csv,
+    load_csv_validated, load_contact_matrix_csv, resolve_input_path,
     SimpleNamespace,
 ):
     _multi = (num_age_groups > 1) or (num_risk_groups > 1)
     _parts = [mo.md("#### Schedule File Inputs")]
+    _parts.append(input_folder)
 
-    # Absolute humidity
+    # Absolute humidity — CSV-only (no constant option)
     _ah_df = None
     if uses_absolute_humidity:
-        _parts.append(ah_mode)
-        if ah_mode.value == "csv":
-            _parts.append(ah_path)
-            if ah_path.value.strip():
-                _ah_df, _ah_err = load_csv_validated(
-                    ah_path.value, ["date", "absolute_humidity"]
-                )
-                if _ah_err:
-                    _parts.append(mo.callout(mo.md(f"**Humidity CSV:** {_ah_err}"), kind="danger"))
-                else:
-                    _parts.append(mo.callout(
-                        mo.md(f"Humidity CSV: {len(_ah_df)} rows loaded."), kind="success"
-                    ))
+        _parts.append(ah_path)
+        if ah_path.value.strip():
+            _ah_df, _ah_err = load_csv_validated(
+                resolve_input_path(input_folder.value, ah_path.value),
+                ["date", "absolute_humidity"],
+            )
+            if _ah_err:
+                _parts.append(mo.callout(mo.md(f"**Humidity CSV:** {_ah_err}"), kind="danger"))
+            else:
+                _parts.append(mo.callout(
+                    mo.md(f"Humidity CSV: {len(_ah_df)} rows loaded."), kind="success"
+                ))
+        else:
+            _parts.append(mo.callout(
+                mo.md("**Humidity modifier is on but no CSV is set.** "
+                      "Provide an absolute-humidity CSV filename above."),
+                kind="warn",
+            ))
 
     # School/work calendar
     _cal_df = None
@@ -1704,7 +1735,8 @@ def _schedule_csv_show(
             _parts.append(cal_path)
             if cal_path.value.strip():
                 _cal_df, _cal_err = load_csv_validated(
-                    cal_path.value, ["date", "is_school_day", "is_work_day"]
+                    resolve_input_path(input_folder.value, cal_path.value),
+                    ["date", "is_school_day", "is_work_day"],
                 )
                 if _cal_err:
                     _parts.append(mo.callout(mo.md(f"**Calendar CSV:** {_cal_err}"), kind="danger"))
@@ -1720,7 +1752,9 @@ def _schedule_csv_show(
         if mob_mode.value == "csv":
             _parts.append(mob_path)
             if mob_path.value.strip():
-                _mob_df, _mob_err = load_csv_validated(mob_path.value, [])
+                _mob_df, _mob_err = load_csv_validated(
+                    resolve_input_path(input_folder.value, mob_path.value), []
+                )
                 if _mob_err:
                     _parts.append(mo.callout(mo.md(f"**Mobility CSV:** {_mob_err}"), kind="danger"))
                 else:
@@ -1752,7 +1786,8 @@ def _schedule_csv_show(
             _parts.append(vax_path)
             if vax_path.value.strip():
                 _vax_df, _vax_err = load_csv_validated(
-                    vax_path.value, ["date", "daily_vaccines"]
+                    resolve_input_path(input_folder.value, vax_path.value),
+                    ["date", "daily_vaccines"],
                 )
                 if _vax_err:
                     _parts.append(mo.callout(mo.md(f"**Vaccines CSV:** {_vax_err}"), kind="danger"))
@@ -1778,7 +1813,8 @@ def _schedule_csv_show(
         _parts.append(total_contact_csv_path)
         if total_contact_csv_path.value.strip():
             _total_contact_mat, _tc_err = load_contact_matrix_csv(
-                total_contact_csv_path.value, num_age_groups
+                resolve_input_path(input_folder.value, total_contact_csv_path.value),
+                num_age_groups,
             )
             if _tc_err:
                 _parts.append(mo.callout(mo.md(f"**Total contact matrix:** {_tc_err}"), kind="danger"))
@@ -1800,7 +1836,8 @@ def _schedule_csv_show(
         _parts.append(school_contact_csv_path)
         if school_contact_csv_path.value.strip():
             _school_contact_mat, _sc_err = load_contact_matrix_csv(
-                school_contact_csv_path.value, num_age_groups
+                resolve_input_path(input_folder.value, school_contact_csv_path.value),
+                num_age_groups,
             )
             if _sc_err:
                 _parts.append(mo.callout(mo.md(f"**School contact matrix:** {_sc_err}"), kind="danger"))
@@ -1813,7 +1850,8 @@ def _schedule_csv_show(
         _parts.append(work_contact_csv_path)
         if work_contact_csv_path.value.strip():
             _work_contact_mat, _wc_err = load_contact_matrix_csv(
-                work_contact_csv_path.value, num_age_groups
+                resolve_input_path(input_folder.value, work_contact_csv_path.value),
+                num_age_groups,
             )
             if _wc_err:
                 _parts.append(mo.callout(mo.md(f"**Work contact matrix:** {_wc_err}"), kind="danger"))
@@ -1843,7 +1881,6 @@ def _schedule_and_immunity_show(
     main_tab,
     include_inf_immunity,
     include_vax_immunity,
-    absolute_humidity_input,
     total_contact_input,
     school_contact_input,
     work_contact_input,
@@ -1864,7 +1901,6 @@ def _schedule_and_immunity_show(
     uses_mobility,
     requires_immunity_metrics,
     uses_scheduled_transfer,
-    ah_mode,
     cal_mode,
     mob_mode,
     vax_mode,
@@ -1921,8 +1957,6 @@ def _schedule_and_immunity_show(
     ]
 
     _scalar_schedule_inputs = []
-    if uses_absolute_humidity and ah_mode.value == "constant":
-        _scalar_schedule_inputs.append(absolute_humidity_input)
     if uses_contact_matrix:
         if num_age_groups == 1:
             if cal_mode.value == "constant":
@@ -2225,7 +2259,8 @@ def _build_config(
     num_age_groups, num_risk_groups,
     is_metapop, metapop_folder_input,
     loaded_schedule_dfs,
-    ah_mode, cal_mode, mob_mode, vax_mode,
+    input_folder,
+    cal_mode, mob_mode, vax_mode,
     ah_path, cal_path, mob_path, vax_path,
     total_contact_csv_path, school_contact_csv_path, work_contact_csv_path,
     total_pop_input,
@@ -2425,9 +2460,12 @@ def _build_config(
             },
         })
 
-    # Build input_files section (only non-empty paths)
+    # Build input_files section. The shared folder is recorded once and the CSV
+    # entries below are bare filenames resolved against it. Humidity is CSV-only.
     _input_files = {}
-    if uses_absolute_humidity and ah_mode.value == "csv" and ah_path.value.strip():
+    if input_folder.value.strip():
+        _input_files["input_folder"] = input_folder.value.strip()
+    if uses_absolute_humidity and ah_path.value.strip():
         _input_files["absolute_humidity_csv"] = ah_path.value.strip()
     if uses_contact_matrix and cal_mode.value == "csv" and cal_path.value.strip():
         _input_files["school_work_calendar_csv"] = cal_path.value.strip()
@@ -2542,7 +2580,6 @@ def _run_sim(
     timesteps,
     start_date_input,
     transition_vars_input,
-    absolute_humidity_input,
     mobility_input,
     daily_vaccines_input,
     build_notebook_schedules_input,
@@ -2592,7 +2629,7 @@ def _run_sim(
         return build_notebook_schedules_input(
             start_date=start_real_date,
             num_days=_num_days,
-            absolute_humidity=float(absolute_humidity_input.value),
+            absolute_humidity=0.0,  # CSV-only: the humidity df is always supplied when used
             mobility_value=float(mobility_input.value),
             daily_vaccines_value=float(daily_vaccines_input.value),
             num_age_groups=_A,
@@ -2943,7 +2980,6 @@ def _shared_model_factory(
     build_params_from_config,
     clt, flu, np, json, pd, Path,
     loaded_schedule_dfs,
-    absolute_humidity_input,
     mobility_input,
     daily_vaccines_input,
     num_age_groups,
@@ -2955,7 +2991,7 @@ def _shared_model_factory(
     def _sched_builder(start_date, num_days, ah_df=None, cal_df=None, mob_df=None, vax_df=None):
         return build_notebook_schedules_input(
             start_date=start_date, num_days=num_days,
-            absolute_humidity=float(absolute_humidity_input.value),
+            absolute_humidity=0.0,  # CSV-only: the humidity df is always supplied when used
             mobility_value=float(mobility_input.value),
             daily_vaccines_value=float(daily_vaccines_input.value),
             num_age_groups=_A, num_risk_groups=_R,
@@ -7076,6 +7112,14 @@ Arrays are shape `[age_groups][risk_groups]`.
 """),
     ])
     return
+
+
+if __name__ == "__main__":
+    app.run()
+
+
+if __name__ == "__main__":
+    app.run()
 
 
 if __name__ == "__main__":

@@ -213,6 +213,19 @@ def _helpers(Path, SimpleNamespace, json, np, pd):
         except Exception as _exc:
             return {}, f"JSON parse error: {_exc}"
 
+    def resolve_input_path(folder_str, name_str):
+        """Resolve a CSV entry against the shared input folder.
+
+        ``name_str`` is normally a bare filename living in ``folder_str``.
+        An absolute path in ``name_str`` overrides the folder (pathlib join
+        semantics), so configs that still store full paths keep working.
+        Returns "" when ``name_str`` is empty."""
+        if not name_str or not name_str.strip():
+            return ""
+        if not folder_str or not folder_str.strip():
+            return name_str.strip()
+        return str(Path(folder_str.strip()) / name_str.strip())
+
     def validate_metapop_folder(folder_path_str):
         """Check that a metapop folder has the required files.
         Returns (is_valid, status_dict)."""
@@ -260,6 +273,7 @@ def _helpers(Path, SimpleNamespace, json, np, pd):
         load_csv_validated,
         load_contact_matrix_csv,
         load_config_json,
+        resolve_input_path,
         validate_metapop_folder,
         infectious_mapping_to_str,
         is_array_param,
