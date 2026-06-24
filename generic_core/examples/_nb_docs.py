@@ -24,7 +24,38 @@ output in a specific location.
 
 ---
 
-## Tab 1 — Model Builder
+## Tab 1 — Population & Geography
+
+**Purpose:** Define the population dimensions and (optionally) fetch real contact
+matrices for a geography. Do this **first** — the rest of the model is built in the
+Model Builder tab and depends on the age/risk group counts set here.
+
+### What you configure
+- **Age groups** — two modes:
+  - *Count only* — just a number `A` (for abstract models with no real age bands).
+  - *Named age bands* — e.g. `0-4, 5-17, 18-49, 50-64, 65+`. Bands must start at 0,
+    be contiguous, and end in an open band `x+` (with `x ≤ 84`). `A` = number of bands.
+- **Risk groups** — the number `R`.
+- **Population mode** — *Single population* or *Metapopulation* (with a folder path).
+- **Contact matrices** — when using named age bands you can **fetch** the total / school /
+  work matrices for a geography (Mistry 2021, via the optional `epydemix` package).
+
+### Contact-matrix fetch
+- Requires **named age bands** (the fetcher needs age-group definitions). In count-only
+  mode, supply contact-matrix CSVs in Model Builder → Step 4 instead.
+- Choose a **US state** or a **Country** (both are searchable dropdowns of the
+  epydemix-data location names).
+- For metapopulation models, choose the geography **scope**:
+  - *Same for all subpops* — one geography; matrices are shared across subpops.
+  - *Per-subpopulation* — one geography per subpop; each subpop gets its own matrices,
+    written into the config's `subpop_params` section.
+- Press **Fetch contact matrices**. Results are written into the config and used at run
+  time. Requires `pip install epydemix` and internet access; if unavailable, the tab shows
+  an install hint and you can fall back to CSVs.
+
+---
+
+## Tab 2 — Model Builder
 
 **Purpose:** Define the structure of your epidemic model and do a quick preview simulation.
 
@@ -33,18 +64,18 @@ output in a specific location.
 | Step | What you configure |
 |------|--------------------|
 | 0 — Load config | Optionally load a previously saved `model_config.json` to pre-fill all fields. |
-| 1 — Population structure | Number of age groups, risk groups, and whether to use a metapopulation. |
-| 2 — Compartments | Name each compartment (e.g. `S`, `E`, `I`, `R`).  The first compartment receives the bulk of the initial population. |
-| 3 — Transitions | Define flows between compartments.  Each transition needs a name, a "from" compartment, a "to" compartment, and a rate template (`constant_param`, `param_product`, `immunity_modulated`, `force_of_infection`, `force_of_infection_travel`, or `scheduled_exact`). |
-| 4 — Parameters | Set numeric values for all parameters referenced by your rate templates (e.g. `beta_baseline`, `sigma`, `gamma`). |
-| 5 — Schedules & immunity | Optionally upload CSVs for time-varying schedules: absolute humidity, school/work calendars, mobility, and daily vaccines. |
-| 6 — Diagram | Preview the compartment diagram generated from your transitions. |
-| 7 — Initial conditions | Set the total population and seed counts for compartments 2–N. |
-| 8 — Simulation settings | Choose deterministic vs stochastic, number of replicates, timesteps per day, start date, and which transition variables to save. |
-| 9 — Config preview & download | Review the full `model_config.json` and download it. |
-| 10 — Run | Click **Run simulation** to see epidemic curves and a summary table. |
+| 1 — Compartments | Name each compartment (e.g. `S`, `E`, `I`, `R`).  The first compartment receives the bulk of the initial population. |
+| 2 — Transitions | Define flows between compartments.  Each transition needs a name, a "from" compartment, a "to" compartment, and a rate template (`constant_param`, `param_product`, `immunity_modulated`, `force_of_infection`, `force_of_infection_travel`, or `scheduled_exact`). |
+| 3 — Parameters | Set numeric values for all parameters referenced by your rate templates (e.g. `beta_baseline`, `sigma`, `gamma`). |
+| 4 — Schedules & immunity | Optionally upload CSVs for time-varying schedules: absolute humidity, school/work calendars, mobility, and daily vaccines. Contact matrices come from the Population & Geography tab or CSVs here. |
+| 5 — Diagram | Preview the compartment diagram generated from your transitions. |
+| 6 — Initial conditions | Set the total population and seed counts for compartments 2–N. |
+| 7 — Simulation settings | Choose deterministic vs stochastic, number of replicates, timesteps per day, start date, and which transition variables to save. |
+| 8 — Config preview & download | Review the full `model_config.json` and download it. |
+| 9 — Run | Click **Run simulation** to see epidemic curves and a summary table. |
 
-**Metapopulation mode:** When enabled, Step 1 asks for a folder path containing:
+**Metapopulation mode:** Enabled in the **Population & Geography** tab, which asks for a
+folder path containing:
 - `metapop_config.json` — subpopulation names and travel matrix
 - `initial_conditions_<SubpopName>.json` — per-subpop initial conditions
 - Optional per-subpop schedule CSVs (`school_work_calendar_<name>.csv`, `vaccines_<name>.csv`)
@@ -55,7 +86,7 @@ any setting changes, so you never lose your work.
 
 ---
 
-## Tab 2 — Fitting
+## Tab 3 — Fitting
 
 **Purpose:** Estimate unknown parameters by fitting the model to an observed time series.
 
@@ -97,7 +128,7 @@ Auto-saved to `{output_dir}/fitted_params.json`.
 
 ---
 
-## Tab 3 — Forecast
+## Tab 4 — Forecast
 
 **Purpose:** Run an ensemble forward projection using the fitted (or current) parameters.
 
@@ -127,7 +158,7 @@ Auto-saved to `{output_dir}/forecast_ensemble.json`.
 
 ---
 
-## Tab 4 — Export
+## Tab 5 — Export
 
 **Purpose:** Generate a standalone Python script that can run your model on a server
 or in a batch job, and download all configuration files.
@@ -158,7 +189,7 @@ Results are stored in `simulation_output/results.db` as a table with columns
 
 ---
 
-## Tab 5 — Analysis
+## Tab 6 — Analysis
 
 **Purpose:** Compare how model outputs change across scenarios or parameter values.
 Sensitivity and scenario analysis share identical output plots.
@@ -260,16 +291,18 @@ The objective minimised is the weighted sum of per-target losses. Practical advi
 ## Typical workflow
 
 ```
-Model Builder  →  Fitting  →  Forecast  →  Export
-                    ↓
-                 Analysis
+Population & Geography  →  Model Builder  →  Fitting  →  Forecast  →  Export
+                                                ↓
+                                             Analysis
 ```
 
-1. Build your model in **Model Builder** and confirm the epidemic curves look sensible.
-2. Go to **Fitting**, upload observed data, and fit key parameters.
-3. Check the fit overlay in Fitting results, then switch to **Forecast** to project forward.
-4. Use **Analysis** to quantify uncertainty (sensitivity) or compare policy scenarios.
-5. When ready to run larger ensembles, go to **Export**, download the script and configs,
+1. Set age/risk groups, population mode, and (optionally) fetch contact matrices in
+   **Population & Geography**.
+2. Build your model in **Model Builder** and confirm the epidemic curves look sensible.
+3. Go to **Fitting**, upload observed data, and fit key parameters.
+4. Check the fit overlay in Fitting results, then switch to **Forecast** to project forward.
+5. Use **Analysis** to quantify uncertainty (sensitivity) or compare policy scenarios.
+6. When ready to run larger ensembles, go to **Export**, download the script and configs,
    and run them on your server.
 
 ---

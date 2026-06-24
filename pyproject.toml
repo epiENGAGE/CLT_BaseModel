@@ -13,6 +13,13 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = []
 
+# Optional extras. Install with e.g.: pip install -e ".[contact_matrices]"
+# - contact_matrices: enables the in-notebook contact-matrix fetch in the model
+#   builder's Population & Geography tab (generic_core/contact_matrix_fetch.py),
+#   which downloads Mistry-2021 matrices via the epydemix-data repo.
+[project.optional-dependencies]
+contact_matrices = ["epydemix"]
+
 [tool.setuptools.packages.find]
 where = ["."]
 

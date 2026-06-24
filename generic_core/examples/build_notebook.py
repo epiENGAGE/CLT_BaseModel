@@ -13,9 +13,11 @@ defined in the header written by this assembler. Edit a section file, then
 run this script to regenerate model_builder_notebook.py.
 
 Assembly order must respect data-flow dependencies:
-  _nb_shared → _nb_analysis_metric_defs → _nb_entry
+  _nb_shared → _nb_analysis_metric_defs → _nb_entry → _nb_population
     → _nb_model_builder → _nb_shared_factory → _nb_fitting
       → _nb_forecast → _nb_export
+  _nb_population  (defines num_age_groups / is_metapop / metapop_folder_input,
+                  consumed by _nb_model_builder and downstream tabs)
   _nb_analysis  (depends on _nb_shared_factory + _nb_analysis_metric_defs)
   _nb_docs      (depends on _nb_shared for `mo`)
 """
@@ -41,7 +43,8 @@ Section files (all in generic_core/examples/):
   _nb_shared.py               — imports and helper functions
   _nb_analysis_metric_defs.py — analysis metric definition widgets
   _nb_entry.py                — tab selector, output directory, autosave
-  _nb_model_builder.py        — Model Builder tab (Steps 0–10)
+  _nb_population.py           — Population & Geography tab
+  _nb_model_builder.py        — Model Builder tab (Steps 0–9)
   _nb_shared_factory.py       — shared model factory functions
   _nb_fitting.py              — Fitting tab
   _nb_forecast.py             — Forecast tab
@@ -72,9 +75,13 @@ Supported rate templates
 Scope note
 ----------
 This notebook supports single-population and metapopulation models, with
-configurable age and risk groups. For multi-age/risk-group models, contact
-matrices are embedded inline in the config JSON; vaccines and mobility can
-be supplied as CSV files or as constant scalar values.
+configurable age and risk groups. Age groups can be a plain count or named
+bands (e.g. 0-4, 5-17, 65+). For multi-age/risk-group models, contact matrices
+are embedded inline in the config JSON; they can be entered as CSVs or, when
+named age bands are used, fetched for a US state or country in the
+Population & Geography tab (requires the optional ``epydemix`` package:
+``pip install epydemix``). Vaccines and mobility can be supplied as CSV files
+or as constant scalar values.
 
 Metapopulation folder conventions
 ----------------------------------
@@ -108,6 +115,7 @@ SECTIONS = [
     "_nb_shared.py",
     "_nb_analysis_metric_defs.py",
     "_nb_entry.py",
+    "_nb_population.py",
     "_nb_model_builder.py",
     "_nb_shared_factory.py",
     "_nb_fitting.py",

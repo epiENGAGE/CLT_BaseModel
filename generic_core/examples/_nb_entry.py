@@ -5,6 +5,7 @@
 @app.cell
 def _main_tab_selector(mo):
     main_tab = mo.ui.tabs({
+        "Population & Geography": mo.md(""),
         "Model Builder": mo.md(""),
         "Analysis":      mo.md(""),
         "Fitting":       mo.md(""),

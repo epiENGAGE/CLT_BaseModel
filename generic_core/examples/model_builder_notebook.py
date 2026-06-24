@@ -13,7 +13,8 @@ Section files (all in generic_core/examples/):
   _nb_shared.py               — imports and helper functions
   _nb_analysis_metric_defs.py — analysis metric definition widgets
   _nb_entry.py                — tab selector, output directory, autosave
-  _nb_model_builder.py        — Model Builder tab (Steps 0–10)
+  _nb_population.py           — Population & Geography tab
+  _nb_model_builder.py        — Model Builder tab (Steps 0–9)
   _nb_shared_factory.py       — shared model factory functions
   _nb_fitting.py              — Fitting tab
   _nb_forecast.py             — Forecast tab
@@ -44,9 +45,13 @@ Supported rate templates
 Scope note
 ----------
 This notebook supports single-population and metapopulation models, with
-configurable age and risk groups. For multi-age/risk-group models, contact
-matrices are embedded inline in the config JSON; vaccines and mobility can
-be supplied as CSV files or as constant scalar values.
+configurable age and risk groups. Age groups can be a plain count or named
+bands (e.g. 0-4, 5-17, 65+). For multi-age/risk-group models, contact matrices
+are embedded inline in the config JSON; they can be entered as CSVs or, when
+named age bands are used, fetched for a US state or country in the
+Population & Geography tab (requires the optional ``epydemix`` package:
+``pip install epydemix``). Vaccines and mobility can be supplied as CSV files
+or as constant scalar values.
 
 Metapopulation folder conventions
 ----------------------------------
@@ -90,6 +95,7 @@ def _imports():
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
     import generic_core as gc
+    from generic_core import contact_matrix_fetch as cmf
     from generic_core.config_parser import parse_model_config_from_dict
     from generic_core.generic_model import (
         ConfigDrivenSubpopModel,
@@ -128,7 +134,7 @@ def _imports():
 
     return (
         Path, SimpleNamespace, namedtuple, copy, sqlite3, datetime,
-        clt, flu, gc, io, json, mo, np, pd, plt,
+        clt, flu, gc, cmf, io, json, mo, np, pd, plt,
         ConfigDrivenMetapopModel, ConfigDrivenSubpopModel,
         build_state_from_config, build_params_from_config,
         parse_model_config_from_dict,
@@ -455,6 +461,7 @@ def _analysis_metric_plot_controls(mo, analysis_n_metrics_input, analysis_metric
 @app.cell
 def _main_tab_selector(mo):
     main_tab = mo.ui.tabs({
+        "Population & Geography": mo.md(""),
         "Model Builder": mo.md(""),
         "Analysis":      mo.md(""),
         "Fitting":       mo.md(""),
@@ -495,6 +502,360 @@ def _tab_header_display(main_tab, output_dir_input, mo):
 def _autosave_config(config_dict, output_dir, json):
     _p = output_dir / "model_config.json"
     _ = _p.write_text(json.dumps(config_dict, indent=2))
+    return
+
+@app.cell
+def _population_structure_ui(mo, loaded_config):
+    _ar = loaded_config.get("age_risk", {})
+    _inf = loaded_config.get("input_files", {})
+    _saved_bands = _ar.get("age_groups") or []
+
+    age_group_mode_radio = mo.ui.radio(
+        options=["Count only", "Named age bands"],
+        value="Named age bands" if _saved_bands else "Count only",
+        label="Age-group specification",
+    )
+    num_age_groups_input = mo.ui.number(
+        start=1, stop=20, step=1,
+        value=int(_ar.get("num_age_groups", 1)),
+        label="Number of age groups (A)",
+    )
+    age_bands_input = mo.ui.text(
+        value=", ".join(_saved_bands),
+        placeholder="0-4, 5-17, 18-49, 50-64, 65+",
+        label="Age bands (comma-separated, 0-based, contiguous, last 'x+')",
+        full_width=True,
+    )
+    num_risk_groups_input = mo.ui.number(
+        start=1, stop=10, step=1,
+        value=int(_ar.get("num_risk_groups", 1)),
+        label="Number of risk groups (R)",
+    )
+    _metapop_folder_saved = _inf.get("metapop_folder", "")
+    pop_mode_radio = mo.ui.radio(
+        options=["Single population", "Metapopulation"],
+        value="Metapopulation" if _metapop_folder_saved else "Single population",
+        label="Population mode",
+    )
+    metapop_folder_input = mo.ui.text(
+        value=_metapop_folder_saved,
+        placeholder="/path/to/metapop_folder/",
+        label="Metapopulation folder path",
+        full_width=True,
+    )
+    return (
+        age_group_mode_radio,
+        num_age_groups_input,
+        age_bands_input,
+        num_risk_groups_input,
+        pop_mode_radio,
+        metapop_folder_input,
+    )
+
+
+@app.cell
+def _population_structure_compute(
+    age_group_mode_radio,
+    num_age_groups_input,
+    age_bands_input,
+    num_risk_groups_input,
+    pop_mode_radio,
+    cmf,
+):
+    # In band mode, A is the number of named bands; in count mode it's the number
+    # input. age_groups is the band list (or None when no bands are defined).
+    _use_bands = age_group_mode_radio.value == "Named age bands"
+    if _use_bands:
+        age_groups = cmf.parse_age_bands(age_bands_input.value)
+        num_age_groups = max(len(age_groups), 1)
+    else:
+        age_groups = None
+        num_age_groups = int(num_age_groups_input.value)
+
+    num_risk_groups = int(num_risk_groups_input.value)
+    is_metapop = pop_mode_radio.value == "Metapopulation"
+    age_group_mode = age_group_mode_radio.value
+    return (num_age_groups, num_risk_groups, is_metapop, age_groups, age_group_mode)
+
+
+@app.cell
+def _population_structure_show(
+    mo,
+    main_tab,
+    num_age_groups,
+    num_risk_groups,
+    is_metapop,
+    age_groups,
+    age_group_mode,
+    age_group_mode_radio,
+    num_age_groups_input,
+    age_bands_input,
+    num_risk_groups_input,
+    pop_mode_radio,
+    metapop_folder_input,
+    validate_metapop_folder,
+    cmf,
+):
+    mo.stop(main_tab.value != "Population & Geography", None)
+
+    _parts = [
+        mo.md("## Population Structure"),
+        mo.md(
+            "Define the population dimensions and geography here. The rest of the "
+            "model (compartments, transitions, parameters, …) is built in the "
+            "**Model Builder** tab."
+        ),
+        age_group_mode_radio,
+    ]
+
+    if age_group_mode == "Named age bands":
+        _parts.append(age_bands_input)
+        try:
+            cmf.validate_age_bands(age_groups or [])
+            _parts.append(mo.callout(
+                mo.md(f"Parsed **A = {num_age_groups}** age bands: "
+                      + ", ".join(f"`{_b}`" for _b in (age_groups or []))
+                      + ".\n\nNamed bands enable contact-matrix fetching below."),
+                kind="success",
+            ))
+        except ValueError as _exc:
+            _parts.append(mo.callout(mo.md(f"**Age bands:** {_exc}"), kind="danger"))
+    else:
+        _parts.append(num_age_groups_input)
+        if num_age_groups > 1:
+            _parts.append(mo.callout(
+                mo.md(
+                    "Count-only mode: contact matrices cannot be fetched (the "
+                    "fetcher needs age-band definitions). For A > 1, either switch "
+                    "to **Named age bands** to fetch them, or supply contact-matrix "
+                    "CSVs in Model Builder → Step 4."
+                ),
+                kind="info",
+            ))
+
+    _parts.append(num_risk_groups_input)
+    _parts.append(pop_mode_radio)
+
+    if is_metapop:
+        _parts.append(metapop_folder_input)
+        _folder_valid, _folder_status = validate_metapop_folder(metapop_folder_input.value)
+        if metapop_folder_input.value.strip():
+            _lines = [f"- **{_fname}**: {_msg}" for _fname, _msg in _folder_status.items()]
+            _overall_kind = "success" if _folder_valid else "danger"
+            _parts.append(mo.callout(mo.md("\n".join(_lines)), kind=_overall_kind))
+    else:
+        if num_age_groups > 1 or num_risk_groups > 1:
+            _parts.append(mo.callout(
+                mo.md(
+                    f"Multi-group model: A={num_age_groups}, R={num_risk_groups}. "
+                    "Use CSV file paths in Model Builder → Step 4 for schedule data."
+                ),
+                kind="info",
+            ))
+
+    mo.vstack(_parts)
+    return
+
+
+# ---------------------------------------------------------------------------
+# Contact-matrix geography (fetch via epydemix)
+# ---------------------------------------------------------------------------
+
+@app.cell
+def _geo_fetch_state(mo):
+    # Holds the most recent fetch result:
+    #   {"matrices": {scope_key: {param: A×A}}, "scope": "shared"|"per_subpop",
+    #    "errors": {...}}
+    # scope_key is "__shared__" for one geography, or a subpop name otherwise.
+    get_fetched_matrices, set_fetched_matrices = mo.state({})
+    return get_fetched_matrices, set_fetched_matrices
+
+
+@app.cell
+def _geo_subpop_names(is_metapop, metapop_folder_input, Path, json):
+    # Subpop names for per-subpop geography, read from metapop_config.json.
+    geo_subpop_names = []
+    if is_metapop and metapop_folder_input.value.strip():
+        _cfg_path = Path(metapop_folder_input.value.strip()) / "metapop_config.json"
+        if _cfg_path.exists():
+            try:
+                with open(_cfg_path) as _f:
+                    _mc = json.load(_f)
+                _sp = _mc.get("subpopulations")
+                if isinstance(_sp, list):
+                    geo_subpop_names = [str(_s) for _s in _sp]
+            except Exception:
+                geo_subpop_names = []
+    return (geo_subpop_names,)
+
+
+@app.cell
+def _geo_ui(mo, cmf, geo_subpop_names):
+    geo_scope_radio = mo.ui.radio(
+        options=["Same for all subpops", "Per-subpopulation"],
+        value="Same for all subpops",
+        label="Contact-matrix geography scope (metapop)",
+    )
+    geo_kind_radio = mo.ui.radio(
+        options=["US state", "Country"], value="US state", label="Geography type",
+    )
+    geo_state_dropdown = mo.ui.dropdown(
+        options=cmf.US_STATES, value="Massachusetts", label="US state", searchable=True,
+    )
+    geo_country_input = mo.ui.dropdown(
+        options=cmf.COUNTRIES, value="United_Kingdom",
+        label="Country (epydemix-data name)", searchable=True,
+    )
+    # Per-subpop selectors (used only in metapop + per-subpopulation scope).
+    geo_subpop_kind = mo.ui.array([
+        mo.ui.radio(options=["US state", "Country"], value="US state", label=f"{_n}: type")
+        for _n in geo_subpop_names
+    ])
+    geo_subpop_state = mo.ui.array([
+        mo.ui.dropdown(options=cmf.US_STATES, value="Massachusetts",
+                       label=f"{_n}: US state", searchable=True)
+        for _n in geo_subpop_names
+    ])
+    geo_subpop_country = mo.ui.array([
+        mo.ui.dropdown(options=cmf.COUNTRIES, value="United_Kingdom",
+                       label=f"{_n}: country", searchable=True)
+        for _n in geo_subpop_names
+    ])
+    geo_fetch_button = mo.ui.run_button(label="Fetch contact matrices")
+    return (
+        geo_scope_radio, geo_kind_radio, geo_state_dropdown, geo_country_input,
+        geo_subpop_kind, geo_subpop_state, geo_subpop_country, geo_fetch_button,
+    )
+
+
+@app.cell
+def _geo_fetch(
+    mo, cmf,
+    geo_fetch_button,
+    age_group_mode, age_groups,
+    is_metapop, geo_scope_radio,
+    geo_kind_radio, geo_state_dropdown, geo_country_input,
+    geo_subpop_names, geo_subpop_kind, geo_subpop_state, geo_subpop_country,
+    set_fetched_matrices,
+):
+    # Only fetch when the button is pressed and named bands are defined.
+    mo.stop(not geo_fetch_button.value, None)
+
+    def _kind_geo(kind_radio, state_dd, country_txt):
+        if kind_radio.value == "US state":
+            return "us_state", state_dd.value
+        return "country", country_txt.value.strip()
+
+    if age_group_mode != "Named age bands" or not age_groups:
+        set_fetched_matrices({
+            "matrices": {}, "scope": "shared",
+            "errors": {"error": "Define named age bands before fetching contact matrices."},
+        })
+    else:
+        _per_subpop = is_metapop and geo_scope_radio.value == "Per-subpopulation"
+        _results, _errors = {}, {}
+        try:
+            if _per_subpop:
+                for _i, _name in enumerate(geo_subpop_names):
+                    _kind, _geo = _kind_geo(
+                        geo_subpop_kind[_i], geo_subpop_state[_i], geo_subpop_country[_i]
+                    )
+                    _results[_name] = cmf.fetch_contact_matrices(_kind, _geo, age_groups)
+            else:
+                _kind, _geo = _kind_geo(geo_kind_radio, geo_state_dropdown, geo_country_input)
+                _results["__shared__"] = cmf.fetch_contact_matrices(_kind, _geo, age_groups)
+        except Exception as _exc:
+            _errors["error"] = str(_exc)
+
+        set_fetched_matrices({
+            "matrices": _results,
+            "scope": "per_subpop" if _per_subpop else "shared",
+            "errors": _errors,
+        })
+    return
+
+
+@app.cell
+def _geo_result(get_fetched_matrices):
+    _state = get_fetched_matrices() or {}
+    fetched_contact_matrices = _state.get("matrices", {})
+    fetched_matrices_scope = _state.get("scope", "shared")
+    fetched_matrices_errors = _state.get("errors", {})
+    return fetched_contact_matrices, fetched_matrices_scope, fetched_matrices_errors
+
+
+@app.cell
+def _geo_show(
+    mo, main_tab, cmf,
+    age_group_mode, num_age_groups, is_metapop,
+    geo_scope_radio, geo_kind_radio, geo_state_dropdown, geo_country_input,
+    geo_subpop_names, geo_subpop_kind, geo_subpop_state, geo_subpop_country,
+    geo_fetch_button,
+    fetched_contact_matrices, fetched_matrices_scope, fetched_matrices_errors,
+):
+    mo.stop(main_tab.value != "Population & Geography", None)
+
+    _parts = [mo.md("## Contact Matrices (geography)")]
+
+    if age_group_mode != "Named age bands":
+        mo.stop(True, mo.vstack([
+            *_parts,
+            mo.callout(
+                mo.md("Switch to **Named age bands** above to fetch contact matrices "
+                      "for a geography. In count-only mode, provide contact-matrix CSVs "
+                      "in Model Builder → Step 4 instead."),
+                kind="info",
+            ),
+        ]))
+
+    if not cmf.epydemix_available():
+        _parts.append(mo.callout(
+            mo.md("The optional **epydemix** package is not installed, so live fetching "
+                  "is unavailable. Install it with `pip install epydemix`, or supply "
+                  "contact-matrix CSVs in Model Builder → Step 4."),
+            kind="warn",
+        ))
+
+    _parts.append(mo.md(
+        f"Fetch the **total / school / work** {num_age_groups}×{num_age_groups} contact "
+        "matrices (Mistry 2021, via epydemix-data) for your age bands."
+    ))
+
+    if is_metapop:
+        _parts.append(geo_scope_radio)
+
+    if is_metapop and geo_scope_radio.value == "Per-subpopulation":
+        if not geo_subpop_names:
+            _parts.append(mo.callout(
+                mo.md("No subpopulations found — set a valid metapop folder above."),
+                kind="warn",
+            ))
+        for _i, _name in enumerate(geo_subpop_names):
+            _sel = (geo_subpop_state[_i] if geo_subpop_kind[_i].value == "US state"
+                    else geo_subpop_country[_i])
+            _parts.append(mo.hstack([mo.md(f"**{_name}**"), geo_subpop_kind[_i], _sel],
+                                    justify="start"))
+    else:
+        _parts.append(geo_kind_radio)
+        _parts.append(geo_state_dropdown if geo_kind_radio.value == "US state"
+                      else geo_country_input)
+
+    _parts.append(geo_fetch_button)
+
+    if fetched_matrices_errors.get("error"):
+        _parts.append(mo.callout(mo.md(f"**Fetch failed:** {fetched_matrices_errors['error']}"),
+                                 kind="danger"))
+    elif fetched_contact_matrices:
+        _keys = ", ".join(
+            "all subpops" if _k == "__shared__" else _k for _k in fetched_contact_matrices
+        )
+        _parts.append(mo.callout(
+            mo.md(f"Fetched contact matrices ({fetched_matrices_scope}) for: {_keys}. "
+                  "They are written into the config and used at run time."),
+            kind="success",
+        ))
+
+    mo.vstack(_parts)
     return
 
 @app.cell
@@ -635,7 +996,8 @@ def _intro(mo, main_tab):
         Supports all rate templates, configurable age/risk groups, CSV-backed schedules,
         and multi-subpopulation (metapopulation) models.
 
-        **Quick start:** work through Steps 1–10 in order, then press **Run simulation**.
+        **Quick start:** set up the **Population & Geography** tab first, then work through
+        Steps 1–9 here in order and press **Run simulation**.
         Load a previously saved config in **Step 0** to restore any prior setup.
         """
     )
@@ -647,20 +1009,20 @@ def _instructions(mo, main_tab):
     mo.stop(main_tab.value != "Model Builder", None)
     mo.accordion({
         "📋 Workflow overview": mo.md("""
+**Population & Geography tab** *(do this first)*
+Choose the number of age groups (A) and risk groups (R), single-population vs.
+metapopulation mode, and (when using named age bands) fetch contact matrices for a
+chosen geography. For metapop, enter the path to a folder containing the required input
+files (see the *Metapopulation folder conventions* section below).
+
 **Step 0 — Load existing config** *(optional)*
 Enter the path to a `model_config.json` file to pre-populate all fields below.
 Leave blank to start fresh.
 
-**Step 1 — Population structure**
-Choose the number of age groups (A) and risk groups (R).
-Select *Single population* or *Metapopulation* mode.
-For metapop, enter the path to a folder containing the required input files (see the
-*Metapopulation folder conventions* section below).
-
-**Step 2 — Compartments**
+**Step 1 — Compartments**
 Enter compartment names as a comma-separated list, e.g. `S, E, I, R`.
 
-**Step 3 — Transitions**
+**Step 2 — Transitions**
 Define each transition: origin compartment → destination, and the rate template.
 Available templates:
 - `constant_param` — fixed rate from a single parameter
@@ -669,35 +1031,36 @@ Available templates:
 - `force_of_infection` — standard FOI with contact matrix and optional humidity/immunity
 - `force_of_infection_travel` — FOI with inter-subpop travel mixing (metapop only)
 
-**Step 4 — Parameters**
+**Step 3 — Parameters**
 Numeric sliders appear automatically for every parameter name referenced by your transitions.
 
-**Step 5 — Schedules and Immunity**
+**Step 4 — Schedules and Immunity**
 For rate templates that use schedules (humidity, mobility, vaccines):
 - Choose *constant* to use a single scalar value for the whole simulation.
 - Choose *csv* to load a real time-varying schedule from a CSV file.
 Contact matrices (total, school, work) are always stored as inline arrays in the
-config JSON. When A > 1, supply them via CSV paths in the contact matrix fields —
-or load a saved config that already has them embedded. Risk groups (R > 1) affect
-transition and susceptibility parameters but do not require separate contact matrices.
+config JSON. When A > 1, supply them via CSV paths in the contact matrix fields, fetch
+them in the Population & Geography tab, or load a saved config that already has them
+embedded. Risk groups (R > 1) affect transition and susceptibility parameters but do not
+require separate contact matrices.
 
-**Step 6 — Model diagram**
+**Step 5 — Model diagram**
 Auto-generated from your compartments and transitions. Requires `graphviz`; falls back
 to a simple matplotlib diagram if not installed.
 
-**Step 7 — Initial conditions**
+**Step 6 — Initial conditions**
 Set total population N and the count seeded into each non-first compartment.
 In metapopulation mode, per-subpop initial conditions are read from
 `initial_conditions_{name}.csv` in the metapop folder (see below).
 
-**Step 8 — Simulation settings**
+**Step 7 — Simulation settings**
 Days, deterministic vs. stochastic, number of replicates, RNG seed, timesteps per day.
 
-**Step 9 — Config preview and download**
+**Step 8 — Config preview and download**
 The full config JSON (including file paths and age/risk group settings) is shown and
 can be downloaded. The downloaded file can be re-loaded in Step 0.
 
-**Step 10 — Run**
+**Step 9 — Run**
 Press the *Run simulation* button. Results appear as epidemic curves and a summary table.
         """),
 
@@ -749,7 +1112,7 @@ the matrices embedded in the loaded config JSON are used directly.
 
         "🗂️ Metapopulation folder conventions": mo.md("""
 Create a folder with files following these naming conventions.
-The folder path is entered in **Step 1** and saved in the config JSON.
+The folder path is entered in the **Population & Geography** tab and saved in the config JSON.
 
 **Required files:**
 
@@ -829,7 +1192,7 @@ pre-populated automatically.
 
 **Note on contact matrices:** When A > 1, matrix values *are* embedded inline in the
 config JSON under `params` (as nested lists). CSV file paths are optional — if provided
-in Step 5, they override the inline values at load time. If no CSV paths are set, the
+in Step 4, they override the inline values at load time. If no CSV paths are set, the
 inline param arrays are used as-is.
 
 **Note on `subpop_params`:** These overrides are written directly in `model_config.json`
@@ -856,100 +1219,15 @@ Example: `IP:IP_relative_inf, IA:IA_relative_inf, ISR, ISH`
 
 
 # ---------------------------------------------------------------------------
-# Step 1 — Population Structure
+# Population structure (A/R, single vs metapop, metapop folder) now lives in the
+# Population & Geography tab — see _nb_population.py. It exports num_age_groups,
+# num_risk_groups, is_metapop, and metapop_folder_input, which the cells below
+# consume unchanged.
 # ---------------------------------------------------------------------------
 
 
-@app.cell
-def _population_structure_ui(mo, loaded_config):
-    _ar = loaded_config.get("age_risk", {})
-    _inf = loaded_config.get("input_files", {})
-    num_age_groups_input = mo.ui.number(
-        start=1, stop=20, step=1,
-        value=int(_ar.get("num_age_groups", 1)),
-        label="Number of age groups (A)",
-    )
-    num_risk_groups_input = mo.ui.number(
-        start=1, stop=10, step=1,
-        value=int(_ar.get("num_risk_groups", 1)),
-        label="Number of risk groups (R)",
-    )
-    _metapop_folder_saved = _inf.get("metapop_folder", "")
-    pop_mode_radio = mo.ui.radio(
-        options=["Single population", "Metapopulation"],
-        value="Metapopulation" if _metapop_folder_saved else "Single population",
-        label="Population mode",
-    )
-    metapop_folder_input = mo.ui.text(
-        value=_metapop_folder_saved,
-        placeholder="/path/to/metapop_folder/",
-        label="Metapopulation folder path",
-        full_width=True,
-    )
-    return (
-        num_age_groups_input,
-        num_risk_groups_input,
-        pop_mode_radio,
-        metapop_folder_input,
-    )
-
-
-@app.cell
-def _population_structure_compute(
-    num_age_groups_input,
-    num_risk_groups_input,
-    pop_mode_radio,
-):
-    num_age_groups = int(num_age_groups_input.value)
-    num_risk_groups = int(num_risk_groups_input.value)
-    is_metapop = pop_mode_radio.value == "Metapopulation"
-    return (num_age_groups, num_risk_groups, is_metapop)
-
-
-@app.cell
-def _population_structure_show(
-    mo,
-    main_tab,
-    num_age_groups,
-    num_risk_groups,
-    is_metapop,
-    num_age_groups_input,
-    num_risk_groups_input,
-    pop_mode_radio,
-    metapop_folder_input,
-    validate_metapop_folder,
-):
-    mo.stop(main_tab.value != "Model Builder", None)
-
-    _parts = [
-        mo.md("### Step 1 — Population Structure"),
-        mo.hstack([num_age_groups_input, num_risk_groups_input], justify="start"),
-        pop_mode_radio,
-    ]
-
-    if is_metapop:
-        _parts.append(metapop_folder_input)
-        _folder_valid, _folder_status = validate_metapop_folder(metapop_folder_input.value)
-        if metapop_folder_input.value.strip():
-            _lines = [f"- **{_fname}**: {_msg}" for _fname, _msg in _folder_status.items()]
-            _overall_kind = "success" if _folder_valid else "danger"
-            _parts.append(mo.callout(mo.md("\n".join(_lines)), kind=_overall_kind))
-    else:
-        if num_age_groups > 1 or num_risk_groups > 1:
-            _parts.append(mo.callout(
-                mo.md(
-                    f"Multi-group model: A={num_age_groups}, R={num_risk_groups}. "
-                    "Use CSV file paths in Step 5 for schedule data."
-                ),
-                kind="info",
-            ))
-
-    mo.vstack(_parts)
-    return
-
-
 # ---------------------------------------------------------------------------
-# Step 2 — Compartments
+# Step 1 — Compartments
 # ---------------------------------------------------------------------------
 
 
@@ -980,7 +1258,7 @@ def _compartments_display(compartments, compartments_text, mo, main_tab):
     else:
         _body = mo.callout(mo.md("Enter at least one compartment name."), kind="warn")
     mo.vstack([
-        mo.md("### Step 2 — Compartments"),
+        mo.md("### Step 1 — Compartments"),
         compartments_text,
         _body,
     ])
@@ -988,7 +1266,7 @@ def _compartments_display(compartments, compartments_text, mo, main_tab):
 
 
 # ---------------------------------------------------------------------------
-# Step 3 — Transitions
+# Step 2 — Transitions
 # ---------------------------------------------------------------------------
 
 
@@ -1241,7 +1519,7 @@ def _transition_show(
         "Higher r → stronger rate reduction.\n"
         "Example: r_inf = 0.5, M = 1 → rate halved.\n\n"
         "Requires at least one of M or MV to be enabled\n"
-        "in Step 5, otherwise immunity_force stays at 1."
+        "in Step 4, otherwise immunity_force stays at 1."
     )
 
     def _immunity_checkbox(checkbox):
@@ -1262,7 +1540,7 @@ def _transition_show(
                     "Comma-separated parameter names multiplied together to form the rate.\n\n"
                     "Example: base_rate, hosp_prop\n"
                     "Rate = base_rate × hosp_prop\n\n"
-                    "Each name gets a slider in Step 4.",
+                    "Each name gets a slider in Step 3.",
                     t_factors[_i],
                 ),
                 _with_tip(
@@ -1294,7 +1572,7 @@ def _transition_show(
                     "Format:  Compartment  or  Compartment:param_name\n\n"
                     "Example: I, A:a_rel_inf\n"
                     "→ Compartment A has a_rel_inf× the instantaneous infectiousness\n"
-                    "  of I (set its value in Step 4).\n\n"
+                    "  of I (set its value in Step 3).\n\n"
                     "Omit the parameter to treat all listed compartments as equally infectious.",
                     t_infectious[_i],
                 ),
@@ -1317,7 +1595,7 @@ def _transition_show(
                     "The count is rounded to the nearest integer and capped at\n"
                     "the origin compartment's current population -- this is a\n"
                     "deterministic, exact transfer, not a stochastic rate.\n\n"
-                    "Configure the underlying data source and delay in Step 5.",
+                    "Configure the underlying data source and delay in Step 4.",
                     t_schedule_name[_i],
                 ),
             ])
@@ -1332,7 +1610,7 @@ def _transition_show(
                     "Format:  Compartment  or  Compartment:param_name\n\n"
                     "Example: I, A:a_rel_inf\n"
                     "→ Compartment A has a_rel_inf× the instantaneous infectiousness\n"
-                    "  of I (set its value in Step 4).\n\n"
+                    "  of I (set its value in Step 3).\n\n"
                     "Omit the parameter to treat all listed compartments as equally infectious.",
                     t_infectious[_i],
                 ),
@@ -1380,7 +1658,7 @@ def _transition_show(
         ]))
 
     mo.vstack([
-        mo.md("### Step 3 — Transitions"),
+        mo.md("### Step 2 — Transitions"),
         n_transitions,
         *_rows,
     ])
@@ -1502,7 +1780,7 @@ def _collect_param_names(
 
 
 # ---------------------------------------------------------------------------
-# Step 4 — Parameters
+# Step 3 — Parameters
 # ---------------------------------------------------------------------------
 
 
@@ -1526,7 +1804,7 @@ def _params_ui(param_names, reduce_param_names, loaded_config, mo, is_array_para
 def _params_show(param_names, params_inputs, scalar_param_names, array_param_names, loaded_config, mo, main_tab):
     mo.stop(main_tab.value != "Model Builder", None)
     _saved_params = loaded_config.get("params", {})
-    _parts = [mo.md("### Step 4 — Parameters")]
+    _parts = [mo.md("### Step 3 — Parameters")]
     if not param_names:
         _parts.append(mo.callout(mo.md("No transition parameters found yet."), kind="warn"))
     if scalar_param_names:
@@ -1552,7 +1830,7 @@ def _params_show(param_names, params_inputs, scalar_param_names, array_param_nam
 
 
 # ---------------------------------------------------------------------------
-# Step 5 — Schedules and Immunity (scalar inputs + CSV file paths)
+# Step 4 — Schedules and Immunity (scalar inputs + CSV file paths)
 # ---------------------------------------------------------------------------
 
 
@@ -2004,7 +2282,7 @@ def _schedule_and_immunity_show(
         return mo.hstack([widget, _tip_label("", tip_text)], justify="start", align="center")
 
     _parts = [
-        mo.md("### Step 5 — Schedules and Immunity"),
+        mo.md("### Step 4 — Schedules and Immunity"),
         mo.hstack([
             _wtip(
                 include_inf_immunity,
@@ -2013,14 +2291,14 @@ def _schedule_and_immunity_show(
                 "ΔM = (R→S / N) × (1 − inf_sat×M − vax_sat×MV) − wane×M\n\n"
                 "M increases when recently-recovered individuals re-enter\n"
                 "the susceptible pool (R→S), and decays via waning.\n\n"
-                "Must be enabled for inf_reduce_param (Step 3) to have effect.",
+                "Must be enabled for inf_reduce_param (Step 2) to have effect.",
             ),
             _wtip(
                 include_vax_immunity,
                 "Track population-level vaccine-induced immunity (MV).\n\n"
                 "MV grows with daily vaccine doses and decays via waning:\n\n"
                 "ΔMV = daily_vaccines − wane×MV\n\n"
-                "Must be enabled for vax_reduce_param (Step 3) to have effect.",
+                "Must be enabled for vax_reduce_param (Step 2) to have effect.",
             ),
         ], wrap=True),
     ]
@@ -2128,7 +2406,7 @@ def _schedule_and_immunity_show(
 
 
 # ---------------------------------------------------------------------------
-# Step 6 — Model Diagram
+# Step 5 — Model Diagram
 # ---------------------------------------------------------------------------
 
 
@@ -2197,12 +2475,12 @@ def _diagram(compartments, n_transitions, t_name, t_origin, t_dest, mo, plt, mai
         _fallback_parts.append(_fig)
         _inner = mo.vstack(_fallback_parts)
 
-    mo.vstack([mo.md("### Step 6 — Model Diagram"), _inner])
+    mo.vstack([mo.md("### Step 5 — Model Diagram"), _inner])
     return
 
 
 # ---------------------------------------------------------------------------
-# Step 7 — Initial Conditions
+# Step 6 — Initial Conditions
 # ---------------------------------------------------------------------------
 
 
@@ -2223,7 +2501,7 @@ def _init_ui(compartments, mo, loaded_config, num_age_groups, num_risk_groups):
 @app.cell
 def _init_show(compartments, total_pop_input, seed_inputs, is_metapop, mo, main_tab):
     mo.stop(main_tab.value != "Model Builder", None)
-    _parts = [mo.md("### Step 7 — Initial Conditions")]
+    _parts = [mo.md("### Step 6 — Initial Conditions")]
     if is_metapop:
         _parts.append(mo.callout(
             mo.md(
@@ -2256,7 +2534,7 @@ def _init_show(compartments, total_pop_input, seed_inputs, is_metapop, mo, main_
 
 
 # ---------------------------------------------------------------------------
-# Step 8 — Simulation Settings
+# Step 7 — Simulation Settings
 # ---------------------------------------------------------------------------
 
 
@@ -2289,7 +2567,7 @@ def _sim_settings_ui(mo, loaded_config):
 def _sim_settings_show(mo, sim_days, sim_mode, n_reps, rng_seed, timesteps, start_date_input, transition_vars_input, main_tab):
     mo.stop(main_tab.value != "Model Builder", None)
     mo.vstack([
-        mo.md("### Step 8 — Simulation Settings"),
+        mo.md("### Step 7 — Simulation Settings"),
         mo.hstack([sim_days, sim_mode, timesteps, rng_seed], justify="start"),
         mo.hstack([
             n_reps,
@@ -2335,7 +2613,8 @@ def _build_config(
     uses_scheduled_transfer,
     parse_csv_list, parse_infectious_mapping,
     total_contact_input, school_contact_input, work_contact_input,
-    num_age_groups, num_risk_groups,
+    num_age_groups, num_risk_groups, age_groups,
+    fetched_contact_matrices, fetched_matrices_scope,
     is_metapop, metapop_folder_input,
     loaded_schedule_dfs,
     input_folder,
@@ -2364,7 +2643,7 @@ def _build_config(
     _R = num_risk_groups
     # --- 1. PARAMS ---
     # Seed from loaded config first (preserves A×R array-valued params), then
-    # overlay the scalar slider values for any param the user has wired up in Step 3.
+    # overlay the scalar slider values for any param the user has wired up in Step 2.
     params_dict: dict = dict(loaded_config.get("params", {}))
     for _j, _name in enumerate(scalar_param_names):
         params_dict[_name] = float(params_inputs.value[_j])
@@ -2484,8 +2763,18 @@ def _build_config(
                         f"{_label.capitalize()} contact matrix: no {_A}×{_A} CSV or "
                         f"inline matrix provided for {_A} age groups; falling back to a "
                         f"scalar 1×1 matrix. Provide a {_A}×{_A} contact-matrix CSV in "
-                        f"Step 5 — the model will not behave correctly otherwise."
+                        f"Step 4, or fetch matrices in the Population & Geography tab — "
+                        f"the model will not behave correctly otherwise."
                     )
+
+        # Contact matrices fetched in the Population & Geography tab take
+        # precedence. Shared scope writes the three params here; per-subpop
+        # scope is applied to subpop_params below (section 7).
+        if fetched_matrices_scope == "shared":
+            _shared_fetched = fetched_contact_matrices.get("__shared__", {})
+            for _mname in ("total_contact_matrix", "school_contact_matrix", "work_contact_matrix"):
+                if _mname in _shared_fetched:
+                    params_dict[_mname] = _shared_fetched[_mname]
 
     # --- 4. SCHEDULES ---
     _schedules = []
@@ -2610,6 +2899,7 @@ def _build_config(
         "age_risk": {
             "num_age_groups": _A,
             "num_risk_groups": _R,
+            **({"age_groups": age_groups} if age_groups else {}),
         },
         "total_population": int(total_pop_input.value),
         "simulation_settings": {
@@ -2620,11 +2910,19 @@ def _build_config(
     if _input_files:
         config_dict["input_files"] = _input_files
 
-    # Preserve per-subpopulation parameter overrides from the loaded config.
-    # These are authored directly in model_config.json (no dedicated widget yet);
-    # carrying them through keeps the load -> rebuild -> run round-trip lossless
-    # so the metapop run path and shared factory can apply them.
-    _subpop_params = loaded_config.get("subpop_params")
+    # Per-subpopulation parameter overrides. Start from any loaded overrides
+    # (authored directly in model_config.json) so the load -> rebuild -> run
+    # round-trip stays lossless, then layer on per-subpop contact matrices
+    # fetched in the Population & Geography tab. Both feed the metapop run path
+    # and the shared factory, which read config_dict["subpop_params"].
+    _subpop_params = dict(loaded_config.get("subpop_params", {}))
+    if fetched_matrices_scope == "per_subpop":
+        for _sp_name, _mats in fetched_contact_matrices.items():
+            _entry = dict(_subpop_params.get(_sp_name, {}))
+            for _mname in ("total_contact_matrix", "school_contact_matrix", "work_contact_matrix"):
+                if _mname in _mats:
+                    _entry[_mname] = _mats[_mname]
+            _subpop_params[_sp_name] = _entry
     if _subpop_params:
         config_dict["subpop_params"] = _subpop_params
 
@@ -2647,7 +2945,7 @@ def _build_config(
 
 
 # ---------------------------------------------------------------------------
-# Step 9 — Config Preview
+# Step 8 — Config Preview
 # ---------------------------------------------------------------------------
 
 
@@ -2665,7 +2963,7 @@ def _config_preview(config_dict, config_warnings, json, mo, main_tab):
             kind="warn",
         ))
     mo.vstack([
-        mo.md("### Step 9 — Config Preview"),
+        mo.md("### Step 8 — Config Preview"),
         *_warn_block,
         mo.accordion({
             "View / download config JSON": mo.vstack([
@@ -2683,7 +2981,7 @@ def _config_preview(config_dict, config_warnings, json, mo, main_tab):
 
 
 # ---------------------------------------------------------------------------
-# Step 10 — Run
+# Step 9 — Run
 # ---------------------------------------------------------------------------
 
 
@@ -2696,7 +2994,7 @@ def _run_button(mo):
 @app.cell
 def _run_section_display(run_button, mo, main_tab):
     mo.stop(main_tab.value != "Model Builder", None)
-    mo.vstack([mo.md("### Step 10 — Run"), run_button])
+    mo.vstack([mo.md("### Step 9 — Run"), run_button])
     return
 
 
@@ -2741,7 +3039,7 @@ def _run_sim(
     mo.stop(main_tab.value != "Model Builder", None)
     mo.stop(not run_button.value, mo.md(""))
 
-    # Runs the preview simulation for Step 10. Structure of this cell:
+    # Runs the preview simulation for Step 9. Structure of this cell:
     #   - run settings (stochastic/deterministic, reps, days, timesteps)
     #   - nested helper _build_schedules_input_for_subpop(...)
     #   - nested helper _run_once(...)         — single-population path
@@ -2863,7 +3161,7 @@ def _run_sim(
             mo.md(
                 f"**Shape mismatch** — the following parameters/schedules are incompatible "
                 f"with A={_A}, R={_R}. They are likely carried over from the loaded config. "
-                f"Switch the affected schedule source to **constant** in Step 5, "
+                f"Switch the affected schedule source to **constant** in Step 4, "
                 f"or reload a config that matches the current group counts.\n\n"
                 + "\n".join(f"- {_issue}" for _issue in _shape_issues)
             ),
@@ -7010,7 +7308,38 @@ output in a specific location.
 
 ---
 
-## Tab 1 — Model Builder
+## Tab 1 — Population & Geography
+
+**Purpose:** Define the population dimensions and (optionally) fetch real contact
+matrices for a geography. Do this **first** — the rest of the model is built in the
+Model Builder tab and depends on the age/risk group counts set here.
+
+### What you configure
+- **Age groups** — two modes:
+  - *Count only* — just a number `A` (for abstract models with no real age bands).
+  - *Named age bands* — e.g. `0-4, 5-17, 18-49, 50-64, 65+`. Bands must start at 0,
+    be contiguous, and end in an open band `x+` (with `x ≤ 84`). `A` = number of bands.
+- **Risk groups** — the number `R`.
+- **Population mode** — *Single population* or *Metapopulation* (with a folder path).
+- **Contact matrices** — when using named age bands you can **fetch** the total / school /
+  work matrices for a geography (Mistry 2021, via the optional `epydemix` package).
+
+### Contact-matrix fetch
+- Requires **named age bands** (the fetcher needs age-group definitions). In count-only
+  mode, supply contact-matrix CSVs in Model Builder → Step 4 instead.
+- Choose a **US state** or a **Country** (both are searchable dropdowns of the
+  epydemix-data location names).
+- For metapopulation models, choose the geography **scope**:
+  - *Same for all subpops* — one geography; matrices are shared across subpops.
+  - *Per-subpopulation* — one geography per subpop; each subpop gets its own matrices,
+    written into the config's `subpop_params` section.
+- Press **Fetch contact matrices**. Results are written into the config and used at run
+  time. Requires `pip install epydemix` and internet access; if unavailable, the tab shows
+  an install hint and you can fall back to CSVs.
+
+---
+
+## Tab 2 — Model Builder
 
 **Purpose:** Define the structure of your epidemic model and do a quick preview simulation.
 
@@ -7019,18 +7348,18 @@ output in a specific location.
 | Step | What you configure |
 |------|--------------------|
 | 0 — Load config | Optionally load a previously saved `model_config.json` to pre-fill all fields. |
-| 1 — Population structure | Number of age groups, risk groups, and whether to use a metapopulation. |
-| 2 — Compartments | Name each compartment (e.g. `S`, `E`, `I`, `R`).  The first compartment receives the bulk of the initial population. |
-| 3 — Transitions | Define flows between compartments.  Each transition needs a name, a "from" compartment, a "to" compartment, and a rate template (`constant_param`, `param_product`, `immunity_modulated`, `force_of_infection`, `force_of_infection_travel`, or `scheduled_exact`). |
-| 4 — Parameters | Set numeric values for all parameters referenced by your rate templates (e.g. `beta_baseline`, `sigma`, `gamma`). |
-| 5 — Schedules & immunity | Optionally upload CSVs for time-varying schedules: absolute humidity, school/work calendars, mobility, and daily vaccines. |
-| 6 — Diagram | Preview the compartment diagram generated from your transitions. |
-| 7 — Initial conditions | Set the total population and seed counts for compartments 2–N. |
-| 8 — Simulation settings | Choose deterministic vs stochastic, number of replicates, timesteps per day, start date, and which transition variables to save. |
-| 9 — Config preview & download | Review the full `model_config.json` and download it. |
-| 10 — Run | Click **Run simulation** to see epidemic curves and a summary table. |
+| 1 — Compartments | Name each compartment (e.g. `S`, `E`, `I`, `R`).  The first compartment receives the bulk of the initial population. |
+| 2 — Transitions | Define flows between compartments.  Each transition needs a name, a "from" compartment, a "to" compartment, and a rate template (`constant_param`, `param_product`, `immunity_modulated`, `force_of_infection`, `force_of_infection_travel`, or `scheduled_exact`). |
+| 3 — Parameters | Set numeric values for all parameters referenced by your rate templates (e.g. `beta_baseline`, `sigma`, `gamma`). |
+| 4 — Schedules & immunity | Optionally upload CSVs for time-varying schedules: absolute humidity, school/work calendars, mobility, and daily vaccines. Contact matrices come from the Population & Geography tab or CSVs here. |
+| 5 — Diagram | Preview the compartment diagram generated from your transitions. |
+| 6 — Initial conditions | Set the total population and seed counts for compartments 2–N. |
+| 7 — Simulation settings | Choose deterministic vs stochastic, number of replicates, timesteps per day, start date, and which transition variables to save. |
+| 8 — Config preview & download | Review the full `model_config.json` and download it. |
+| 9 — Run | Click **Run simulation** to see epidemic curves and a summary table. |
 
-**Metapopulation mode:** When enabled, Step 1 asks for a folder path containing:
+**Metapopulation mode:** Enabled in the **Population & Geography** tab, which asks for a
+folder path containing:
 - `metapop_config.json` — subpopulation names and travel matrix
 - `initial_conditions_<SubpopName>.json` — per-subpop initial conditions
 - Optional per-subpop schedule CSVs (`school_work_calendar_<name>.csv`, `vaccines_<name>.csv`)
@@ -7041,7 +7370,7 @@ any setting changes, so you never lose your work.
 
 ---
 
-## Tab 2 — Fitting
+## Tab 3 — Fitting
 
 **Purpose:** Estimate unknown parameters by fitting the model to an observed time series.
 
@@ -7083,7 +7412,7 @@ Auto-saved to `{output_dir}/fitted_params.json`.
 
 ---
 
-## Tab 3 — Forecast
+## Tab 4 — Forecast
 
 **Purpose:** Run an ensemble forward projection using the fitted (or current) parameters.
 
@@ -7113,7 +7442,7 @@ Auto-saved to `{output_dir}/forecast_ensemble.json`.
 
 ---
 
-## Tab 4 — Export
+## Tab 5 — Export
 
 **Purpose:** Generate a standalone Python script that can run your model on a server
 or in a batch job, and download all configuration files.
@@ -7144,7 +7473,7 @@ Results are stored in `simulation_output/results.db` as a table with columns
 
 ---
 
-## Tab 5 — Analysis
+## Tab 6 — Analysis
 
 **Purpose:** Compare how model outputs change across scenarios or parameter values.
 Sensitivity and scenario analysis share identical output plots.
@@ -7246,16 +7575,18 @@ The objective minimised is the weighted sum of per-target losses. Practical advi
 ## Typical workflow
 
 ```
-Model Builder  →  Fitting  →  Forecast  →  Export
-                    ↓
-                 Analysis
+Population & Geography  →  Model Builder  →  Fitting  →  Forecast  →  Export
+                                                ↓
+                                             Analysis
 ```
 
-1. Build your model in **Model Builder** and confirm the epidemic curves look sensible.
-2. Go to **Fitting**, upload observed data, and fit key parameters.
-3. Check the fit overlay in Fitting results, then switch to **Forecast** to project forward.
-4. Use **Analysis** to quantify uncertainty (sensitivity) or compare policy scenarios.
-5. When ready to run larger ensembles, go to **Export**, download the script and configs,
+1. Set age/risk groups, population mode, and (optionally) fetch contact matrices in
+   **Population & Geography**.
+2. Build your model in **Model Builder** and confirm the epidemic curves look sensible.
+3. Go to **Fitting**, upload observed data, and fit key parameters.
+4. Check the fit overlay in Fitting results, then switch to **Forecast** to project forward.
+5. Use **Analysis** to quantify uncertainty (sensitivity) or compare policy scenarios.
+6. When ready to run larger ensembles, go to **Export**, download the script and configs,
    and run them on your server.
 
 ---

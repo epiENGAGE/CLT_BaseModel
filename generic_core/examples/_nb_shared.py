@@ -24,6 +24,7 @@ def _imports():
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
     import generic_core as gc
+    from generic_core import contact_matrix_fetch as cmf
     from generic_core.config_parser import parse_model_config_from_dict
     from generic_core.generic_model import (
         ConfigDrivenSubpopModel,
@@ -62,7 +63,7 @@ def _imports():
 
     return (
         Path, SimpleNamespace, namedtuple, copy, sqlite3, datetime,
-        clt, flu, gc, io, json, mo, np, pd, plt,
+        clt, flu, gc, cmf, io, json, mo, np, pd, plt,
         ConfigDrivenMetapopModel, ConfigDrivenSubpopModel,
         build_state_from_config, build_params_from_config,
         parse_model_config_from_dict,
