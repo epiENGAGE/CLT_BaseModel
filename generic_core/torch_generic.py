@@ -521,15 +521,23 @@ def generic_advance_timestep(
             )
 
             inf_sat = params_dict[mc.update_config["inf_induced_saturation_param"]]
-            vax_sat = params_dict[mc.update_config["vax_induced_saturation_param"]]
             wane = params_dict[mc.update_config["inf_induced_immune_wane_param"]]
+
+            # vax_induced_saturation_param is optional (mirrors the numpy guard
+            # in metric_templates.py InfInducedImmunityGeneric): only include the
+            # vax-immunity saturation term when configured and a vax metric exists.
+            if "vax_induced_saturation_param" in mc.update_config and vax_metric_name:
+                vax_sat = params_dict[mc.update_config["vax_induced_saturation_param"]]
+                vax_term = vax_sat * MV
+            else:
+                vax_term = torch.zeros_like(M)
 
             total_pop = precomputed.total_pop_LAR_tensor.to(R_to_S.dtype)
 
             # Mirrors compute_M_change: R_to_S already includes dt,
             # so only the waning term is multiplied by dt.
             M_change = (
-                (R_to_S / total_pop) * (1 - inf_sat * M - vax_sat * MV)
+                (R_to_S / total_pop) * (1 - inf_sat * M - vax_term)
                 - wane * M * dt
             )
             new_state[mc.name] = M + M_change

@@ -35,7 +35,7 @@ output in a specific location.
 | 0 — Load config | Optionally load a previously saved `model_config.json` to pre-fill all fields. |
 | 1 — Population structure | Number of age groups, risk groups, and whether to use a metapopulation. |
 | 2 — Compartments | Name each compartment (e.g. `S`, `E`, `I`, `R`).  The first compartment receives the bulk of the initial population. |
-| 3 — Transitions | Define flows between compartments.  Each transition needs a name, a "from" compartment, a "to" compartment, and a rate template (e.g. `standard_infection`, `fixed_rate`). |
+| 3 — Transitions | Define flows between compartments.  Each transition needs a name, a "from" compartment, a "to" compartment, and a rate template (`constant_param`, `param_product`, `immunity_modulated`, `force_of_infection`, `force_of_infection_travel`, or `scheduled_exact`). |
 | 4 — Parameters | Set numeric values for all parameters referenced by your rate templates (e.g. `beta_baseline`, `sigma`, `gamma`). |
 | 5 — Schedules & immunity | Optionally upload CSVs for time-varying schedules: absolute humidity, school/work calendars, mobility, and daily vaccines. |
 | 6 — Diagram | Preview the compartment diagram generated from your transitions. |
@@ -208,6 +208,55 @@ Auto-saved to `{output_dir}/analysis_results.json`.
 
 ---
 
+## Advanced: modelling vaccination (`scheduled_exact`)
+
+To move an exact, data-driven number of people between compartments each day
+(e.g. vaccination `S → V`), use the **`scheduled_exact`** rate template instead
+of a rate-based one. It bypasses the usual rate→probability machinery and applies
+the scheduled transfer deterministically on the first timestep of each day.
+
+How to set it up in **Model Builder**:
+
+1. **Step 2 — Compartments:** add the destination compartment (e.g. `V`).
+2. **Step 3 — Transitions:** add a transition `S → V` with rate template
+   `scheduled_exact`. It references a schedule by name (the daily-vaccines
+   schedule).
+3. **Step 5 — Schedules:** supply the vaccines schedule, either as a constant
+   value or via a `vaccines_<name>.csv` (column `daily_vaccines`, a JSON A×R
+   array). **The schedule value is a daily _proportion_ of the origin
+   compartment** (0–1), not an absolute count; it is rounded to an integer and
+   capped at the available population each day.
+
+Notes:
+- `scheduled_exact` transitions are deterministic. They cannot be placed in a
+  transition group or marked jointly-distributed (the config parser rejects this).
+- Vaccination immunity (the `MV` metric) is configured separately in Step 5 — a
+  compartment transfer (`scheduled_exact`) and a population-immunity metric
+  (`vaccine_induced_immunity`) are independent mechanisms; use either or both.
+
+---
+
+## Advanced: multi-target fitting
+
+The **Fitting** tab can fit several observed series at once. Add targets with the
+"number of targets" control; each target independently specifies:
+
+- the model output to match (a compartment or transition variable),
+- an optional **slice** (subpopulation / age group / risk group),
+- a **mode** — timeseries, scalar total, or proportions, and
+- a **weight** `λ` controlling its contribution to the combined loss.
+
+The objective minimised is the weighted sum of per-target losses. Practical advice:
+
+- Keep targets on comparable scales, or use weights to balance them — a large-count
+  target will otherwise dominate a small-count one.
+- Avoid conflicting targets (e.g. fitting both a compartment and a transition that
+  mechanically determine each other) — they can make the loss landscape ill-conditioned.
+- Gradient methods (Adam / L-BFGS) require **transition-variable** targets; use
+  accept-reject if any target is a compartment.
+
+---
+
 ## Typical workflow
 
 ```
@@ -250,9 +299,11 @@ A flat dict of `{param_name: value}` pairs, e.g.:
 ```
 
 ### Metapop config JSON (`metapop_config.json`)
+`subpopulations` is an **ordered list** of names; `travel_matrix` is an N×N
+matrix (N = number of subpopulations) whose rows sum to 1.
 ```json
 {
-  "subpopulations": {"SubpopA": {}, "SubpopB": {}},
+  "subpopulations": ["SubpopA", "SubpopB"],
   "travel_matrix": [[0.95, 0.05], [0.05, 0.95]]
 }
 ```
@@ -268,16 +319,4 @@ Arrays are shape `[age_groups][risk_groups]`.
 """),
     ])
     return
-
-
-if __name__ == "__main__":
-    app.run()
-
-
-if __name__ == "__main__":
-    app.run()
-
-
-if __name__ == "__main__":
-    app.run()
 

@@ -658,8 +658,11 @@ class ScheduledExactTransferRate(RateTemplate):
     rate_config keys
     -----------------
     schedule : str
-        Name of the schedule (e.g. a vaccine_schedule instance) providing
-        the daily count of individuals to move from origin to destination.
+        Name of the schedule (e.g. a vaccine_schedule instance) providing the
+        daily *proportion* of the origin compartment to move to the destination
+        each day. The proportion is converted to an exact (rounded, capped)
+        count in ScheduledTransferVariable.get_scheduled_exact_realization
+        (numpy) and generic_advance_timestep (torch).
     """
 
     def validate_config(self, rate_config, param_names, compartment_names, schedule_names):

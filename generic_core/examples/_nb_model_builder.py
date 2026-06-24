@@ -3,10 +3,18 @@
 # Part of model_builder_notebook.py — assembled by build_notebook.py
 
 @app.cell
-def _load_config_state(mo):
-    get_config_path, set_config_path = mo.state(
-        "/Users/rfp437/Work/CityLevelTransmission/CLT_BaseModel/generic_core/examples/example_metapop_inputs/model_config.json"
-    )
+def _load_config_state(mo, Path):
+    # Default to the example config that ships alongside this notebook, resolved
+    # relative to the notebook file so it works on any machine. Falls back to an
+    # empty string if the bundled example cannot be located.
+    try:
+        _default_config_path = str(
+            Path(__file__).parent / "example_metapop_inputs" / "model_config.json"
+        )
+    except NameError:
+        _default_config_path = ""
+
+    get_config_path, set_config_path = mo.state(_default_config_path)
     return get_config_path, set_config_path
 
 
@@ -1028,6 +1036,12 @@ def _params_show(param_names, params_inputs, scalar_param_names, array_param_nam
         _parts.append(mo.callout(mo.md("No transition parameters found yet."), kind="warn"))
     if scalar_param_names:
         _parts.append(mo.hstack(list(params_inputs), wrap=True))
+    if array_param_names:
+        _parts.append(mo.md(
+            "*The parameters below are age×risk arrays loaded from the config "
+            "and have no slider. To change them, edit their values in the config "
+            "JSON (Step 0 to reload) — they pass through to the model unchanged.*"
+        ))
     for _name in array_param_names:
         _val = _saved_params[_name]
         _parts.append(mo.callout(
@@ -1788,6 +1802,16 @@ def _sim_settings_show(mo, sim_days, sim_mode, n_reps, rng_seed, timesteps, star
         ]),
         start_date_input,
         transition_vars_input,
+        mo.callout(
+            mo.md(
+                "Leaving **Transition variables to save** blank saves *every* "
+                "transition variable each day. For large models or many "
+                "replicates this can use a lot of memory and produce large "
+                "output files — list only the transitions you need (e.g. "
+                "`S_to_E, ISH_to_HR`)."
+            ),
+            kind="info",
+        ) if not transition_vars_input.value.strip() else mo.md(""),
     ])
     return
 
@@ -1829,17 +1853,31 @@ def _build_config(
     analysis_n_metrics_input, analysis_metric_names, analysis_metric_tvs,
     np,
 ):
+    # Assembles the full model_config.json dict from every Step's widgets.
+    # Roadmap of the sections below (search for the banner comments):
+    #   1. PARAMS        — seed from loaded config, overlay scalar sliders
+    #   2. TRANSITIONS   — per-template rate_config + self-loop warnings
+    #   3. CONTACT MATRIX PARAMS
+    #   4. SCHEDULES
+    #   5. EPI METRICS   — infection-/vaccine-induced immunity
+    #   6. INPUT FILES   — CSV references resolved against the shared folder
+    #   7. CONFIG DICT   — final assembly
+    #   8. ANALYSIS METRICS
+    # Returns: (config_dict, immunity_active, metapop_travel_config, config_warnings)
     _n = int(n_transitions.value)
     _A = num_age_groups
     _R = num_risk_groups
+    # --- 1. PARAMS ---
     # Seed from loaded config first (preserves A×R array-valued params), then
     # overlay the scalar slider values for any param the user has wired up in Step 3.
     params_dict: dict = dict(loaded_config.get("params", {}))
     for _j, _name in enumerate(scalar_param_names):
         params_dict[_name] = float(params_inputs.value[_j])
 
+    # --- 2. TRANSITIONS ---
     _transitions = []
     _metapop_travel_config = {}
+    _config_warnings = []
     for _i in range(_n):
         _template = t_template.value[_i]
         if _template == "constant_param":
@@ -1907,34 +1945,54 @@ def _build_config(
             if not _metapop_travel_config:
                 _metapop_travel_config = _travel_config
 
+        _t_name = t_name.value[_i].strip()
+        _t_origin = t_origin.value[_i]
+        _t_dest = t_dest.value[_i]
+        if _t_origin and _t_dest and _t_origin == _t_dest:
+            _config_warnings.append(
+                f"Transition '{_t_name or _i + 1}' has the same origin and "
+                f"destination ('{_t_origin}') — this self-loop has no net effect."
+            )
         _transitions.append({
-            "name": t_name.value[_i].strip(),
-            "origin": t_origin.value[_i],
-            "destination": t_dest.value[_i],
+            "name": _t_name,
+            "origin": _t_origin,
+            "destination": _t_dest,
             "rate_template": _template,
             "rate_config": _rate_config,
         })
 
-    # Contact matrix params
+    # --- 3. CONTACT MATRIX PARAMS ---
     if uses_contact_matrix:
         if _A == 1:
             params_dict["total_contact_matrix"] = [[float(total_contact_input.value)]]
             params_dict["school_contact_matrix"] = [[float(school_contact_input.value)]]
             params_dict["work_contact_matrix"] = [[float(work_contact_input.value)]]
         else:
-            if loaded_schedule_dfs.total_contact_matrix is not None:
-                params_dict["total_contact_matrix"] = loaded_schedule_dfs.total_contact_matrix
-            elif not isinstance(params_dict.get("total_contact_matrix"), list):
-                params_dict["total_contact_matrix"] = [[float(total_contact_input.value)]]
-            if loaded_schedule_dfs.school_contact_matrix is not None:
-                params_dict["school_contact_matrix"] = loaded_schedule_dfs.school_contact_matrix
-            elif not isinstance(params_dict.get("school_contact_matrix"), list):
-                params_dict["school_contact_matrix"] = [[float(school_contact_input.value)]]
-            if loaded_schedule_dfs.work_contact_matrix is not None:
-                params_dict["work_contact_matrix"] = loaded_schedule_dfs.work_contact_matrix
-            elif not isinstance(params_dict.get("work_contact_matrix"), list):
-                params_dict["work_contact_matrix"] = [[float(work_contact_input.value)]]
+            # A > 1: a proper A×A contact matrix is required. Prefer the CSV,
+            # then an inline A×A list from the loaded config. Only fall back to a
+            # scalar 1×1 matrix as a last resort, and warn loudly because that is
+            # the wrong shape and will misbehave at run time.
+            for _label, _matrix_attr, _scalar_input in (
+                ("total", "total_contact_matrix", total_contact_input),
+                ("school", "school_contact_matrix", school_contact_input),
+                ("work", "work_contact_matrix", work_contact_input),
+            ):
+                _loaded_mat = getattr(loaded_schedule_dfs, _matrix_attr)
+                if _loaded_mat is not None:
+                    params_dict[_matrix_attr] = _loaded_mat
+                elif isinstance(params_dict.get(_matrix_attr), list) and \
+                        len(params_dict[_matrix_attr]) == _A:
+                    pass  # valid inline A×A matrix from loaded config — keep it
+                else:
+                    params_dict[_matrix_attr] = [[float(_scalar_input.value)]]
+                    _config_warnings.append(
+                        f"{_label.capitalize()} contact matrix: no {_A}×{_A} CSV or "
+                        f"inline matrix provided for {_A} age groups; falling back to a "
+                        f"scalar 1×1 matrix. Provide a {_A}×{_A} contact-matrix CSV in "
+                        f"Step 5 — the model will not behave correctly otherwise."
+                    )
 
+    # --- 4. SCHEDULES ---
     _schedules = []
     if uses_absolute_humidity:
         _schedules.append({
@@ -1965,6 +2023,7 @@ def _build_config(
             },
         })
 
+    # --- 5. EPI METRICS ---
     _immunity_active = include_inf_immunity.value or include_vax_immunity.value
     _epi_metrics = []
     if include_vax_immunity.value:
@@ -2020,8 +2079,9 @@ def _build_config(
             },
         })
 
-    # Build input_files section. The shared folder is recorded once and the CSV
-    # entries below are bare filenames resolved against it. Humidity is CSV-only.
+    # --- 6. INPUT FILES ---
+    # The shared folder is recorded once and the CSV entries below are bare
+    # filenames resolved against it. Humidity is CSV-only.
     _input_files = {}
     if input_folder.value.strip():
         _input_files["input_folder"] = input_folder.value.strip()
@@ -2043,6 +2103,7 @@ def _build_config(
     if is_metapop and metapop_folder_input.value.strip():
         _input_files["metapop_folder"] = metapop_folder_input.value.strip()
 
+    # --- 7. CONFIG DICT ---
     _tvs = [v.strip() for v in transition_vars_input.value.split(",") if v.strip()]
     config_dict = {
         "compartments": compartments,
@@ -2064,6 +2125,15 @@ def _build_config(
     if _input_files:
         config_dict["input_files"] = _input_files
 
+    # Preserve per-subpopulation parameter overrides from the loaded config.
+    # These are authored directly in model_config.json (no dedicated widget yet);
+    # carrying them through keeps the load -> rebuild -> run round-trip lossless
+    # so the metapop run path and shared factory can apply them.
+    _subpop_params = loaded_config.get("subpop_params")
+    if _subpop_params:
+        config_dict["subpop_params"] = _subpop_params
+
+    # --- 8. ANALYSIS METRICS ---
     _n_metrics = int(analysis_n_metrics_input.value)
     _analysis_metrics = []
     for _i in range(_n_metrics):
@@ -2077,7 +2147,8 @@ def _build_config(
 
     immunity_active = _immunity_active
     metapop_travel_config = _metapop_travel_config
-    return config_dict, immunity_active, metapop_travel_config
+    config_warnings = _config_warnings
+    return config_dict, immunity_active, metapop_travel_config, config_warnings
 
 
 # ---------------------------------------------------------------------------
@@ -2086,11 +2157,21 @@ def _build_config(
 
 
 @app.cell
-def _config_preview(config_dict, json, mo, main_tab):
+def _config_preview(config_dict, config_warnings, json, mo, main_tab):
     mo.stop(main_tab.value != "Model Builder", None)
     json_str = json.dumps(config_dict, indent=2)
+    _warn_block = []
+    if config_warnings:
+        _warn_block.append(mo.callout(
+            mo.md(
+                "**Config warnings:**\n\n"
+                + "\n".join(f"- {_w}" for _w in config_warnings)
+            ),
+            kind="warn",
+        ))
     mo.vstack([
         mo.md("### Step 9 — Config Preview"),
+        *_warn_block,
         mo.accordion({
             "View / download config JSON": mo.vstack([
                 mo.md(f"```json\n{json_str}\n```"),
@@ -2165,6 +2246,12 @@ def _run_sim(
     mo.stop(main_tab.value != "Model Builder", None)
     mo.stop(not run_button.value, mo.md(""))
 
+    # Runs the preview simulation for Step 10. Structure of this cell:
+    #   - run settings (stochastic/deterministic, reps, days, timesteps)
+    #   - nested helper _build_schedules_input_for_subpop(...)
+    #   - nested helper _run_once(...)         — single-population path
+    #   - nested helper _run_metapop_once(...) — metapopulation path
+    #   - dispatch on is_metapop, aggregate replicates, then plot + summary table
     _A = num_age_groups
     _R = num_risk_groups
     start_real_date = start_date_input.value.strip() or "2024-01-01"

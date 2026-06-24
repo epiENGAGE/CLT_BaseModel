@@ -84,10 +84,12 @@ def _imports():
 
 @app.cell
 def _helpers(Path, SimpleNamespace, json, np, pd):
-    def parse_csv_list(text):
+    def parse_csv_list(text: str) -> list[str]:
+        """Split a comma-separated string into a list of trimmed, non-empty items."""
         return [_item.strip() for _item in text.split(",") if _item.strip()]
 
-    def parse_infectious_mapping(text):
+    def parse_infectious_mapping(text: str) -> dict[str, str | None]:
+        """Parse 'IP:ip_rel, IA:ia_rel, ISR' into {compartment: rel_param | None}."""
         _mapping = {}
         for _item in parse_csv_list(text):
             if ":" in _item:
@@ -100,22 +102,25 @@ def _helpers(Path, SimpleNamespace, json, np, pd):
                 _mapping[_item] = None
         return _mapping
 
-    def build_scalar_array(value, num_age_groups=1, num_risk_groups=1):
+    def build_scalar_array(value, num_age_groups: int = 1, num_risk_groups: int = 1) -> "np.ndarray":
+        """Return an (A×R) array filled with ``value``."""
         return np.full((num_age_groups, num_risk_groups), float(value), dtype=float)
 
     def build_notebook_schedules_input(
         start_date,
-        num_days,
-        absolute_humidity,
-        mobility_value,
-        daily_vaccines_value,
-        num_age_groups=1,
-        num_risk_groups=1,
+        num_days: int,
+        absolute_humidity: float,
+        mobility_value: float,
+        daily_vaccines_value: float,
+        num_age_groups: int = 1,
+        num_risk_groups: int = 1,
         absolute_humidity_df=None,
         school_work_calendar_df=None,
         mobility_df=None,
         daily_vaccines_df=None,
-    ):
+    ) -> "SimpleNamespace":
+        """Assemble a schedules-input namespace for the model from the per-schedule
+        DataFrames, falling back to constant-valued DataFrames where a df is None."""
         _horizon = max(int(num_days) + 14, 370)
         _dates = pd.date_range(start=start_date, periods=_horizon, freq="D").date
 
@@ -164,7 +169,7 @@ def _helpers(Path, SimpleNamespace, json, np, pd):
             daily_vaccines_df=_vax_df,
         )
 
-    def load_csv_validated(path_str, required_columns):
+    def load_csv_validated(path_str: str, required_columns) -> tuple:
         """Load a CSV from path_str and validate column names.
         Returns (df, error_str) — error_str is None on success."""
         if not path_str or not path_str.strip():
@@ -184,7 +189,7 @@ def _helpers(Path, SimpleNamespace, json, np, pd):
         except Exception as _exc:
             return None, f"CSV read error: {_exc}"
 
-    def load_contact_matrix_csv(path_str, expected_size):
+    def load_contact_matrix_csv(path_str: str, expected_size: int) -> tuple:
         """Load an A×A contact matrix CSV (plain floats).
         Returns (nested_list, error_str)."""
         if not path_str or not path_str.strip():
@@ -200,7 +205,7 @@ def _helpers(Path, SimpleNamespace, json, np, pd):
         except Exception as _exc:
             return None, f"Matrix CSV error: {_exc}"
 
-    def load_config_json(path_str):
+    def load_config_json(path_str: str) -> tuple:
         """Load a config JSON from path_str. Returns ({}, None) on empty path."""
         if not path_str or not path_str.strip():
             return {}, None
@@ -213,7 +218,7 @@ def _helpers(Path, SimpleNamespace, json, np, pd):
         except Exception as _exc:
             return {}, f"JSON parse error: {_exc}"
 
-    def resolve_input_path(folder_str, name_str):
+    def resolve_input_path(folder_str: str, name_str: str) -> str:
         """Resolve a CSV entry against the shared input folder.
 
         ``name_str`` is normally a bare filename living in ``folder_str``.
@@ -226,8 +231,9 @@ def _helpers(Path, SimpleNamespace, json, np, pd):
             return name_str.strip()
         return str(Path(folder_str.strip()) / name_str.strip())
 
-    def validate_metapop_folder(folder_path_str):
-        """Check that a metapop folder has the required files.
+    def validate_metapop_folder(folder_path_str: str) -> tuple:
+        """Check that a metapop folder has the required files and a coherent
+        metapop_config.json (travel matrix shape / row sums, per-subpop files).
         Returns (is_valid, status_dict)."""
         if not folder_path_str or not folder_path_str.strip():
             return False, {}
@@ -252,16 +258,65 @@ def _helpers(Path, SimpleNamespace, json, np, pd):
                 _status[_fname] = "OK (optional shared)"
             else:
                 _status[_fname] = "absent (will use constant value)"
+
+        # Deeper validation of metapop_config.json contents.
+        _cfg_path = _folder / "metapop_config.json"
+        if _cfg_path.exists():
+            try:
+                with open(_cfg_path) as _f:
+                    _cfg = json.load(_f)
+            except Exception as _exc:
+                _status["metapop_config.json"] = f"INVALID JSON: {_exc}"
+                return False, _status
+
+            _subpops = _cfg.get("subpopulations")
+            _travel = _cfg.get("travel_matrix")
+            if not isinstance(_subpops, list) or not _subpops:
+                _status["subpopulations"] = "MISSING or empty (expected non-empty list)"
+                _valid = False
+            else:
+                _n = len(_subpops)
+                _status["subpopulations"] = f"OK ({_n}: {', '.join(map(str, _subpops))})"
+
+                # Travel matrix must be N×N with rows summing to ~1.
+                _tm = np.asarray(_travel, dtype=float) if _travel is not None else None
+                if _tm is None or _tm.ndim != 2 or _tm.shape != (_n, _n):
+                    _shape = None if _tm is None else _tm.shape
+                    _status["travel_matrix"] = (
+                        f"INVALID: expected {_n}×{_n}, got {_shape}"
+                    )
+                    _valid = False
+                else:
+                    _row_sums = _tm.sum(axis=1)
+                    if not np.allclose(_row_sums, 1.0, atol=1e-6):
+                        _status["travel_matrix"] = (
+                            f"WARNING: rows should sum to 1; got {np.round(_row_sums, 4).tolist()}"
+                        )
+                    else:
+                        _status["travel_matrix"] = f"OK ({_n}×{_n}, rows sum to 1)"
+
+                # Per-subpop files (informational; defaults used when absent).
+                for _name in _subpops:
+                    for _suffix, _kind in (
+                        (f"initial_conditions_{_name}.json", "initial conditions"),
+                        (f"school_work_calendar_{_name}.csv", "calendar"),
+                        (f"vaccines_{_name}.csv", "vaccines"),
+                    ):
+                        if (_folder / _suffix).exists():
+                            _status[_suffix] = f"OK ({_kind})"
+                        else:
+                            _status[_suffix] = f"absent ({_kind}; default used)"
+
         return _valid, _status
 
-    def infectious_mapping_to_str(mapping):
+    def infectious_mapping_to_str(mapping: dict) -> str:
         """Convert {comp: rel_param | None} back to the text format 'IP:ip_rel, IA:ia_rel, ISR'."""
         _parts = []
         for _k, _v in mapping.items():
             _parts.append(f"{_k}:{_v}" if _v else _k)
         return ", ".join(_parts)
 
-    def is_array_param(cfg, name):
+    def is_array_param(cfg: dict, name: str) -> bool:
         """Return True if the named param in cfg has a list (A×R array) value."""
         return isinstance(cfg.get("params", {}).get(name), list)
 
