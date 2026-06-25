@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Blocks commits that leave generic_core/examples/model_builder_notebook.py
+# out of sync with its _nb_*.py section sources.
+#
+# Enable with: git config core.hooksPath .githooks
+
+set -euo pipefail
+
+changed=$(git diff --cached --name-only -- \
+    'generic_core/examples/model_builder_notebook.py' \
+    'generic_core/examples/_nb_*.py')
+
+if [ -z "$changed" ]; then
+    exit 0
+fi
+
+if ! python generic_core/examples/check_notebook_sync.py; then
+    echo
+    echo "pre-commit: model_builder_notebook.py is out of sync with _nb_*.py — commit blocked."
+    echo "Run 'python generic_core/examples/build_notebook.py' (or split_notebook.py first" \
+         "if you edited cells in the marimo UI), then re-stage and commit."
+    exit 1
+fi

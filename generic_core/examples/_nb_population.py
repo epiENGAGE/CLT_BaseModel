@@ -4,12 +4,8 @@
 #
 # IMPORTANT: This section must be assembled AFTER _nb_entry.py and BEFORE
 # _nb_model_builder.py, because it defines num_age_groups / num_risk_groups /
-# is_metapop / metapop_folder_input / age_groups, which the Model Builder tab
-# consumes.
-#
-# The compute cell (_population_structure_compute) is intentionally NOT gated on
-# the active tab, so the population variables it exports stay available to every
-# downstream tab regardless of which tab is selected.
+# is_metapop / metapop_folder_input / age_groups / population_by_subpop /
+# pop_subpop_names, which the Model Builder tab consumes.
 
 @app.cell
 def _population_structure_ui(mo, loaded_config):
@@ -168,6 +164,7 @@ def _population_structure_show(
 # Contact-matrix geography (fetch via epydemix)
 # ---------------------------------------------------------------------------
 
+
 @app.cell
 def _geo_fetch_state(mo):
     # Holds the most recent fetch result:
@@ -228,7 +225,7 @@ def _geo_ui(mo, cmf, geo_subpop_names):
                        label=f"{_n}: country", searchable=True)
         for _n in geo_subpop_names
     ])
-    geo_fetch_button = mo.ui.run_button(label="Fetch contact matrices")
+    geo_fetch_button = mo.ui.run_button(label="Fetch contact matrices & population")
     return (
         geo_scope_radio, geo_kind_radio, geo_state_dropdown, geo_country_input,
         geo_subpop_kind, geo_subpop_state, geo_subpop_country, geo_fetch_button,
@@ -236,13 +233,42 @@ def _geo_ui(mo, cmf, geo_subpop_names):
 
 
 @app.cell
+def _pop_source_ui(mo, num_risk_groups, loaded_config):
+    # Population-source widgets: either fetch per-age-band totals for the
+    # geography (epydemix), or load a CSV of population per age/risk/subpop.
+    population_source_radio = mo.ui.radio(
+        options=["Fetch from geography", "CSV file"],
+        value="Fetch from geography",
+        label="Population source",
+    )
+    _saved_rf = (loaded_config.get("age_risk", {}) or {}).get("risk_group_fractions")
+    if not isinstance(_saved_rf, list) or len(_saved_rf) != int(num_risk_groups):
+        _saved_rf = [1.0 / max(int(num_risk_groups), 1)] * int(num_risk_groups)
+    # One fraction per risk group; the fetched (age-only) population is split
+    # across risk groups by these fractions (renormalised to sum to 1).
+    risk_fraction_inputs = mo.ui.array([
+        mo.ui.number(start=0.0, stop=1.0, step=None, value=float(_saved_rf[_r]),
+                     label=f"risk {_r}")
+        for _r in range(int(num_risk_groups))
+    ])
+    population_csv_input = mo.ui.text(
+        value="",
+        placeholder="/path/to/population.csv",
+        label="Population CSV (columns: age, population, [risk], [subpopulation])",
+        full_width=True,
+    )
+    return population_source_radio, risk_fraction_inputs, population_csv_input
+
+
+@app.cell
 def _geo_fetch(
     mo, cmf,
     geo_fetch_button,
-    age_group_mode, age_groups,
+    age_group_mode, age_groups, num_age_groups,
     is_metapop, geo_scope_radio,
     geo_kind_radio, geo_state_dropdown, geo_country_input,
     geo_subpop_names, geo_subpop_kind, geo_subpop_state, geo_subpop_country,
+    population_source_radio,
     set_fetched_matrices,
 ):
     # Only fetch when the button is pressed and named bands are defined.
@@ -253,29 +279,44 @@ def _geo_fetch(
             return "us_state", state_dd.value
         return "country", country_txt.value.strip()
 
-    if age_group_mode != "Named age bands" or not age_groups:
+    # With a single age group there are no named bands to define; '0+' covers
+    # the whole population in one band, which is all fetch_* needs for A=1.
+    if age_group_mode == "Named age bands":
+        _eff_age_groups = age_groups
+    elif num_age_groups == 1:
+        _eff_age_groups = ["0+"]
+    else:
+        _eff_age_groups = None
+
+    if not _eff_age_groups:
         set_fetched_matrices({
-            "matrices": {}, "scope": "shared",
+            "matrices": {}, "populations": {}, "scope": "shared",
             "errors": {"error": "Define named age bands before fetching contact matrices."},
         })
     else:
         _per_subpop = is_metapop and geo_scope_radio.value == "Per-subpopulation"
-        _results, _errors = {}, {}
+        _fetch_pop = population_source_radio.value == "Fetch from geography"
+        _results, _pops, _errors = {}, {}, {}
         try:
             if _per_subpop:
                 for _i, _name in enumerate(geo_subpop_names):
                     _kind, _geo = _kind_geo(
                         geo_subpop_kind[_i], geo_subpop_state[_i], geo_subpop_country[_i]
                     )
-                    _results[_name] = cmf.fetch_contact_matrices(_kind, _geo, age_groups)
+                    _results[_name] = cmf.fetch_contact_matrices(_kind, _geo, _eff_age_groups)
+                    if _fetch_pop:
+                        _pops[_name] = cmf.fetch_population(_kind, _geo, _eff_age_groups)
             else:
                 _kind, _geo = _kind_geo(geo_kind_radio, geo_state_dropdown, geo_country_input)
-                _results["__shared__"] = cmf.fetch_contact_matrices(_kind, _geo, age_groups)
+                _results["__shared__"] = cmf.fetch_contact_matrices(_kind, _geo, _eff_age_groups)
+                if _fetch_pop:
+                    _pops["__shared__"] = cmf.fetch_population(_kind, _geo, _eff_age_groups)
         except Exception as _exc:
             _errors["error"] = str(_exc)
 
         set_fetched_matrices({
             "matrices": _results,
+            "populations": _pops,
             "scope": "per_subpop" if _per_subpop else "shared",
             "errors": _errors,
         })
@@ -286,9 +327,13 @@ def _geo_fetch(
 def _geo_result(get_fetched_matrices):
     _state = get_fetched_matrices() or {}
     fetched_contact_matrices = _state.get("matrices", {})
+    fetched_populations = _state.get("populations", {})
     fetched_matrices_scope = _state.get("scope", "shared")
     fetched_matrices_errors = _state.get("errors", {})
-    return fetched_contact_matrices, fetched_matrices_scope, fetched_matrices_errors
+    return (
+        fetched_contact_matrices, fetched_populations,
+        fetched_matrices_scope, fetched_matrices_errors,
+    )
 
 
 @app.cell
@@ -304,13 +349,13 @@ def _geo_show(
 
     _parts = [mo.md("## Contact Matrices (geography)")]
 
-    if age_group_mode != "Named age bands":
+    if age_group_mode != "Named age bands" and num_age_groups != 1:
         mo.stop(True, mo.vstack([
             *_parts,
             mo.callout(
                 mo.md("Switch to **Named age bands** above to fetch contact matrices "
-                      "for a geography. In count-only mode, provide contact-matrix CSVs "
-                      "in Model Builder → Step 4 instead."),
+                      "for a geography. In count-only mode with A > 1, provide "
+                      "contact-matrix CSVs in Model Builder → Step 4 instead."),
                 kind="info",
             ),
         ]))
@@ -364,3 +409,176 @@ def _geo_show(
 
     mo.vstack(_parts)
     return
+
+
+@app.cell
+def _population_data(
+    population_source_radio, risk_fraction_inputs, population_csv_input,
+    fetched_populations, fetched_matrices_scope,
+    is_metapop, geo_subpop_names,
+    num_age_groups, num_risk_groups, age_groups,
+    loaded_config, load_population_csv, np,
+):
+    # Resolve the per-subpopulation population into A×R arrays. Not gated on the
+    # active tab so population_by_subpop stays available to the Model Builder
+    # tab (initial conditions) and the run paths.
+    _A = int(num_age_groups)
+    _R = int(num_risk_groups)
+    pop_subpop_names = (
+        list(geo_subpop_names) if (is_metapop and geo_subpop_names) else ["aggregate_pop"]
+    )
+    population_source = population_source_radio.value
+    population_by_subpop = {}
+    population_errors = {}
+
+    # Risk-group split fractions (renormalised; uniform fallback).
+    _rf = np.array([float(_x) for _x in risk_fraction_inputs.value], dtype=float)
+    if _rf.size != _R or _rf.sum() <= 0:
+        _rf = np.full(_R, 1.0 / max(_R, 1))
+    _rf = _rf / _rf.sum()
+
+    if population_source == "CSV file":
+        _pop, _err = load_population_csv(
+            population_csv_input.value, pop_subpop_names, _A, _R, age_groups,
+        )
+        if _err:
+            population_errors["error"] = _err
+        elif _pop:
+            population_by_subpop = _pop
+    else:  # Fetch from geography
+        if not fetched_populations:
+            population_errors["info"] = (
+                "No population fetched yet — choose a geography and press "
+                "**Fetch contact matrices & population** above."
+            )
+        elif fetched_matrices_scope == "per_subpop":
+            for _name in pop_subpop_names:
+                _nk = fetched_populations.get(_name)
+                if _nk:
+                    population_by_subpop[_name] = np.round(
+                        np.outer(np.asarray(_nk, dtype=float), _rf)
+                    )
+        else:
+            _nk = fetched_populations.get("__shared__")
+            if _nk:
+                _arr = np.round(np.outer(np.asarray(_nk, dtype=float), _rf))
+                for _name in pop_subpop_names:
+                    population_by_subpop[_name] = _arr
+
+    # Fallback for any subpop without a resolved population: reuse a saved value
+    # from config (round-trip), else split total_population uniformly across cells.
+    _saved_ic = loaded_config.get("initial_conditions", {}) or {}
+    for _name in pop_subpop_names:
+        if _name in population_by_subpop:
+            continue
+        _saved_pop = (_saved_ic.get(_name, {}) or {}).get("population")
+        _arr = None
+        if isinstance(_saved_pop, list):
+            try:
+                _cand = np.asarray(_saved_pop, dtype=float)
+                if _cand.shape == (_A, _R):
+                    _arr = _cand
+            except Exception:
+                _arr = None
+        if _arr is None:
+            _total = float(loaded_config.get("total_population", 10000))
+            _arr = np.full((_A, _R), _total / max(_A * _R, 1))
+        population_by_subpop[_name] = _arr
+    return population_by_subpop, population_source, population_errors, pop_subpop_names
+
+
+@app.cell
+def _population_show(
+    mo, main_tab,
+    population_source_radio, risk_fraction_inputs, population_csv_input,
+    num_risk_groups, age_groups, num_age_groups,
+    population_by_subpop, population_source, population_errors, pop_subpop_names,
+    param_grid_columns, pd,
+):
+    mo.stop(main_tab.value != "Population & Geography", None)
+
+    import html as _html
+    import random as _random
+
+    def _tip_label(label_text, tip_text):
+        """Render a field label with an inline ⓘ hover tooltip using CSS only."""
+        _uid = _random.randint(10**7, 10**8 - 1)
+        _esc = _html.escape(tip_text)
+        return mo.Html(
+            f"<style>"
+            f"#tip{_uid}{{position:relative;display:inline-block;"
+            f"cursor:help;color:#888;font-size:0.8em;vertical-align:middle;}}"
+            f"#tip{_uid}>span{{visibility:hidden;opacity:0;"
+            f"transition:opacity .15s;transition-delay:.2s;"
+            f"position:absolute;bottom:120%;left:0;"
+            f"background:#222;color:#fff;border-radius:4px;"
+            f"padding:6px 10px;width:280px;font-size:12px;line-height:1.5;"
+            f"white-space:pre-wrap;pointer-events:none;z-index:9999;}}"
+            f"#tip{_uid}:hover>span{{visibility:visible;opacity:1;}}"
+            f"</style>"
+            f"<span>"
+            f"{label_text}&nbsp;"
+            f'<span id="tip{_uid}">ⓘ<span>{_esc}</span></span>'
+            f"</span>"
+        )
+
+    _CSV_FORMAT_TIP = (
+        "Required columns: age, population\n\n"
+        "  age — named band (matching the configured\n"
+        "        age groups) or a 0-based index\n"
+        "  population — count for that row\n\n"
+        "Optional columns:\n"
+        "  risk — 0-based index in 0..R-1\n"
+        "        (required only if there is more\n"
+        "        than one risk group)\n"
+        "  subpopulation — must match a configured\n"
+        "        subpopulation name (required only\n"
+        "        if there is more than one)"
+    )
+
+    _parts = [
+        mo.md("## Population sizes (per age / risk group)"),
+        mo.md(
+            "Population totals per age group are fetched for the chosen geography "
+            "(US states and countries supported via epydemix), or loaded from a CSV "
+            "for custom / per-subpopulation populations."
+        ),
+        population_source_radio,
+    ]
+    if population_source == "Fetch from geography":
+        if int(num_risk_groups) > 1:
+            _parts.append(mo.md(
+                "**Risk-group split** — the fetched (age-only) population is split "
+                "across risk groups by these fractions (renormalised to sum to 1):"
+            ))
+            _parts.append(mo.hstack(list(risk_fraction_inputs), justify="start"))
+    else:
+        _parts.append(
+            mo.hstack(
+                [population_csv_input, _tip_label("", _CSV_FORMAT_TIP)],
+                justify="start", align="center", gap=0.5,
+            )
+        )
+
+    if population_errors.get("error"):
+        _parts.append(mo.callout(mo.md(f"**Population error:** {population_errors['error']}"),
+                                 kind="danger"))
+    elif population_errors.get("info"):
+        _parts.append(mo.callout(mo.md(population_errors["info"]), kind="info"))
+
+    _cols = param_grid_columns(age_groups, int(num_age_groups))
+    for _name in pop_subpop_names:
+        _arr = population_by_subpop.get(_name)
+        if _arr is None:
+            continue
+        _label = "Population" if _name == "aggregate_pop" else f"Population — {_name}"
+        _df = pd.DataFrame(
+            [{"risk_group": _r, **{_c: _arr[_a, _r] for _a, _c in enumerate(_cols)}}
+             for _r in range(_arr.shape[1])]
+        )
+        _parts.append(mo.md(f"**{_label}** (total {_arr.sum():,.0f})"))
+        _parts.append(mo.ui.table(_df, selection=None))
+
+    mo.vstack(_parts)
+    return
+

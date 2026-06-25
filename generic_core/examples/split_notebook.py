@@ -34,17 +34,30 @@ CELL_TO_SECTION: dict[str, str] = {
     "_output_dir": "_nb_entry",
     "_tab_header_display": "_nb_entry",
     "_autosave_config": "_nb_entry",
+    # _nb_population.py — Population & Geography tab (structure, contact-matrix
+    # geography, and per-age/risk/subpop population fetch/CSV)
+    "_population_structure_ui": "_nb_population",
+    "_population_structure_compute": "_nb_population",
+    "_population_structure_show": "_nb_population",
+    "_geo_fetch_state": "_nb_population",
+    "_geo_subpop_names": "_nb_population",
+    "_geo_ui": "_nb_population",
+    "_pop_source_ui": "_nb_population",
+    "_geo_fetch": "_nb_population",
+    "_geo_result": "_nb_population",
+    "_geo_show": "_nb_population",
+    "_population_data": "_nb_population",
+    "_population_show": "_nb_population",
     # _nb_model_builder.py
     "_load_config_state": "_nb_model_builder",
+    "_config_file_upload_ui": "_nb_model_builder",
     "_load_config_ui": "_nb_model_builder",
+    "_clear_path_on_browse": "_nb_model_builder",
     "_clear_config_button_ui": "_nb_model_builder",
     "_load_config_parse": "_nb_model_builder",
     "_load_config_display": "_nb_model_builder",
     "_intro": "_nb_model_builder",
     "_instructions": "_nb_model_builder",
-    "_population_structure_ui": "_nb_model_builder",
-    "_population_structure_compute": "_nb_model_builder",
-    "_population_structure_show": "_nb_model_builder",
     "_compartments_ui": "_nb_model_builder",
     "_compartments_parse": "_nb_model_builder",
     "_compartments_display": "_nb_model_builder",
@@ -99,6 +112,7 @@ CELL_TO_SECTION: dict[str, str] = {
     "_forecast_results_display": "_nb_forecast",
     # _nb_export.py
     "_export_display": "_nb_export",
+    "_build_schedules": "_nb_export",
     # _nb_analysis.py
     "_analysis_sub_tab": "_nb_analysis",
     "_analysis_param_catalog": "_nb_analysis",
@@ -147,6 +161,16 @@ SECTION_HEADERS: dict[str, str] = {
         "# Section: Notebook entry-point UI (tab selector, output directory, autosave)\n"
         "# Part of model_builder_notebook.py — assembled by build_notebook.py\n"
     ),
+    "_nb_population": (
+        "# _nb_population.py\n"
+        "# Section: Population & Geography tab cells\n"
+        "# Part of model_builder_notebook.py — assembled by build_notebook.py\n"
+        "#\n"
+        "# IMPORTANT: This section must be assembled AFTER _nb_entry.py and BEFORE\n"
+        "# _nb_model_builder.py, because it defines num_age_groups / num_risk_groups /\n"
+        "# is_metapop / metapop_folder_input / age_groups / population_by_subpop /\n"
+        "# pop_subpop_names, which the Model Builder tab consumes.\n"
+    ),
     "_nb_model_builder": (
         "# _nb_model_builder.py\n"
         "# Section: Model Builder tab cells (Steps 0-10)\n"
@@ -189,6 +213,7 @@ SECTION_ORDER = [
     "_nb_shared",
     "_nb_analysis_metric_defs",
     "_nb_entry",
+    "_nb_population",
     "_nb_model_builder",
     "_nb_shared_factory",
     "_nb_fitting",

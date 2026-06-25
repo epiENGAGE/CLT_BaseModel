@@ -103,13 +103,16 @@ def validate_age_bands(age_groups: list[str]) -> None:
     - first band starts at 0,
     - last band is of the form 'x+' with x <= 84,
     - bands are contiguous (each starts where the previous ends + 1).
+
+    A single band of ['0+'] (the whole population, A=1) is also valid.
     """
     if not isinstance(age_groups, list) or not age_groups:
         raise ValueError("Age groups must be a non-empty list of band strings.")
     if not all(isinstance(x, str) for x in age_groups):
         raise ValueError("All age-group entries must be strings, e.g. '0-4'.")
 
-    first_lower = age_groups[0].split("-")[0]
+    _first = age_groups[0]
+    first_lower = _first[:-1] if _first.endswith("+") else _first.split("-")[0]
     if first_lower != "0":
         raise ValueError(
             f"Age groups must start at 0; first band lower bound is {first_lower}."
@@ -231,3 +234,43 @@ def fetch_contact_matrices(
         # numpy array -> nested list (config-friendly)
         out[_SETTING_TO_PARAM[layer]] = matrix.tolist()
     return out
+
+
+def fetch_population(
+    geography_kind: str,
+    geography_name: str,
+    age_groups: list[str],
+    contacts_source: str = "mistry_2021",
+) -> list[float]:
+    """Fetch the per-age-band population totals for a geography.
+
+    Returns a list of length A (= len(age_groups)) giving the population in each
+    age band, aggregated from the epydemix-data 1-year bins by the same band
+    definitions used for contact matrices. Pairs with fetch_contact_matrices().
+
+    Raises:
+        ImportError: if the optional ``epydemix`` package is not installed.
+        ValueError: if the age bands are malformed or the geography is unknown.
+        Exception: propagated from epydemix if the geography/data is unavailable.
+    """
+    try:
+        from epydemix.population import load_epydemix_population
+    except Exception as exc:  # ImportError or any epydemix import-time failure
+        raise ImportError(
+            "Fetching population requires the optional 'epydemix' package. "
+            "Install it with: pip install epydemix"
+        ) from exc
+
+    validate_age_bands(age_groups)
+    population_name = resolve_population_name(geography_kind, geography_name)
+    mappings = age_band_mappings(age_groups)
+
+    population = load_epydemix_population(
+        population_name=population_name,
+        contacts_source=contacts_source,
+        layers=["all"],
+        age_group_mapping=mappings,
+    )
+    # population.Nk is aggregated to the bands by age_group_mapping (verified
+    # against load_epydemix_population); convert to a plain float list.
+    return [float(_x) for _x in population.Nk]

@@ -17,8 +17,11 @@ dependencies = []
 # - contact_matrices: enables the in-notebook contact-matrix fetch in the model
 #   builder's Population & Geography tab (generic_core/contact_matrix_fetch.py),
 #   which downloads Mistry-2021 matrices via the epydemix-data repo.
+# - netcdf: lets scripts read gridMET-style .nc files, e.g.
+#   generic_core/examples/massachusetts_vax/extract_ma_humidity.py.
 [project.optional-dependencies]
 contact_matrices = ["epydemix"]
+netcdf = ["netCDF4"]
 
 [tool.setuptools.packages.find]
 where = ["."]

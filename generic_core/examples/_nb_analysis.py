@@ -10,16 +10,25 @@ def _analysis_sub_tab(mo):
 
 
 @app.cell
-def _analysis_param_catalog(scalar_param_names, params_inputs, array_param_names, loaded_config):
+def _analysis_param_catalog(
+    param_names, param_vary_toggles, param_scalar_inputs, param_grid_inputs,
+    param_grid_columns, num_age_groups, num_risk_groups, age_groups,
+):
     import math as _math
 
-    _saved_params = loaded_config.get("params", {})
-    _scalar = {
-        scalar_param_names[_j]: float(params_inputs.value[_j])
-        for _j in range(len(scalar_param_names))
-    }
-    _array = {_n: _saved_params[_n] for _n in array_param_names if _n in _saved_params}
-    _params = {**_scalar, **_array}
+    _A = num_age_groups
+    _R = num_risk_groups
+    _age_cols = param_grid_columns(age_groups, _A)
+    _params = {}
+    for _name in param_names:
+        if param_vary_toggles[_name].value:
+            _rows = list(param_grid_inputs[_name].value)
+            _params[_name] = [
+                [float(_rows[_r][_age_cols[_a]]) for _r in range(_R)]
+                for _a in range(_A)
+            ]
+        else:
+            _params[_name] = float(param_scalar_inputs[_name].value)
 
     ANALYSIS_SCALAR_PARAMS = {k: v for k, v in _params.items() if isinstance(v, (int, float))}
     ANALYSIS_ARRAY_PARAMS = {k: v for k, v in _params.items() if isinstance(v, list)}
@@ -541,7 +550,7 @@ def _run_analysis(
     config_dict, compartments, is_metapop,
     metapop_folder_input, metapop_travel_config,
     transition_vars_input,
-    total_pop_input, seed_inputs, start_date_input, rng_seed,
+    build_compartment_init, start_date_input, rng_seed,
     make_single_pop_metapop, make_metapop_from_folder,
     set_analysis_results,
     np, mo, build_scalar_array,
@@ -565,13 +574,15 @@ def _run_analysis(
 
     _ci = None
     if not is_metapop:
-        _N = int(total_pop_input.value)
-        _sv = {compartments[_j + 1]: int(seed_inputs.value[_j]) for _j in range(len(seed_inputs.value))}
-        _fc = compartments[0]
-        _ci = {_fc: build_scalar_array(_N - sum(_sv.values()), 1, 1)}
-        _ci.update({_c: build_scalar_array(_v, 1, 1) for _c, _v in _sv.items()})
-        for _c in compartments:
-            _ci.setdefault(_c, build_scalar_array(0.0, 1, 1))
+        # Initial conditions from the Step 6 tables via config_dict.
+        _ic_entry = config_dict.get("initial_conditions", {}).get("aggregate_pop", {})
+        _pop_arr = np.asarray(_ic_entry.get("population", np.zeros((1, 1))), dtype=float)
+        _seed_arrays = {
+            _c: np.asarray(_a, dtype=float)
+            for _c, _a in (_ic_entry.get("seeds", {}) or {}).items()
+            if _c in compartments
+        }
+        _ci, _ = build_compartment_init(_seed_arrays, _pop_arr, compartments)
 
     def _extract_detailed(metapop, comps, tvs=None):
         _out = {}

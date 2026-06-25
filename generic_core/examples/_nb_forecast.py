@@ -142,7 +142,7 @@ def _run_forecast(
     forecast_horizon, forecast_n_reps, forecast_stochastic,
     fit_result, config_dict, compartments, is_metapop,
     metapop_folder_input, metapop_travel_config,
-    total_pop_input, seed_inputs, start_date_input, timesteps, rng_seed,
+    build_compartment_init, start_date_input, timesteps, rng_seed,
     transition_vars_input,
     make_single_pop_metapop, make_metapop_from_folder, extract_history,
     np, json, mo, Path, build_scalar_array, datetime,
@@ -192,13 +192,15 @@ def _run_forecast(
 
         _ci = None
         if not is_metapop:
-            _N = int(total_pop_input.value)
-            _sv = {compartments[_j + 1]: int(seed_inputs.value[_j]) for _j in range(len(seed_inputs.value))}
-            _fc = compartments[0]
-            _ci = {_fc: build_scalar_array(_N - sum(_sv.values()), 1, 1)}
-            _ci.update({_c: build_scalar_array(_v, 1, 1) for _c, _v in _sv.items()})
-            for _c in compartments:
-                _ci.setdefault(_c, build_scalar_array(0.0, 1, 1))
+            # Initial conditions from the Step 6 tables via config_dict.
+            _ic_entry = config_dict.get("initial_conditions", {}).get("aggregate_pop", {})
+            _pop_arr = np.asarray(_ic_entry.get("population", np.zeros((1, 1))), dtype=float)
+            _seed_arrays = {
+                _c: np.asarray(_a, dtype=float)
+                for _c, _a in (_ic_entry.get("seeds", {}) or {}).items()
+                if _c in compartments
+            }
+            _ci, _ = build_compartment_init(_seed_arrays, _pop_arr, compartments)
 
         _histories = []
 

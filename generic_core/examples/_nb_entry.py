@@ -3,6 +3,21 @@
 # Part of model_builder_notebook.py — assembled by build_notebook.py
 
 @app.cell
+def _tab_style_injection(mo):
+    # Must render in its own cell, before the tabs widget's cell, so this
+    # stylesheet already exists in the document when marimo-tabs constructs
+    # its shadow root and copies stylesheets into it (a one-time, synchronous
+    # snapshot at construction — added later is too late).
+    mo.Html(
+        '<style title="marimo-tab-width">'
+        '[role="tablist"] { width: 100%; }'
+        '[role="tablist"] [role="tab"] { flex: 1; text-align: center; }'
+        "</style>"
+    )
+    return
+
+
+@app.cell
 def _main_tab_selector(mo):
     main_tab = mo.ui.tabs({
         "Population & Geography": mo.md(""),

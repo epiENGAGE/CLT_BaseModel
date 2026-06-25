@@ -89,19 +89,9 @@ def _helpers(Path, SimpleNamespace, json, np, pd):
         """Split a comma-separated string into a list of trimmed, non-empty items."""
         return [_item.strip() for _item in text.split(",") if _item.strip()]
 
-    def parse_infectious_mapping(text: str) -> dict[str, str | None]:
-        """Parse 'IP:ip_rel, IA:ia_rel, ISR' into {compartment: rel_param | None}."""
-        _mapping = {}
-        for _item in parse_csv_list(text):
-            if ":" in _item:
-                _name, _rel = _item.split(":", 1)
-                _name = _name.strip()
-                _rel = _rel.strip()
-                if _name:
-                    _mapping[_name] = _rel or None
-            elif _item:
-                _mapping[_item] = None
-        return _mapping
+    def rel_inf_param_name(compartment: str) -> str:
+        """Auto-generated parameter name for a compartment's relative infectiousness."""
+        return f"{compartment}_relative_infectiousness"
 
     def build_scalar_array(value, num_age_groups: int = 1, num_risk_groups: int = 1) -> "np.ndarray":
         """Return an (A×R) array filled with ``value``."""
@@ -112,7 +102,7 @@ def _helpers(Path, SimpleNamespace, json, np, pd):
         num_days: int,
         absolute_humidity: float,
         mobility_value: float,
-        daily_vaccines_value: float,
+        daily_vaccines_value,  # float, or an A×R nested list to vary by age/risk group
         num_age_groups: int = 1,
         num_risk_groups: int = 1,
         absolute_humidity_df=None,
@@ -153,9 +143,11 @@ def _helpers(Path, SimpleNamespace, json, np, pd):
                 "mobility_modifier": [_mob_payload] * 7,
             })
 
-        _vax_payload = json.dumps(
-            np.full((num_age_groups, num_risk_groups), float(daily_vaccines_value)).tolist()
-        )
+        if isinstance(daily_vaccines_value, (list, tuple)):
+            _vax_arr = np.asarray(daily_vaccines_value, dtype=float)
+        else:
+            _vax_arr = np.full((num_age_groups, num_risk_groups), float(daily_vaccines_value))
+        _vax_payload = json.dumps(_vax_arr.tolist())
         _vax_df = daily_vaccines_df
         if _vax_df is None:
             _vax_df = pd.DataFrame({
@@ -321,11 +313,193 @@ def _helpers(Path, SimpleNamespace, json, np, pd):
         """Return True if the named param in cfg has a list (A×R array) value."""
         return isinstance(cfg.get("params", {}).get(name), list)
 
+    def param_grid_columns(age_groups, num_age_groups: int) -> list:
+        """Column labels for an age×risk param data_editor: named age bands
+        when available (from the Population & Geography tab), else age0..ageN."""
+        if age_groups and len(age_groups) == num_age_groups:
+            return list(age_groups)
+        return [f"age{_a}" for _a in range(num_age_groups)]
+
+    def grid_to_AR_array(grid_value, age_cols, num_age_groups, num_risk_groups):
+        """Transpose a risk-row / age-column data_editor value into an A×R array.
+
+        ``grid_value`` is the list-of-row-dicts produced by ``mo.ui.data_editor``
+        (one row per risk group, one column per age band). Mirrors the param-grid
+        readback in ``_build_config``."""
+        _A = int(num_age_groups)
+        _R = int(num_risk_groups)
+        _rows = list(grid_value)
+        return np.array(
+            [[float(_rows[_r][age_cols[_a]]) for _r in range(_R)] for _a in range(_A)],
+            dtype=float,
+        )
+
+    def array_to_grid_rows(arr, age_cols, num_risk_groups):
+        """Inverse of grid_to_AR_array: build data_editor rows from an A×R array
+        (or None, which becomes all-zero rows)."""
+        _R = int(num_risk_groups)
+        _A = len(age_cols)
+        _arr = np.zeros((_A, _R)) if arr is None else np.asarray(arr, dtype=float)
+        return [
+            {"risk_group": f"risk{_r}", **{age_cols[_a]: float(_arr[_a][_r]) for _a in range(_A)}}
+            for _r in range(_R)
+        ]
+
+    def default_seed_row_data(saved_ic, subpop, comp, age_cols, num_risk_groups,
+                               is_first_seed_comp):
+        """Build initial data_editor rows for one (subpop, compartment) seed grid.
+
+        Pulls from ``saved_ic`` (a loaded config's ``initial_conditions`` dict)
+        when present, else defaults to 50 in the first seed compartment's
+        (age0, risk0) cell so a freshly built model still produces an epidemic
+        out of the box."""
+        _R = int(num_risk_groups)
+        _seeds = (saved_ic.get(subpop, {}) or {}).get("seeds", {}) or {}
+        _arr = _seeds.get(comp)
+        _rows = []
+        for _r in range(_R):
+            _row = {"risk_group": _r}
+            for _a, _col in enumerate(age_cols):
+                _val = 0.0
+                if isinstance(_arr, list):
+                    try:
+                        _val = float(_arr[_a][_r])
+                    except (IndexError, TypeError, ValueError):
+                        _val = 0.0
+                elif is_first_seed_comp and _a == 0 and _r == 0:
+                    _val = 50.0
+                _row[_col] = _val
+            _rows.append(_row)
+        return _rows
+
+    def load_population_csv(path_str, subpop_names, num_age_groups,
+                            num_risk_groups, age_groups=None):
+        """Parse a population CSV into per-subpop A×R arrays.
+
+        Expected columns: ``age``, ``risk``, ``subpopulation``, ``population``.
+        - ``age`` may be a named band (matching ``age_groups``) or a 0-based index.
+        - ``risk`` is a 0-based index in ``0..R-1``. Optional when there is only
+          one risk group, in which case every row is assumed to be risk 0.
+        - ``subpopulation`` must be one of ``subpop_names``. Optional when there
+          is only one subpopulation, in which case every row is assigned to it.
+        Returns ``(pop_by_subpop, error_str)`` where ``pop_by_subpop`` maps each
+        subpop name to an A×R numpy array; ``error_str`` is None on success."""
+        if not path_str or not path_str.strip():
+            return None, "No path provided"
+        _p = Path(path_str.strip())
+        if not _p.exists():
+            return None, f"File not found: {_p}"
+        try:
+            _df = pd.read_csv(_p)
+        except Exception as _exc:
+            return None, f"CSV read error: {_exc}"
+        _df = _df.loc[:, ~_df.columns.str.match(r"^Unnamed")]
+        _required = {"age", "population"}
+        _missing = _required - set(_df.columns)
+        if _missing:
+            return None, f"Missing columns: {_missing}. Found: {list(_df.columns)}"
+        if "risk" not in _df.columns:
+            if int(num_risk_groups) != 1:
+                return None, (
+                    "Missing column: {'risk'} (required when there is more than "
+                    "one risk group)."
+                )
+            _df = _df.assign(risk=0)
+        if "subpopulation" not in _df.columns:
+            if len(subpop_names) != 1:
+                return None, (
+                    "Missing column: {'subpopulation'} (required when there is "
+                    "more than one subpopulation)."
+                )
+            _df = _df.assign(subpopulation=subpop_names[0])
+
+        _A = int(num_age_groups)
+        _R = int(num_risk_groups)
+        # Map an age cell (named band or index string) to a 0-based age index.
+        _band_to_idx = {}
+        if age_groups and len(age_groups) == _A:
+            _band_to_idx = {str(_b): _i for _i, _b in enumerate(age_groups)}
+
+        def _age_index(_val):
+            _s = str(_val).strip()
+            if _s in _band_to_idx:
+                return _band_to_idx[_s]
+            try:
+                return int(float(_s))
+            except ValueError:
+                return None
+
+        _pop = {_name: np.zeros((_A, _R), dtype=float) for _name in subpop_names}
+        for _row_i, _row in _df.iterrows():
+            _sp = str(_row["subpopulation"]).strip()
+            if _sp not in _pop:
+                return None, (f"Row {_row_i}: unknown subpopulation '{_sp}'. "
+                              f"Expected one of {list(subpop_names)}.")
+            _ai = _age_index(_row["age"])
+            if _ai is None or not (0 <= _ai < _A):
+                return None, (f"Row {_row_i}: age '{_row['age']}' is not a valid "
+                              f"band/index for A={_A}.")
+            try:
+                _ri = int(float(_row["risk"]))
+            except (ValueError, TypeError):
+                return None, f"Row {_row_i}: risk '{_row['risk']}' is not an integer."
+            if not (0 <= _ri < _R):
+                return None, f"Row {_row_i}: risk {_ri} out of range 0..{_R - 1}."
+            try:
+                _pop[_sp][_ai, _ri] = float(_row["population"])
+            except (ValueError, TypeError):
+                return None, f"Row {_row_i}: population '{_row['population']}' is not numeric."
+        return _pop, None
+
+    def build_compartment_init(seed_arrays, population_AR, compartments):
+        """Build a {compartment: A×R array} init dict from seed counts + population.
+
+        ``seed_arrays`` maps non-first compartment names to A×R arrays of seeded
+        counts. The first compartment receives ``population − Σ seeds`` per cell
+        (clamped at 0). Returns ``(comp_init, overflow)`` where ``overflow`` is
+        True if any cell's seeds exceeded its population."""
+        _pop = np.asarray(population_AR, dtype=float)
+        _seed_total = np.zeros_like(_pop)
+        _comp_init = {}
+        for _c in compartments[1:] if len(compartments) > 1 else []:
+            _arr = np.asarray(seed_arrays.get(_c, np.zeros_like(_pop)), dtype=float)
+            _comp_init[_c] = _arr
+            _seed_total = _seed_total + _arr
+        _remainder = _pop - _seed_total
+        _overflow = bool(np.any(_remainder < 0))
+        if compartments:
+            _comp_init[compartments[0]] = np.clip(_remainder, 0.0, None)
+        for _c in compartments:
+            _comp_init.setdefault(_c, np.zeros_like(_pop))
+        return _comp_init, _overflow
+
+    def read_initial_conditions(config, subpop_name, compartments,
+                                num_age_groups, num_risk_groups):
+        """Read per-subpop initial conditions from ``config['initial_conditions']``.
+
+        Returns a ``{compartment: A×R array}`` init dict (first compartment =
+        population − Σ seeds), or None when the subpop has no entry. Used by the
+        metapop and shared-factory run paths, with the folder JSON as fallback."""
+        _ic = (config or {}).get("initial_conditions", {})
+        _entry = _ic.get(subpop_name)
+        if not _entry:
+            return None
+        _A = int(num_age_groups)
+        _R = int(num_risk_groups)
+        _pop = np.asarray(_entry.get("population",
+                                     np.zeros((_A, _R))), dtype=float)
+        _seeds = {}
+        for _c, _arr in (_entry.get("seeds", {}) or {}).items():
+            if _c in compartments:
+                _seeds[_c] = np.asarray(_arr, dtype=float)
+        _comp_init, _ = build_compartment_init(_seeds, _pop, compartments)
+        return _comp_init
+
     return (
         build_notebook_schedules_input,
         build_scalar_array,
         parse_csv_list,
-        parse_infectious_mapping,
+        rel_inf_param_name,
         load_csv_validated,
         load_contact_matrix_csv,
         load_config_json,
@@ -333,5 +507,12 @@ def _helpers(Path, SimpleNamespace, json, np, pd):
         validate_metapop_folder,
         infectious_mapping_to_str,
         is_array_param,
+        array_to_grid_rows,
+        param_grid_columns,
+        grid_to_AR_array,
+        default_seed_row_data,
+        load_population_csv,
+        build_compartment_init,
+        read_initial_conditions,
     )
 

@@ -18,6 +18,7 @@ from generic_core.contact_matrix_fetch import (
     age_band_mappings,
     resolve_population_name,
     fetch_contact_matrices,
+    fetch_population,
     COUNTRIES,
 )
 
@@ -35,6 +36,7 @@ def test_parse_age_bands():
 def test_validate_age_bands_accepts_valid():
     validate_age_bands(["0-4", "5-17", "18-49", "50-64", "65+"])  # no raise
     validate_age_bands(["0-0", "1-4", "5-12", "13-17", "18-49", "50-64", "65+"])
+    validate_age_bands(["0+"])  # single band covering the whole population (A=1)
 
 
 @pytest.mark.parametrize("bands, needle", [
@@ -111,6 +113,9 @@ def _install_fake_epydemix(monkeypatch, captured):
             layer: np.full((a, a), float(i + 1))
             for i, layer in enumerate(layers)
         }
+        # per-band population totals (distinct per band)
+        pop.Nk = np.array([1000.0 * (j + 1) for j in range(a)], dtype=float)
+        pop.Nk_names = list(age_group_mapping.keys())
         return pop
 
     pkg = types.ModuleType("epydemix")
@@ -147,3 +152,41 @@ def test_fetch_contact_matrices_propagates_band_errors(monkeypatch):
     _install_fake_epydemix(monkeypatch, captured)
     with pytest.raises(ValueError):
         fetch_contact_matrices("us_state", "Massachusetts", ["5-17", "18+"])
+
+
+# ---------------------------------------------------------------------------
+# fetch_population with a fake epydemix module
+# ---------------------------------------------------------------------------
+
+def test_fetch_population_with_fake_epydemix(monkeypatch):
+    captured = {}
+    _install_fake_epydemix(monkeypatch, captured)
+
+    bands = ["0-4", "5-17", "18-49", "50-64", "65+"]
+    pop = fetch_population("us_state", "Massachusetts", bands)
+
+    # one population total per band, in band order, as plain floats
+    assert isinstance(pop, list)
+    assert len(pop) == len(bands)
+    assert pop == [1000.0, 2000.0, 3000.0, 4000.0, 5000.0]
+    assert all(isinstance(x, float) for x in pop)
+
+    # geography name resolved and passed through; only the "all" layer is loaded
+    assert captured["population_name"] == "United_States__Massachusetts"
+    assert captured["contacts_source"] == "mistry_2021"
+    assert captured["layers"] == ["all"]
+
+
+def test_fetch_population_country(monkeypatch):
+    captured = {}
+    _install_fake_epydemix(monkeypatch, captured)
+    pop = fetch_population("country", "United_Kingdom", ["0-17", "18+"])
+    assert len(pop) == 2
+    assert captured["population_name"] == "United_Kingdom"
+
+
+def test_fetch_population_propagates_band_errors(monkeypatch):
+    captured = {}
+    _install_fake_epydemix(monkeypatch, captured)
+    with pytest.raises(ValueError):
+        fetch_population("us_state", "Massachusetts", ["5-17", "18+"])

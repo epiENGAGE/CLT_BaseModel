@@ -553,7 +553,7 @@ def _run_fitting(
     fit_start_offset_enable, fit_start_offset_lo, fit_start_offset_hi,
     fit_lr, fit_n_iter, fit_r2_thresh, fit_n_replications,
     config_dict, compartments, is_metapop,
-    total_pop_input, seed_inputs,
+    build_compartment_init, read_initial_conditions,
     start_date_input, timesteps, rng_seed,
     num_age_groups, num_risk_groups,
     metapop_folder_input, metapop_travel_config,
@@ -668,16 +668,15 @@ def _run_fitting(
     
         _ci = None
         if not is_metapop:
-            _N = int(total_pop_input.value)
-            _seed_vals = {
-                compartments[_j + 1]: int(seed_inputs.value[_j])
-                for _j in range(len(seed_inputs.value))
+            # Initial conditions from the Step 6 tables via config_dict.
+            _ic_entry = config_dict.get("initial_conditions", {}).get("aggregate_pop", {})
+            _pop_arr = np.asarray(_ic_entry.get("population", np.zeros((_A, _R))), dtype=float)
+            _seed_arrays = {
+                _c: np.asarray(_a, dtype=float)
+                for _c, _a in (_ic_entry.get("seeds", {}) or {}).items()
+                if _c in compartments
             }
-            _first_comp = compartments[0]
-            _ci = {_first_comp: build_scalar_array(_N - sum(_seed_vals.values()), 1, 1)}
-            _ci.update({_c: build_scalar_array(_v, 1, 1) for _c, _v in _seed_vals.items()})
-            for _c in compartments:
-                _ci.setdefault(_c, build_scalar_array(0.0, 1, 1))
+            _ci, _ = build_compartment_init(_seed_arrays, _pop_arr, compartments)
     
         _bounds_grad = {
             _selected_params[_j]: [float(_lo_vals[_j]), float(_hi_vals[_j])]
@@ -1133,9 +1132,14 @@ def _run_fitting(
                         _folder_ar = Path(metapop_folder_input.value.strip())
                         for _sp_nm_ar in _subpop_names_run:
                             _ic_path_ar = _folder_ar / f"initial_conditions_{_sp_nm_ar}.json"
+                            _ic_cfg_ar = (config_dict.get("initial_conditions", {}) or {}).get(_sp_nm_ar, {})
+                            _table_ci_ar = read_initial_conditions(
+                                config_dict, _sp_nm_ar, compartments, _A, _R)
                             _comp_base_ar = {_c: build_scalar_array(0.0, _A, _R) for _c in compartments}
                             _epi_base_ar = {}
-                            if _ic_path_ar.exists():
+                            if _ic_cfg_ar.get("seeds") and _table_ci_ar is not None:
+                                _comp_base_ar = _table_ci_ar
+                            elif _ic_path_ar.exists():
                                 try:
                                     with open(_ic_path_ar) as _f:
                                         _ic_data_ar = json.load(_f)
@@ -1146,6 +1150,8 @@ def _run_fitting(
                                         _epi_base_ar[_em] = np.array(_arr, dtype=float)
                                 except Exception:
                                     pass
+                            elif _table_ci_ar is not None:
+                                _comp_base_ar = _table_ci_ar
                             _metapop_base_inits.append((_comp_base_ar, _epi_base_ar))
 
                     def _extract_ts_sliced(metapop_obj, target_vars_k, sp_idx, ag_idx, rk_idx, n_days):
@@ -1341,19 +1347,21 @@ def _run_fitting(
                                     _init_override.append((_scaled_comp, _epi_base_sp))
                             elif not is_metapop and _ci is not None:
                                 _ci_iter = {}
+                                _delta = np.zeros_like(
+                                    _ci.get(compartments[0], build_scalar_array(0.0, _A, _R))
+                                ) if compartments else None
                                 for _c in compartments:
+                                    _base_arr = _ci.get(_c, build_scalar_array(0.0, _A, _R))
                                     if _c in _sampled_scales and _c != (compartments[0] if compartments else None):
-                                        _base_val = float(np.sum(_ci[_c]))
-                                        _ci_iter[_c] = build_scalar_array(_base_val * _sampled_scales[_c], 1, 1)
+                                        _sc = _sampled_scales[_c]
+                                        _ci_iter[_c] = _base_arr * _sc
+                                        if _delta is not None:
+                                            _delta += _base_arr * (_sc - 1.0)
                                     else:
-                                        _ci_iter[_c] = _ci[_c]
-                                if compartments:
-                                    _total_non_first = sum(
-                                        float(np.sum(_ci_iter[_c])) for _c in compartments[1:]
-                                    )
-                                    _ci_iter[compartments[0]] = build_scalar_array(
-                                        max(0.0, _N - _total_non_first), 1, 1
-                                    )
+                                        _ci_iter[_c] = _base_arr.copy()
+                                if compartments and _delta is not None:
+                                    _first_arr = _ci.get(compartments[0], build_scalar_array(0.0, _A, _R))
+                                    _ci_iter[compartments[0]] = np.maximum(_first_arr - _delta, 0.0)
 
                         _has_per_subpop = any(_per_subpop)
                         if is_metapop:

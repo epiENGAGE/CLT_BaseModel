@@ -6,6 +6,7 @@
 def _shared_model_factory(
     build_notebook_schedules_input,
     build_scalar_array,
+    read_initial_conditions,
     parse_model_config_from_dict,
     ConfigDrivenSubpopModel,
     ConfigDrivenMetapopModel,
@@ -106,8 +107,15 @@ def _shared_model_factory(
             )
             _comp_init = {_c: build_scalar_array(0.0, _A, _R) for _c in compartments_list}
             _epi_init = {}
+            # Precedence: explicit override > Step 6 tables (with seeds) > folder
+            # JSON > population-only table > zeros.
+            _ic_cfg = (config.get("initial_conditions", {}) or {}).get(_sp_name, {})
+            _has_table_seeds = bool(_ic_cfg.get("seeds"))
+            _table_ci = read_initial_conditions(config, _sp_name, compartments_list, _A, _R)
             if init_states_override is not None and _si < len(init_states_override):
                 _comp_init, _epi_init = init_states_override[_si]
+            elif _has_table_seeds and _table_ci is not None:
+                _comp_init = _table_ci
             elif _ic_p.exists():
                 with open(_ic_p) as _f:
                     _ic = json.load(_f)
@@ -116,6 +124,8 @@ def _shared_model_factory(
                         _comp_init[_c] = np.array(_arr, dtype=float)
                 for _m, _arr in _ic.get("epi_metrics", {}).items():
                     _epi_init[_m] = np.array(_arr, dtype=float)
+            elif _table_ci is not None:
+                _comp_init = _table_ci
             _sp_overrides = dict(param_overrides or {})
             if param_overrides_per_subpop and _si < len(param_overrides_per_subpop) and param_overrides_per_subpop[_si]:
                 _sp_overrides.update(param_overrides_per_subpop[_si])
