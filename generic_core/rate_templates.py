@@ -663,6 +663,18 @@ class ScheduledExactTransferRate(RateTemplate):
         each day. The proportion is converted to an exact (rounded, capped)
         count in ScheduledTransferVariable.get_scheduled_exact_realization
         (numpy) and generic_advance_timestep (torch).
+    compartment_reset_date_mm_dd_param : str, optional
+        Parameter name holding a "MM_DD" string (or None). If set, the
+        schedule's pre-simulation history (between this reset date and the
+        simulation start date) is summed and moved from origin to destination
+        in the initial compartment values, so a schedule (e.g. a vaccine CSV)
+        that starts before the simulation start date still counts toward the
+        initial vaccinated population. If the param is absent/None, all
+        history before the simulation start date is used. If this key is
+        omitted entirely from rate_config, no adjustment is made (the
+        transition's pre-simulation history is ignored, as before). See
+        ConfigDrivenSubpopModel._compute_scheduled_exact_pre_simulation_adjustments
+        in generic_model.py.
     """
 
     def validate_config(self, rate_config, param_names, compartment_names, schedule_names):

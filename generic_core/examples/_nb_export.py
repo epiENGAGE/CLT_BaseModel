@@ -3,8 +3,9 @@
 # Part of model_builder_notebook.py — assembled by build_notebook.py
 
 @app.cell
-def _export_display(config_dict, fit_result, output_dir, json, mo, main_tab, num_age_groups, num_risk_groups, sim_days, sim_mode, n_reps, timesteps, start_date_input, analysis_scenarios):
+def _export_display(config_dict, fit_result, output_dir, json, mo, main_tab, num_age_groups, num_risk_groups, sim_days, sim_mode, n_reps, timesteps, start_date_input, analysis_scenarios, step_header, section_card, CLT_ACCENT):
     mo.stop(main_tab.value != "Export", None)
+    _ACC = CLT_ACCENT["export"]
     _config_str = json.dumps(config_dict, indent=2)
     _fitted_str = json.dumps(fit_result.best_params if fit_result is not None else {}, indent=2)
 
@@ -233,14 +234,44 @@ print(f"Results saved to {_db}")
             kind="info",
         )
 
+    _how_to = mo.callout(
+        mo.md(
+            "**How to run**\n\n"
+            "1. Download `run_simulation.py`, `model_config.json`, and "
+            "`fitted_params.json` below into one folder.\n"
+            "2. (Optional) edit the `SCENARIOS` block and top constants in the script.\n"
+            "3. Run `python run_simulation.py` — results are written to a "
+            "`simulation_output/` folder alongside the script."
+        ),
+        kind="info",
+    )
     mo.vstack([
-        mo.md("## Export"),
-        mo.md("### Generated script  *(edit `SCENARIOS` and top constants before running)*"),
-        _scen_note,
-        mo.accordion({"run_simulation.py": mo.md(f"```python\n{_script}\n```")}),
-        mo.md("### Downloads"),
-        mo.hstack([_config_dl, _script_dl, _fitted_dl], justify="start"),
-        mo.md(f"*Outputs auto-saved to `{output_dir}/`*"),
+        mo.Html(
+            f'<div style="font-size:1.35rem;font-weight:800;color:{_ACC};">Export</div>'
+            '<div style="color:#777;margin:.1rem 0 .2rem;">Generate a standalone '
+            "script to run this model outside the notebook.</div>"
+        ),
+        section_card(
+            step_header("①", "Generated script",
+                        "A runnable run_simulation.py — edit SCENARIOS and the top "
+                        "constants before running.",
+                        accent=_ACC),
+            mo.vstack([
+                _how_to,
+                _scen_note,
+                mo.accordion({"run_simulation.py": mo.md(f"```python\n{_script}\n```")}),
+            ]),
+            accent=_ACC,
+        ),
+        section_card(
+            step_header("②", "Downloads",
+                        "Grab the script and its input files.", accent=_ACC),
+            mo.vstack([
+                mo.hstack([_config_dl, _script_dl, _fitted_dl], justify="start"),
+                mo.md(f"*Outputs auto-saved to `{output_dir}/`*"),
+            ]),
+            accent=_ACC,
+        ),
     ])
     return
 

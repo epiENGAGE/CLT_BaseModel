@@ -587,6 +587,129 @@ def _helpers(Path, SimpleNamespace, json, np, pd):
         read_initial_conditions,
     )
 
+
+# ---------------------------------------------------------------------------
+# Shared visual style layer
+# ---------------------------------------------------------------------------
+
+
+@app.cell
+def _clt_style_helpers(mo):
+    import html as _html
+    import random as _random
+
+    # Per-tab accent colors — keep section badges/headers visually distinct so
+    # the user always knows which part of the workflow they are in.
+    CLT_ACCENT = {
+        "population": "#2e7d6b",  # teal
+        "builder":    "#3b6ea5",  # blue
+        "fitting":    "#9c5fb5",  # purple
+        "forecast":   "#c2792e",  # amber
+        "export":     "#557a46",  # green
+        "analysis":   "#b5495b",  # rose
+    }
+
+    def tip_label(label_text="", tip_text="", *, html_tip=False, width=None):
+        """Inline ⓘ hover tooltip, optionally preceded by ``label_text``.
+
+        ``html_tip=False`` (default): ``tip_text`` is plain text, HTML-escaped,
+        shown with line breaks preserved (pre-wrap). ``html_tip=True``:
+        ``tip_text`` is treated as raw HTML (use ``<br>`` for breaks).
+
+        The ``<style>`` is emitted inline (scoped to a unique id) rather than
+        relying on a global stylesheet, so the tooltip still hides correctly
+        when it renders inside a shadow-DOM component such as ``mo.accordion``
+        or ``mo.ui.tabs`` (a global stylesheet would not reach inside those)."""
+        if html_tip:
+            _body = tip_text.replace("\n", "<br>")
+            _ws = "normal"
+            _w = 520 if width is None else width
+        else:
+            _body = _html.escape(tip_text)
+            _ws = "pre-wrap"
+            _w = 300 if width is None else width
+        _uid = _random.randint(10**7, 10**8 - 1)
+        _lead = f"{label_text}&nbsp;" if label_text else ""
+        return mo.Html(
+            f"<style>"
+            f"#tip{_uid}{{position:relative;display:inline-block;cursor:help;"
+            f"color:#888;font-size:0.8em;vertical-align:middle;}}"
+            f"#tip{_uid}>span{{visibility:hidden;opacity:0;transition:opacity .15s;"
+            f"transition-delay:.2s;position:absolute;bottom:120%;left:0;"
+            f"display:block;box-sizing:border-box;"
+            f"background:#222;color:#fff;border-radius:4px;padding:6px 10px;"
+            f"width:{_w}px;font-size:12px;line-height:1.5;white-space:{_ws};"
+            f"pointer-events:none;z-index:9999;}}"
+            f"#tip{_uid}:hover>span{{visibility:visible;opacity:1;}}"
+            # Radix's accordion content panel keeps a permanent
+            # `overflow-hidden` class (for its open/close animation), which
+            # clips this absolutely-positioned popup when a tooltip lives
+            # inside an accordion item. Lifting overflow on the open panel
+            # only takes effect once it's fully open, so it doesn't disturb
+            # the collapse/expand animation itself.
+            f'div[data-state="open"].overflow-hidden{{overflow:visible;}}'
+            f"</style>"
+            f"<span>{_lead}"
+            f'<span id="tip{_uid}">ⓘ<span>{_body}</span></span>'
+            f"</span>"
+        )
+
+    def with_tip(label_text, tip_text, widget, **kw):
+        """Label + ⓘ tooltip on the left, widget on the right."""
+        return mo.hstack(
+            [tip_label(label_text, tip_text, **kw), widget],
+            justify="start", align="center",
+        )
+
+    def wtip(widget, tip_text, **kw):
+        """Widget on the left, ⓘ tooltip on the right. The widget sits in a
+        fit-content box so radio/checkbox widgets don't stretch and shove the
+        icon far to the right."""
+        return mo.Html(
+            '<div style="display:inline-flex;align-items:center;gap:4px;">'
+            f'<div style="width:fit-content;">{widget}</div>'
+            f'{tip_label("", tip_text, **kw)}'
+            "</div>"
+        )
+
+    def step_header(n, title, subtitle=None, accent=None):
+        """Bold numbered step/section header: colored badge + accented title.
+
+        Styles are inline (no shared stylesheet) so the header renders
+        correctly even inside shadow-DOM components."""
+        _acc = accent or "#3b6ea5"
+        _sub = (
+            f'<div style="color:#777;font-size:.82rem;margin:.05rem 0 0 2.25rem;">'
+            f"{_html.escape(str(subtitle))}</div>"
+            if subtitle else ""
+        )
+        return mo.Html(
+            '<div style="display:flex;align-items:center;gap:.55rem;'
+            'margin:.1rem 0 .15rem;">'
+            '<span style="display:inline-flex;align-items:center;'
+            "justify-content:center;min-width:1.7em;height:1.7em;padding:0 .45em;"
+            f"border-radius:999px;background:{_acc};color:#fff;font-weight:700;"
+            f'font-size:.95rem;line-height:1;flex:none;">{_html.escape(str(n))}</span>'
+            f'<span style="font-size:1.06rem;font-weight:700;color:{_acc};">'
+            f"{_html.escape(str(title))}</span>"
+            f"</div>{_sub}"
+        )
+
+    def section_card(header, body, accent=None):
+        """Wrap ``header`` + ``body`` in a bordered card with a colored accent
+        stripe down the left edge."""
+        _stripe = accent or "#9aa7b8"
+        return mo.vstack([header, body], gap=0.5).style({
+            "border": "1px solid rgba(127,127,127,0.25)",
+            "border-left": f"4px solid {_stripe}",
+            "border-radius": "10px",
+            "padding": "0.8rem 1rem",
+            "margin": "0.45rem 0",
+            "background": "rgba(127,127,127,0.03)",
+        })
+
+    return CLT_ACCENT, tip_label, with_tip, wtip, step_header, section_card
+
 @app.cell
 def _analysis_metric_defs_ui(mo, loaded_config, n_transitions, t_name, transition_vars_input):
     _MAX_MET = 5
@@ -791,11 +914,12 @@ def _population_structure_show(
     metapop_folder_input,
     validate_metapop_folder,
     cmf,
+    step_header, section_card, CLT_ACCENT,
 ):
     mo.stop(main_tab.value != "Population & Geography", None)
+    _ACC = CLT_ACCENT["population"]
 
     _parts = [
-        mo.md("## Population Structure"),
         mo.md(
             "Define the population dimensions and geography here. The rest of the "
             "model (compartments, transitions, parameters, …) is built in the "
@@ -849,7 +973,13 @@ def _population_structure_show(
                 kind="info",
             ))
 
-    mo.vstack(_parts)
+    section_card(
+        step_header("①", "Population Structure",
+                    "Age groups, risk groups, and single-population vs. metapopulation.",
+                    accent=_ACC),
+        mo.vstack(_parts),
+        accent=_ACC,
+    )
     return
 
 
@@ -1037,22 +1167,29 @@ def _geo_show(
     geo_subpop_names, geo_subpop_kind, geo_subpop_state, geo_subpop_country,
     geo_fetch_button,
     fetched_contact_matrices, fetched_matrices_scope, fetched_matrices_errors,
+    step_header, section_card, CLT_ACCENT,
 ):
     mo.stop(main_tab.value != "Population & Geography", None)
-
-    _parts = [mo.md("## Contact Matrices (geography)")]
+    _ACC = CLT_ACCENT["population"]
+    _header = step_header(
+        "②", "Contact Matrices (geography)",
+        "Optionally fetch age-structured contact matrices for a US state or country.",
+        accent=_ACC,
+    )
 
     if age_group_mode != "Named age bands" and num_age_groups != 1:
-        mo.stop(True, mo.vstack([
-            *_parts,
+        mo.stop(True, section_card(
+            _header,
             mo.callout(
                 mo.md("Switch to **Named age bands** above to fetch contact matrices "
                       "for a geography. In count-only mode with A > 1, provide "
                       "contact-matrix CSVs in Model Builder → Step 4 instead."),
                 kind="info",
             ),
-        ]))
+            accent=_ACC,
+        ))
 
+    _parts = []
     if not cmf.epydemix_available():
         _parts.append(mo.callout(
             mo.md("The optional **epydemix** package is not installed, so live fetching "
@@ -1066,26 +1203,29 @@ def _geo_show(
         "matrices (Mistry 2021, via epydemix-data) for your age bands."
     ))
 
+    # Fetch controls collapse into an accordion to keep the tab tidy.
+    _ctrl = []
     if is_metapop:
-        _parts.append(geo_scope_radio)
-
+        _ctrl.append(geo_scope_radio)
     if is_metapop and geo_scope_radio.value == "Per-subpopulation":
         if not geo_subpop_names:
-            _parts.append(mo.callout(
+            _ctrl.append(mo.callout(
                 mo.md("No subpopulations found — set a valid metapop folder above."),
                 kind="warn",
             ))
         for _i, _name in enumerate(geo_subpop_names):
             _sel = (geo_subpop_state[_i] if geo_subpop_kind[_i].value == "US state"
                     else geo_subpop_country[_i])
-            _parts.append(mo.hstack([mo.md(f"**{_name}**"), geo_subpop_kind[_i], _sel],
-                                    justify="start"))
+            _ctrl.append(mo.hstack([mo.md(f"**{_name}**"), geo_subpop_kind[_i], _sel],
+                                   justify="start"))
     else:
-        _parts.append(geo_kind_radio)
-        _parts.append(geo_state_dropdown if geo_kind_radio.value == "US state"
-                      else geo_country_input)
-
-    _parts.append(geo_fetch_button)
+        _ctrl.append(geo_kind_radio)
+        _ctrl.append(geo_state_dropdown if geo_kind_radio.value == "US state"
+                     else geo_country_input)
+    _ctrl.append(geo_fetch_button)
+    _parts.append(mo.accordion(
+        {"Fetch contact matrices for a geography": mo.vstack(_ctrl)},
+    ))
 
     if fetched_matrices_errors.get("error"):
         _parts.append(mo.callout(mo.md(f"**Fetch failed:** {fetched_matrices_errors['error']}"),
@@ -1100,7 +1240,7 @@ def _geo_show(
             kind="success",
         ))
 
-    mo.vstack(_parts)
+    section_card(_header, mo.vstack(_parts), accent=_ACC)
     return
 
 
@@ -1187,33 +1327,10 @@ def _population_show(
     num_risk_groups, age_groups, num_age_groups,
     population_by_subpop, population_source, population_errors, pop_subpop_names,
     param_grid_columns, pd,
+    tip_label, step_header, section_card, CLT_ACCENT,
 ):
     mo.stop(main_tab.value != "Population & Geography", None)
-
-    import html as _html
-    import random as _random
-
-    def _tip_label(label_text, tip_text):
-        """Render a field label with an inline ⓘ hover tooltip using CSS only."""
-        _uid = _random.randint(10**7, 10**8 - 1)
-        _esc = _html.escape(tip_text)
-        return mo.Html(
-            f"<style>"
-            f"#tip{_uid}{{position:relative;display:inline-block;"
-            f"cursor:help;color:#888;font-size:0.8em;vertical-align:middle;}}"
-            f"#tip{_uid}>span{{visibility:hidden;opacity:0;"
-            f"transition:opacity .15s;transition-delay:.2s;"
-            f"position:absolute;bottom:120%;left:0;"
-            f"background:#222;color:#fff;border-radius:4px;"
-            f"padding:6px 10px;width:280px;font-size:12px;line-height:1.5;"
-            f"white-space:pre-wrap;pointer-events:none;z-index:9999;}}"
-            f"#tip{_uid}:hover>span{{visibility:visible;opacity:1;}}"
-            f"</style>"
-            f"<span>"
-            f"{label_text}&nbsp;"
-            f'<span id="tip{_uid}">ⓘ<span>{_esc}</span></span>'
-            f"</span>"
-        )
+    _ACC = CLT_ACCENT["population"]
 
     _CSV_FORMAT_TIP = (
         "Required columns: age, population\n\n"
@@ -1230,7 +1347,6 @@ def _population_show(
     )
 
     _parts = [
-        mo.md("## Population sizes (per age / risk group)"),
         mo.md(
             "Population totals per age group are fetched for the chosen geography "
             "(US states and countries supported via epydemix), or loaded from a CSV "
@@ -1248,7 +1364,7 @@ def _population_show(
     else:
         _parts.append(
             mo.hstack(
-                [population_csv_input, _tip_label("", _CSV_FORMAT_TIP)],
+                [population_csv_input, tip_label("", _CSV_FORMAT_TIP)],
                 justify="start", align="center", gap=0.5,
             )
         )
@@ -1265,15 +1381,55 @@ def _population_show(
         if _arr is None:
             continue
         _label = "Population" if _name == "aggregate_pop" else f"Population — {_name}"
-        _df = pd.DataFrame(
-            [{"risk_group": _r, **{_c: _arr[_a, _r] for _a, _c in enumerate(_cols)}}
-             for _r in range(_arr.shape[1])]
-        )
+        _rows = [
+            {"risk_group": str(_r), **{_c: _arr[_a, _r] for _a, _c in enumerate(_cols)}}
+            for _r in range(_arr.shape[1])
+        ]
+        # Totals row: sum across risk groups for each age band.
+        _rows.append({"risk_group": "Σ all risk",
+                      **{_c: _arr[_a, :].sum() for _a, _c in enumerate(_cols)}})
+        _df = pd.DataFrame(_rows)
         _parts.append(mo.md(f"**{_label}** (total {_arr.sum():,.0f})"))
         _parts.append(mo.ui.table(_df, selection=None))
 
-    mo.vstack(_parts)
+    section_card(
+        step_header("③", "Population sizes",
+                    "Per age / risk-group population counts used as denominators.",
+                    accent=_ACC),
+        mo.vstack(_parts),
+        accent=_ACC,
+    )
     return
+
+@app.cell
+def _builder_overview(mo, main_tab, CLT_ACCENT):
+    mo.stop(main_tab.value != "Model Builder", None)
+    _ACC = CLT_ACCENT["builder"]
+    _steps = [
+        ("0", "Load config"), ("1", "Compartments"), ("2", "Transitions"),
+        ("3", "Parameters"), ("4", "Schedules"), ("4", "Immunity"),
+        ("5", "Diagram"), ("6", "Initial conditions"), ("7", "Sim settings"),
+        ("8", "Config preview"), ("9", "Run"),
+    ]
+    _chips = "".join(
+        '<span style="display:inline-flex;align-items:center;gap:.35rem;'
+        "background:rgba(127,127,127,0.08);border:1px solid rgba(127,127,127,0.2);"
+        "border-radius:999px;padding:.15rem .6rem .15rem .2rem;font-size:.8rem;"
+        'white-space:nowrap;">'
+        '<span style="display:inline-flex;align-items:center;justify-content:center;'
+        "min-width:1.5em;height:1.5em;border-radius:999px;"
+        f"background:{_ACC};color:#fff;font-weight:700;font-size:.78rem;\">{_n}</span>"
+        f"{_t}</span>"
+        for _n, _t in _steps
+    )
+    mo.Html(
+        f'<div style="font-size:1.35rem;font-weight:800;color:{_ACC};">Model Builder</div>'
+        '<div style="color:#777;margin:.1rem 0 .55rem;">Work top to bottom — each '
+        "numbered card below is one step.</div>"
+        f'<div style="display:flex;flex-wrap:wrap;gap:.4rem;">{_chips}</div>'
+    )
+    return
+
 
 @app.cell
 def _load_config_state(mo, Path):
@@ -1358,9 +1514,11 @@ def _load_config_parse(config_file_upload, config_path_input, load_config_json, 
 @app.cell
 def _load_config_display(
     config_file_upload, config_path_input, clear_config_button,
-    loaded_config, load_config_json, mo, main_tab
+    loaded_config, load_config_json, mo, main_tab,
+    step_header, section_card, CLT_ACCENT,
 ):
     mo.stop(main_tab.value != "Model Builder", None)
+    _ACC = CLT_ACCENT["builder"]
 
     _cfg_err = None
     _source = None
@@ -1381,7 +1539,6 @@ def _load_config_display(
     ), align="center", gap=1)
 
     _parts = [
-        mo.md("### Step 0 — Load Existing Config"),
         _browse_row,
         config_path_input,
         clear_config_button,
@@ -1411,7 +1568,13 @@ def _load_config_display(
             mo.md("No config loaded — all fields below use their defaults. Enter a path or browse for a JSON file to pre-populate the form, or fill it in manually."),
             kind="info",
         ))
-    mo.vstack(_parts)
+    section_card(
+        step_header(0, "Load Existing Config",
+                    "Optional — pre-fill the form from a saved config JSON.",
+                    accent=_ACC),
+        mo.vstack(_parts),
+        accent=_ACC,
+    )
     return
 
 
@@ -1693,17 +1856,23 @@ def _compartments_parse(compartments_text):
 
 
 @app.cell
-def _compartments_display(compartments, compartments_text, mo, main_tab):
+def _compartments_display(
+    compartments, compartments_text, mo, main_tab,
+    step_header, section_card, CLT_ACCENT,
+):
     mo.stop(main_tab.value != "Model Builder", None)
+    _ACC = CLT_ACCENT["builder"]
     if compartments:
         _body = mo.md("**Parsed:** " + "  ".join(f"`{_c}`" for _c in compartments))
     else:
         _body = mo.callout(mo.md("Enter at least one compartment name."), kind="warn")
-    mo.vstack([
-        mo.md("### Step 1 — Compartments"),
-        compartments_text,
-        _body,
-    ])
+    section_card(
+        step_header(1, "Compartments",
+                    "The disease states individuals move between (e.g. S, E, I, R).",
+                    accent=_ACC),
+        mo.vstack([compartments_text, _body]),
+        accent=_ACC,
+    )
     return
 
 
@@ -1926,36 +2095,11 @@ def _transition_show(
     t_base_rate, t_proportion, t_is_complement, t_inf_reduce, t_vax_reduce,
     t_beta, t_rel_sus, t_infectious, t_use_humidity, t_humidity_impact,
     t_use_foi_immunity, t_immobile,
+    tip_label, with_tip,
+    step_header, section_card, CLT_ACCENT,
 ):
+    _ACC = CLT_ACCENT["builder"]
     mo.stop(main_tab.value != "Model Builder", None)
-    import html as _html
-    import random as _random
-
-    def _tip_label(label_text, tip_text):
-        """Render a field label with an inline ⓘ hover tooltip using CSS only."""
-        _uid = _random.randint(10**7, 10**8 - 1)
-        _esc = _html.escape(tip_text)
-        return mo.Html(
-            f"<style>"
-            f"#tip{_uid}{{position:relative;display:inline-block;"
-            f"cursor:help;color:#888;font-size:0.8em;vertical-align:middle;}}"
-            f"#tip{_uid}>span{{visibility:hidden;opacity:0;"
-            f"transition:opacity .15s;transition-delay:.2s;"
-            f"position:absolute;bottom:120%;left:0;"
-            f"background:#222;color:#fff;border-radius:4px;"
-            f"padding:6px 10px;width:280px;font-size:12px;line-height:1.5;"
-            f"white-space:pre-wrap;pointer-events:none;z-index:9999;}}"
-            f"#tip{_uid}:hover>span{{visibility:visible;opacity:1;}}"
-            f"</style>"
-            f"<span>"
-            f"{label_text}&nbsp;"
-            f'<span id="tip{_uid}">ⓘ<span>{_esc}</span></span>'
-            f"</span>"
-        )
-
-    def _with_tip(label_text, tip_text, widget):
-        return mo.hstack([_tip_label(label_text, tip_text), widget], justify="start", align="center")
-
     _IMMUNITY_TIP = (
         "Divides the rate or force of infection by a population-level immunity factor:\n\n"
         "  immunity_force =\n"
@@ -1973,11 +2117,11 @@ def _transition_show(
     )
 
     def _immunity_checkbox(checkbox):
-        return mo.hstack([checkbox, _tip_label("", _IMMUNITY_TIP)], justify="start", align="center")
+        return mo.hstack([checkbox, tip_label("", _IMMUNITY_TIP)], justify="start", align="center")
 
 
     _n = int(n_transitions.value)
-    _rows = []
+    _acc = {}
     for _i in range(_n):
         _template = t_template.value[_i]
 
@@ -1985,7 +2129,7 @@ def _transition_show(
             _rate_ui = t_param[_i]
         elif _template == "param_product":
             _rate_ui = mo.vstack([
-                _with_tip(
+                with_tip(
                     "Factors",
                     "Comma-separated parameter names multiplied together to form the rate.\n\n"
                     "Example: base_rate, hosp_prop\n"
@@ -1993,7 +2137,7 @@ def _transition_show(
                     "Each name gets a slider in Step 3.",
                     t_factors[_i],
                 ),
-                _with_tip(
+                with_tip(
                     "Complement factors",
                     "Parameters applied as (1 − param) factors in the product.\n"
                     "Useful for modelling the fraction that does NOT take a given path.\n\n"
@@ -2015,7 +2159,7 @@ def _transition_show(
             _foi_items = [
                 t_beta[_i],
                 t_rel_sus[_i],
-                _with_tip(
+                with_tip(
                     "Infectious compartments",
                     "Comma-separated names of compartments that contribute to\n"
                     "this force of infection.\n\n"
@@ -2035,7 +2179,7 @@ def _transition_show(
             _rate_ui = mo.vstack(_foi_items)
         elif _template == "scheduled_exact":
             _rate_ui = mo.vstack([
-                _with_tip(
+                with_tip(
                     "Schedule name",
                     "Name of the schedule providing the exact daily count of\n"
                     "individuals to move from origin to destination (e.g. a\n"
@@ -2052,7 +2196,7 @@ def _transition_show(
             _foit_items = [
                 t_beta[_i],
                 t_rel_sus[_i],
-                _with_tip(
+                with_tip(
                     "Infectious compartments",
                     "Comma-separated names of compartments that contribute to\n"
                     "this force of infection.\n\n"
@@ -2069,7 +2213,7 @@ def _transition_show(
             _foit_items.append(_immunity_checkbox(t_use_foi_immunity[_i]))
             if t_use_foi_immunity.value[_i]:
                 _foit_items.extend([t_inf_reduce[_i], t_vax_reduce[_i]])
-            _foit_items.append(_with_tip(
+            _foit_items.append(with_tip(
                 "Immobile compartments",
                 "Comma-separated compartment names whose members do NOT travel\n"
                 "between subpopulations (no cross-subpop mixing).\n\n"
@@ -2078,12 +2222,18 @@ def _transition_show(
             ))
             _rate_ui = mo.vstack(_foit_items)
 
-        _rows.append(mo.vstack([
-            mo.md(f"**Transition {_i + 1}**"),
+        _o = str(t_origin.value[_i]).strip() or "?"
+        _d = str(t_dest.value[_i]).strip() or "?"
+        _nm = str(t_name.value[_i]).strip()
+        _label = f"{_i + 1}. {_o} → {_d}  ·  {_template}"
+        if _nm:
+            _label += f"  ({_nm})"
+        _label = f'<span style="font-size: 0.85em;">{_label}</span>'
+        _acc[_label] = mo.vstack([
             mo.vstack([
                 mo.hstack([t_origin[_i], t_dest[_i]], justify="start"),
                 t_name[_i],
-                _with_tip(
+                with_tip(
                     "Rate template",
                     "Determines how the transition rate is computed each timestep.\n\n"
                     "constant_param — single fixed rate parameter\n"
@@ -2103,14 +2253,16 @@ def _transition_show(
                 ),
             ]),
             _rate_ui,
-            mo.md("---"),
-        ]))
+        ])
 
-    mo.vstack([
-        mo.md("### Step 2 — Transitions"),
-        n_transitions,
-        *_rows,
-    ])
+    section_card(
+        step_header(2, "Transitions",
+                    "Define each flow between compartments and how its rate is computed. "
+                    "Click a transition to expand it.",
+                    accent=_ACC),
+        mo.vstack([n_transitions, mo.accordion(_acc, multiple=True)]),
+        accent=_ACC,
+    )
     return
 
 
@@ -2309,32 +2461,11 @@ def _params_show(
     param_names, param_vary_toggles, param_scalar_inputs, param_grid_inputs,
     infectious_compartment_names, rel_inf_param_names,
     mo, main_tab,
+    tip_label, step_header, section_card, CLT_ACCENT,
 ):
     mo.stop(main_tab.value != "Model Builder", None)
     import html as _html
-    import random as _random
-
-    def _tip_label(label_text, tip_text):
-        """Render a field label with an inline ⓘ hover tooltip using CSS only."""
-        _uid = _random.randint(10**7, 10**8 - 1)
-        _esc = _html.escape(tip_text)
-        return mo.Html(
-            f"<style>"
-            f"#tip{_uid}{{position:relative;display:inline-block;"
-            f"cursor:help;color:#888;font-size:0.8em;vertical-align:middle;}}"
-            f"#tip{_uid}>span{{visibility:hidden;opacity:0;"
-            f"transition:opacity .15s;transition-delay:.2s;"
-            f"position:absolute;bottom:120%;left:0;"
-            f"background:#222;color:#fff;border-radius:4px;"
-            f"padding:6px 10px;width:280px;font-size:12px;line-height:1.5;"
-            f"white-space:pre-wrap;pointer-events:none;z-index:9999;}}"
-            f"#tip{_uid}:hover>span{{visibility:visible;opacity:1;}}"
-            f"</style>"
-            f"<span>"
-            f"{label_text}&nbsp;"
-            f'<span id="tip{_uid}">ⓘ<span>{_esc}</span></span>'
-            f"</span>"
-        )
+    _ACC = CLT_ACCENT["builder"]
 
     _rel_inf_tip = (
         "Relative infectiousness of this compartment vs. baseline (1.0).\n\n"
@@ -2353,21 +2484,30 @@ def _params_show(
 
     _regular_names = [_n for _n in param_names if _n not in rel_inf_param_names]
 
-    _parts = [mo.md("### Step 3 — Parameters")]
+    _parts = []
     if not param_names:
         _parts.append(mo.callout(mo.md("No transition parameters found yet."), kind="warn"))
     for _name in _regular_names:
         _parts.append(_param_row(_name, mo.md(f"**`{_name}`**")))
 
     if rel_inf_param_names:
-        _parts.append(mo.md("#### **Relative infectiousness**"))
+        _rel_rows = []
         for _comp, _name in zip(infectious_compartment_names, rel_inf_param_names):
-            _parts.append(_param_row(
+            _rel_rows.append(_param_row(
                 _name,
-                _tip_label(f"<b><code>{_html.escape(_comp)}</code></b>", _rel_inf_tip),
+                tip_label(f"<b><code>{_html.escape(_comp)}</code></b>", _rel_inf_tip),
             ))
+        _parts.append(mo.accordion(
+            {"Relative infectiousness (per infectious compartment)": mo.vstack(_rel_rows)},
+        ))
 
-    mo.vstack(_parts)
+    section_card(
+        step_header(3, "Parameters",
+                    "Rates from your transitions. Toggle a parameter to vary it by age / risk group.",
+                    accent=_ACC),
+        mo.vstack(_parts),
+        accent=_ACC,
+    )
     return
 
 
@@ -2448,6 +2588,12 @@ def _schedule_and_immunity_ui(
         value=int(loaded_config.get("params", {}).get("vax_transfer_delay_days", 0)),
         label="vax_transfer_delay_days",
     )
+    vaccinated_compartment_reset_date_input = mo.ui.text(
+        value=str(loaded_config.get("params", {}).get(
+            "vaccinated_compartment_reset_date_mm_dd", "")),
+        placeholder="07_30",
+        label="vaccinated_compartment_reset_date_mm_dd (MM_DD, blank to use all history)",
+    )
     return (
         include_inf_immunity,
         include_vax_immunity,
@@ -2463,6 +2609,7 @@ def _schedule_and_immunity_ui(
         get_subpop_vax_values,
         set_subpop_vax_values,
         vax_transfer_delay_input,
+        vaccinated_compartment_reset_date_input,
     )
 
 
@@ -2623,7 +2770,7 @@ def _schedule_csv_ui(
 
 @app.cell
 def _schedule_csv_show(
-    mo,
+    mo, main_tab,
     num_age_groups, num_risk_groups,
     uses_absolute_humidity, uses_contact_matrix, uses_mobility, include_vax_immunity,
     uses_scheduled_transfer,
@@ -2644,51 +2791,18 @@ def _schedule_csv_show(
     loaded_config, is_array_param,
     is_metapop, pop_subpop_names,
     age_groups, param_grid_columns, array_to_grid_rows, grid_to_AR_array,
+    tip_label, wtip,
+    step_header, section_card, CLT_ACCENT,
 ):
-    import html as _html
-    import random as _random
-
-    def _tip_label(label_text, tip_text):
-        """Render a field label with an inline ⓘ hover tooltip using CSS only."""
-        _uid = _random.randint(10**7, 10**8 - 1)
-        _esc = _html.escape(tip_text)
-        return mo.Html(
-            f"<style>"
-            f"#tip{_uid}{{position:relative;display:inline-block;"
-            f"cursor:help;color:#888;font-size:0.8em;vertical-align:middle;}}"
-            f"#tip{_uid}>span{{visibility:hidden;opacity:0;"
-            f"transition:opacity .15s;transition-delay:.2s;"
-            f"position:absolute;bottom:120%;left:0;"
-            f"background:#222;color:#fff;border-radius:4px;"
-            f"padding:6px 10px;width:300px;font-size:12px;line-height:1.5;"
-            f"white-space:pre-wrap;pointer-events:none;z-index:9999;}}"
-            f"#tip{_uid}:hover>span{{visibility:visible;opacity:1;}}"
-            f"</style>"
-            f"<span>"
-            f"{label_text}&nbsp;"
-            f'<span id="tip{_uid}">ⓘ<span>{_esc}</span></span>'
-            f"</span>"
-        )
-
-    def _wtip(widget, tip_text):
-        # Wrap the widget in a fit-content div so the tooltip sits right next
-        # to it — without this, radio/checkbox widgets stretch to fill the
-        # hstack item and push the tooltip far to the right.
-        return mo.Html(
-            f'<div style="display:inline-flex;align-items:center;gap:4px;">'
-            f'<div style="width:fit-content;">{widget}</div>'
-            f'{_tip_label("", tip_text)}'
-            f'</div>'
-        )
-
+    _ACC = CLT_ACCENT["builder"]
     _multi = (num_age_groups > 1) or (num_risk_groups > 1)
-    _parts = [mo.md("#### **Schedule File Inputs**")]
+    _parts = []
     _parts.append(input_folder)
 
     # Absolute humidity — CSV-only (no constant option)
     _ah_df = None
     if uses_absolute_humidity:
-        _parts.append(_wtip(ah_path, "CSV columns: date, absolute_humidity"))
+        _parts.append(wtip(ah_path, "CSV columns: date, absolute_humidity"))
         if ah_path.value.strip():
             _ah_df, _ah_err = load_csv_validated(
                 resolve_input_path(input_folder.value, ah_path.value),
@@ -2710,7 +2824,7 @@ def _schedule_csv_show(
     # School/work calendar
     _cal_df = None
     if uses_contact_matrix:
-        _parts.append(_tip_label(
+        _parts.append(tip_label(
             "School/work calendar source",
             "constant: no calendar is used — the model always applies the full "
             "total contact matrix (school/work reductions are never applied).\n\n"
@@ -2724,7 +2838,7 @@ def _schedule_csv_show(
                 wrap=True,
             ))
         if cal_mode.value == "csv":
-            _parts.append(_wtip(
+            _parts.append(wtip(
                 cal_path,
                 "CSV columns: date, is_school_day, is_work_day "
                 "(floats in [0, 1], fractional days allowed)",
@@ -2744,7 +2858,7 @@ def _schedule_csv_show(
     # Mobility
     _mob_df = None
     if uses_mobility:
-        _parts.append(_tip_label(
+        _parts.append(tip_label(
             "Mobility source",
             "constant: the fixed Mobility modifier value entered here is "
             "applied every day.\n\n"
@@ -2754,7 +2868,7 @@ def _schedule_csv_show(
         if mob_mode.value == "constant":
             _parts.append(mobility_input)
         if mob_mode.value == "csv":
-            _parts.append(_wtip(
+            _parts.append(wtip(
                 mob_path,
                 "CSV with a day_of_week or date column, plus a mobility_modifier "
                 "column holding a JSON A×R array per row, e.g.\n"
@@ -2790,7 +2904,7 @@ def _schedule_csv_show(
     # Vaccines
     _vax_df = None
     if include_vax_immunity.value or uses_scheduled_transfer:
-        _parts.append(_tip_label(
+        _parts.append(tip_label(
             "Vaccines source",
             "constant: the value(s) entered here are applied every day.\n\n"
             "csv: vary doses by date (and by age/risk group).",
@@ -2804,7 +2918,7 @@ def _schedule_csv_show(
                 "Off: one value broadcasts to every age/risk group.\n"
                 "Vary by age/risk group: enter a separate proportion per cell."
             )
-            _parts.append(_tip_label("Daily vaccines", _vax_const_tip))
+            _parts.append(tip_label("Daily vaccines", _vax_const_tip))
             if is_metapop and len(pop_subpop_names) > 1:
                 _parts.append(daily_vaccines_per_subpop_toggle)
             if is_metapop and len(pop_subpop_names) > 1 and daily_vaccines_per_subpop_toggle.value:
@@ -2853,7 +2967,7 @@ def _schedule_csv_show(
                 else:
                     _parts.append(daily_vaccines_input)
         if vax_mode.value == "csv":
-            _parts.append(_wtip(
+            _parts.append(wtip(
                 vax_path,
                 "CSV columns: date, daily_vaccines — each value is the "
                 "proportion of that age×risk group vaccinated on that day "
@@ -2913,7 +3027,7 @@ def _schedule_csv_show(
             _no_csv_inline = []
             _no_csv_unset = []
 
-            _parts.append(_wtip(total_contact_csv_path, _contact_csv_tip))
+            _parts.append(wtip(total_contact_csv_path, _contact_csv_tip))
             if total_contact_csv_path.value.strip():
                 _total_contact_mat, _tc_err = load_contact_matrix_csv(
                     resolve_input_path(input_folder.value, total_contact_csv_path.value),
@@ -2931,7 +3045,7 @@ def _schedule_csv_show(
             else:
                 _no_csv_unset.append("total")
 
-            _parts.append(_wtip(school_contact_csv_path, _contact_csv_tip))
+            _parts.append(wtip(school_contact_csv_path, _contact_csv_tip))
             if school_contact_csv_path.value.strip():
                 _school_contact_mat, _sc_err = load_contact_matrix_csv(
                     resolve_input_path(input_folder.value, school_contact_csv_path.value),
@@ -2949,7 +3063,7 @@ def _schedule_csv_show(
             else:
                 _no_csv_unset.append("school")
 
-            _parts.append(_wtip(work_contact_csv_path, _contact_csv_tip))
+            _parts.append(wtip(work_contact_csv_path, _contact_csv_tip))
             if work_contact_csv_path.value.strip():
                 _work_contact_mat, _wc_err = load_contact_matrix_csv(
                     resolve_input_path(input_folder.value, work_contact_csv_path.value),
@@ -2987,7 +3101,15 @@ def _schedule_csv_show(
                     kind="warn",
                 ))
 
-    mo.output.append(mo.vstack(_parts))
+    if main_tab.value == "Model Builder":
+        mo.output.append(section_card(
+            step_header(4, "Schedules",
+                        "Time-varying inputs: humidity, school/work calendar, "
+                        "mobility, vaccines, and contact matrices.",
+                        accent=_ACC),
+            mo.vstack(_parts),
+            accent=_ACC,
+        ))
 
     loaded_schedule_dfs = SimpleNamespace(
         absolute_humidity_df=_ah_df,
@@ -3008,6 +3130,7 @@ def _schedule_and_immunity_show(
     include_inf_immunity,
     include_vax_immunity,
     vax_transfer_delay_input,
+    vaccinated_compartment_reset_date_input,
     r_to_s_picker,
     inf_sat_input,
     vax_sat_input,
@@ -3022,47 +3145,15 @@ def _schedule_and_immunity_show(
     uses_mobility,
     requires_immunity_metrics,
     uses_scheduled_transfer,
+    tip_label, wtip,
+    step_header, section_card, CLT_ACCENT,
 ):
     mo.stop(main_tab.value != "Model Builder", None)
-    import html as _html
-    import random as _random
-
-    def _tip_label(label_text, tip_text):
-        _uid = _random.randint(10**7, 10**8 - 1)
-        _esc = _html.escape(tip_text)
-        return mo.Html(
-            f"<style>"
-            f"#tip{_uid}{{position:relative;display:inline-block;"
-            f"cursor:help;color:#888;font-size:0.8em;vertical-align:middle;}}"
-            f"#tip{_uid}>span{{visibility:hidden;opacity:0;"
-            f"transition:opacity .15s;transition-delay:.2s;"
-            f"position:absolute;bottom:120%;left:0;"
-            f"background:#222;color:#fff;border-radius:4px;"
-            f"padding:6px 10px;width:300px;font-size:12px;line-height:1.5;"
-            f"white-space:pre-wrap;pointer-events:none;z-index:9999;}}"
-            f"#tip{_uid}:hover>span{{visibility:visible;opacity:1;}}"
-            f"</style>"
-            f"<span>"
-            f"{label_text}&nbsp;"
-            f'<span id="tip{_uid}">ⓘ<span>{_esc}</span></span>'
-            f"</span>"
-        )
-
-    def _wtip(widget, tip_text):
-        # Wrap the widget in a fit-content div so the tooltip sits right next
-        # to it — without this, radio/checkbox widgets stretch to fill the
-        # hstack item and push the tooltip far to the right.
-        return mo.Html(
-            f'<div style="display:inline-flex;align-items:center;gap:4px;">'
-            f'<div style="width:fit-content;">{widget}</div>'
-            f'{_tip_label("", tip_text)}'
-            f'</div>'
-        )
+    _ACC = CLT_ACCENT["builder"]
 
     _parts = [
-        mo.md("### Step 4 — Schedules and Immunity"),
         mo.hstack([
-            _wtip(
+            wtip(
                 include_inf_immunity,
                 "Track population-level infection-induced immunity (M).\n\n"
                 "For instance, if driven by (R→S) transitions:\n\n"
@@ -3071,7 +3162,7 @@ def _schedule_and_immunity_show(
                 "the susceptible pool (R→S), and decays via waning.\n\n"
                 "Must be enabled for inf_reduce_param (Step 2) to have effect.",
             ),
-            _wtip(
+            wtip(
                 include_vax_immunity,
                 "Track population-level vaccine-induced immunity (MV).\n\n"
                 "MV grows with daily vaccine doses and decays via waning:\n\n"
@@ -3089,13 +3180,27 @@ def _schedule_and_immunity_show(
     # rather than here, so the input sits next to the control that reveals it.
 
     if uses_scheduled_transfer:
-        _parts.append(_wtip(
-            vax_transfer_delay_input,
-            "Days between the scheduled date (e.g. vaccination date) and the\n"
-            "date individuals actually move from origin to destination in a\n"
-            "'scheduled_exact' transition.\n\n"
-            "0 = transfer happens on the scheduled date itself.",
-        ))
+        _parts.append(mo.hstack([
+            wtip(
+                vax_transfer_delay_input,
+                "Days between the scheduled date (e.g. vaccination date) and the\n"
+                "date individuals actually move from origin to destination in a\n"
+                "'scheduled_exact' transition.\n\n"
+                "0 = transfer happens on the scheduled date itself.",
+            ),
+            wtip(
+                vaccinated_compartment_reset_date_input,
+                "If the schedule's CSV history starts before the simulation\n"
+                "start date (e.g. a vaccine CSV starting months earlier than a\n"
+                "fitted start date), doses between this reset date and the\n"
+                "start date are replayed into the destination compartment's\n"
+                "initial value (and out of the origin's), so pre-simulation\n"
+                "vaccination history isn't lost.\n\n"
+                "Blank = use all available history before the start date.\n"
+                "Set to a date after last year's vaccination season (e.g.\n"
+                "07_30) to exclude vaccinations from a previous year.",
+            ),
+        ], wrap=True))
 
     if requires_immunity_metrics:
         _parts.append(mo.callout(
@@ -3111,7 +3216,7 @@ def _schedule_and_immunity_show(
         _metric_inputs = []
         if include_inf_immunity.value:
             _metric_inputs.extend([
-                _wtip(
+                wtip(
                     r_to_s_picker,
                     "The transition that drives immunity gain.\n\n"
                     "M increases as people move from R back to S — recently-\n"
@@ -3119,21 +3224,21 @@ def _schedule_and_immunity_show(
                     "still carry partial immunity.\n\n"
                     "Select the transition that represents this R→S flow.",
                 ),
-                _wtip(
+                wtip(
                     inf_sat_input,
                     "Limits how much M can grow as immunity accumulates.\n\n"
                     "ΔM = (R→S / N) × (1 − inf_sat×M − vax_sat×MV) − wane×M\n\n"
                     "Higher values → M saturates at a lower level.\n"
                     "0 = no saturation limit.",
                 ),
-                _wtip(
+                wtip(
                     vax_sat_input,
                     "How much vaccine immunity (MV) dampens further gain in M.\n\n"
                     "ΔM = (R→S / N) × (1 − inf_sat×M − vax_sat×MV) − wane×M\n\n"
                     "Higher values → MV reduces M accumulation more.\n"
                     "0 = vaccine and infection immunity are independent.",
                 ),
-                _wtip(
+                wtip(
                     inf_wane_input,
                     "Daily decay rate of infection-induced immunity M.\n\n"
                     "ΔM = (R→S / N) × (...) − wane×M\n\n"
@@ -3153,7 +3258,7 @@ def _schedule_and_immunity_show(
                 ))
             else:
                 _metric_inputs.append(
-                    _wtip(
+                    wtip(
                         vax_wane_input,
                         "Daily decay rate of vaccine-induced immunity MV.\n\n"
                         "ΔMV = daily_vaccines − wane×MV\n\n"
@@ -3166,7 +3271,14 @@ def _schedule_and_immunity_show(
     else:
         _parts.append(mo.md("*Dynamic immunity metrics disabled.*"))
 
-    mo.vstack(_parts)
+    section_card(
+        step_header(4, "Immunity",
+                    "Cumulative infection- and vaccine-induced immunity metrics "
+                    "(M / MV) and their waning.",
+                    accent=_ACC),
+        mo.vstack(_parts),
+        accent=_ACC,
+    )
     return
 
 
@@ -3179,8 +3291,10 @@ def _schedule_and_immunity_show(
 def _diagram(
     compartments, n_transitions, t_name, t_origin, t_dest, t_template, t_infectious,
     parse_csv_list, mo, plt, main_tab,
+    step_header, section_card, CLT_ACCENT,
 ):
     mo.stop(main_tab.value != "Model Builder", None)
+    _ACC = CLT_ACCENT["builder"]
     _n = int(n_transitions.value)
     _inner = None
     _graphviz_error = None
@@ -3289,7 +3403,13 @@ def _diagram(
         _fallback_parts.append(_fig)
         _inner = mo.vstack(_fallback_parts)
 
-    mo.vstack([mo.md("### Step 5 — Model Diagram"), _inner])
+    section_card(
+        step_header(5, "Model Diagram",
+                    "Auto-generated compartment-flow diagram from your transitions.",
+                    accent=_ACC),
+        _inner,
+        accent=_ACC,
+    )
     return
 
 
@@ -3322,8 +3442,10 @@ def _init_show(
     num_age_groups, num_risk_groups, age_groups,
     param_grid_columns, grid_to_AR_array, default_seed_row_data,
     is_metapop, mo, main_tab, np, pd, loaded_config,
+    step_header, section_card, CLT_ACCENT,
 ):
     mo.stop(main_tab.value != "Model Builder", None)
+    _ACC = CLT_ACCENT["builder"]
     _A = int(num_age_groups)
     _R = int(num_risk_groups)
     _seed_comps = compartments[1:] if len(compartments) > 1 else []
@@ -3331,7 +3453,6 @@ def _init_show(
     _saved_ic = loaded_config.get("initial_conditions", {}) or {}
 
     _parts = [
-        mo.md("### Step 6 — Initial Conditions"),
         mo.md(
             "Seed each compartment by **age** and **risk** group (absolute counts). "
             "The first compartment (`"
@@ -3400,7 +3521,14 @@ def _init_show(
             kind="danger",
         ))
 
-    mo.vstack(_parts)
+    section_card(
+        step_header(6, "Initial Conditions",
+                    "Seed the compartments by age / risk group; the first "
+                    "compartment absorbs the remaining population.",
+                    accent=_ACC),
+        mo.vstack(_parts),
+        accent=_ACC,
+    )
     return
 
 
@@ -3435,28 +3563,39 @@ def _sim_settings_ui(mo, loaded_config):
 
 
 @app.cell
-def _sim_settings_show(mo, sim_days, sim_mode, n_reps, rng_seed, timesteps, start_date_input, transition_vars_input, main_tab):
+def _sim_settings_show(
+    mo, sim_days, sim_mode, n_reps, rng_seed, timesteps, start_date_input,
+    transition_vars_input, main_tab,
+    step_header, section_card, CLT_ACCENT,
+):
     mo.stop(main_tab.value != "Model Builder", None)
-    mo.vstack([
-        mo.md("### Step 7 — Simulation Settings"),
-        mo.hstack([sim_days, sim_mode, timesteps, rng_seed], justify="start"),
-        mo.hstack([
-            n_reps,
-            mo.md("*Ignored in deterministic mode.*") if sim_mode.value == "Deterministic" else mo.md(""),
+    _ACC = CLT_ACCENT["builder"]
+    section_card(
+        step_header(7, "Simulation Settings",
+                    "Horizon, deterministic vs. stochastic mode, RNG seed, and "
+                    "which transition variables to record.",
+                    accent=_ACC),
+        mo.vstack([
+            mo.hstack([sim_days, sim_mode, timesteps, rng_seed], justify="start"),
+            mo.hstack([
+                n_reps,
+                mo.md("*Ignored in deterministic mode.*") if sim_mode.value == "Deterministic" else mo.md(""),
+            ]),
+            start_date_input,
+            transition_vars_input,
+            mo.callout(
+                mo.md(
+                    "Leaving **Transition variables to save** blank saves *every* "
+                    "transition variable each day. For large models or many "
+                    "replicates this can use a lot of memory and produce large "
+                    "output files — list only the transitions you need (e.g. "
+                    "`S_to_E, ISH_to_HR`)."
+                ),
+                kind="info",
+            ) if not transition_vars_input.value.strip() else mo.md(""),
         ]),
-        start_date_input,
-        transition_vars_input,
-        mo.callout(
-            mo.md(
-                "Leaving **Transition variables to save** blank saves *every* "
-                "transition variable each day. For large models or many "
-                "replicates this can use a lot of memory and produce large "
-                "output files — list only the transitions you need (e.g. "
-                "`S_to_E, ISH_to_HR`)."
-            ),
-            kind="info",
-        ) if not transition_vars_input.value.strip() else mo.md(""),
-    ])
+        accent=_ACC,
+    )
     return
 
 
@@ -3481,6 +3620,7 @@ def _build_config(
     vax_wane_input, vax_wane_is_array, vax_wane_loaded_val,
     vax_delay_input, vax_reset_date_input,
     vax_transfer_delay_input,
+    vaccinated_compartment_reset_date_input,
     uses_absolute_humidity, uses_contact_matrix, uses_mobility, requires_immunity_metrics,
     uses_scheduled_transfer,
     rel_inf_param_name,
@@ -3586,7 +3726,14 @@ def _build_config(
                 if _vax_r:
                     _rate_config["vax_reduce_param"] = _vax_r
         elif _template == "scheduled_exact":
-            _rate_config = {"schedule": t_schedule_name.value[_i].strip()}
+            _rate_config = {
+                "schedule": t_schedule_name.value[_i].strip(),
+                "compartment_reset_date_mm_dd_param": "vaccinated_compartment_reset_date_mm_dd",
+            }
+            if vaccinated_compartment_reset_date_input.value.strip():
+                params_dict["vaccinated_compartment_reset_date_mm_dd"] = (
+                    vaccinated_compartment_reset_date_input.value.strip()
+                )
         else:
             _travel_config = {
                 "infectious_compartments": _infectious_compartments_map(_i),
@@ -3760,6 +3907,8 @@ def _build_config(
             "update_config": {
                 "daily_vaccines_schedule": "daily_vaccines",
                 "vax_induced_immune_wane_param": "vax_induced_immune_wane",
+                "vax_protection_delay_days_param": "vax_protection_delay_days",
+                "vax_immunity_reset_date_mm_dd_param": "vax_immunity_reset_date_mm_dd",
             },
         })
 
@@ -3892,8 +4041,12 @@ def _build_config(
 
 
 @app.cell
-def _config_preview(config_dict, config_warnings, json, mo, main_tab):
+def _config_preview(
+    config_dict, config_warnings, json, mo, main_tab,
+    step_header, section_card, CLT_ACCENT,
+):
     mo.stop(main_tab.value != "Model Builder", None)
+    _ACC = CLT_ACCENT["builder"]
     json_str = json.dumps(config_dict, indent=2)
     _warn_block = []
     if config_warnings:
@@ -3904,21 +4057,26 @@ def _config_preview(config_dict, config_warnings, json, mo, main_tab):
             ),
             kind="warn",
         ))
-    mo.vstack([
-        mo.md("### Step 8 — Config Preview"),
-        *_warn_block,
-        mo.accordion({
-            "View / download config JSON": mo.vstack([
-                mo.md(f"```json\n{json_str}\n```"),
-                mo.download(
-                    data=json_str.encode(),
-                    filename="model_config.json",
-                    mimetype="application/json",
-                    label="Download config JSON",
-                ),
-            ])
-        }),
-    ])
+    section_card(
+        step_header(8, "Config Preview",
+                    "The assembled model config JSON — review or download it.",
+                    accent=_ACC),
+        mo.vstack([
+            *_warn_block,
+            mo.accordion({
+                "View / download config JSON": mo.vstack([
+                    mo.md(f"```json\n{json_str}\n```"),
+                    mo.download(
+                        data=json_str.encode(),
+                        filename="model_config.json",
+                        mimetype="application/json",
+                        label="Download config JSON",
+                    ),
+                ])
+            }),
+        ]),
+        accent=_ACC,
+    )
     return
 
 
@@ -3934,9 +4092,18 @@ def _run_button(mo):
 
 
 @app.cell
-def _run_section_display(run_button, mo, main_tab):
+def _run_section_display(
+    run_button, mo, main_tab,
+    step_header, section_card, CLT_ACCENT,
+):
     mo.stop(main_tab.value != "Model Builder", None)
-    mo.vstack([mo.md("### Step 9 — Run"), run_button])
+    _ACC = CLT_ACCENT["builder"]
+    section_card(
+        step_header(9, "Run",
+                    "Run the model and view trajectories below.", accent=_ACC),
+        run_button,
+        accent=_ACC,
+    )
     return
 
 
@@ -4796,35 +4963,20 @@ def _fitting_display(
     fit_method, fit_lr, fit_n_iter, fit_r2_thresh, fit_n_replications, fit_run_button,
     mo, main_tab,
     num_age_groups, num_risk_groups, is_metapop,
+    tip_label, wtip,
+    step_header, section_card, CLT_ACCENT,
 ):
     mo.stop(main_tab.value != "Fitting", None)
+    _ACC = CLT_ACCENT["fitting"]
     _n = get_n_targets()
     _selected_params = list(fit_params_multiselect.value)
     _any_non_ts = any(fit_target_mode.value[_k] in ("scalar", "proportion") for _k in range(_n))
     _any_ts = any(fit_target_mode.value[_k] == "ts" for _k in range(_n))
 
-    # ── tooltip helpers ───────────────────────────────────────────────────────
-    import html as _html
-    import random as _random
-
-    def _tip_label(tip_text, width=520):
-        _uid = _random.randint(10**7, 10**8 - 1)
-        _body = tip_text.replace("\n", "<br>")
-        return mo.Html(
-            f"<style>#tip{_uid}{{position:relative;display:inline-block;"
-            f"cursor:help;color:#888;font-size:0.8em;vertical-align:middle;}}"
-            f"#tip{_uid}>span{{visibility:hidden;opacity:0;"
-            f"transition:opacity .15s;transition-delay:.2s;"
-            f"position:absolute;bottom:120%;left:0;"
-            f"background:#222;color:#fff;border-radius:4px;"
-            f"padding:6px 10px;width:{width}px;font-size:12px;line-height:1.6;"
-            f"white-space:normal;pointer-events:none;z-index:9999;}}"
-            f"#tip{_uid}:hover>span{{visibility:visible;opacity:1;}}</style>"
-            f'<span id="tip{_uid}">ⓘ<span>{_body}</span></span>'
-        )
-
-    def _wtip(widget, tip_text):
-        return mo.hstack([widget, _tip_label(tip_text)], justify="start", align="center")
+    # Fitting tooltips carry rich HTML (the shared helpers escape plain text by
+    # default, so pass html_tip=True here).
+    def _tip(tip_text):
+        return tip_label("", tip_text, html_tip=True)
 
     _PROPORTION_TIP = (
         "<b>Proportions mode</b><br><br>"
@@ -4844,7 +4996,7 @@ def _fitting_display(
     )
 
     # ── target cards ──────────────────────────────────────────────────────────
-    _target_cards = []
+    _target_acc = {}
     for _k in range(_n):
         _src = fit_target_src.value[_k]
         _mode = fit_target_mode.value[_k]
@@ -4901,7 +5053,7 @@ def _fitting_display(
         _prop_tip_row = mo.md("")
         if _mode == "proportion":
             _prop_tip_row = mo.hstack(
-                [mo.md("*Proportions quick reference*"), _tip_label(_PROPORTION_TIP)],
+                [mo.md("*Proportions quick reference*"), _tip(_PROPORTION_TIP)],
                 justify="start", align="center",
             )
 
@@ -4914,8 +5066,9 @@ def _fitting_display(
             _slice_items.append(fit_target_risk[_k])
         _slice_ui = mo.hstack(_slice_items, justify="start") if _slice_items else mo.md("")
 
-        _target_cards.append(mo.vstack([
-            mo.md(f"#### Target {_k + 1}"),
+        _tvar = str(fit_target_vars.value[_k]).strip()
+        _tlabel = f"Target {_k + 1}  ·  {_mode}" + (f"  ·  {_tvar}" if _tvar else "")
+        _target_acc[_tlabel] = mo.vstack([
             fit_target_src[_k],
             _data_input,
             _fname_note,
@@ -4925,8 +5078,7 @@ def _fitting_display(
             fit_target_vars[_k],
             mo.hstack([fit_target_weight[_k]], justify="start"),
             _slice_ui,
-            mo.md("---"),
-        ]))
+        ])
 
     # ── parameter bounds ──────────────────────────────────────────────────────
     if _selected_params:
@@ -4986,12 +5138,12 @@ def _fitting_display(
     )
 
     _method_val = fit_method.value
-    _hyper = [_wtip(fit_n_iter, _ITER_TIP)]
+    _hyper = [wtip(fit_n_iter, _ITER_TIP, html_tip=True)]
     if _method_val != "ar":
-        _hyper = [_wtip(fit_lr, _LR_TIP)] + _hyper
-        _hyper.append(_wtip(fit_n_replications, _REP_TIP))
+        _hyper = [wtip(fit_lr, _LR_TIP, html_tip=True)] + _hyper
+        _hyper.append(wtip(fit_n_replications, _REP_TIP, html_tip=True))
     if _method_val == "ar":
-        _hyper.append(_wtip(fit_r2_thresh, _R2_TIP))
+        _hyper.append(wtip(fit_r2_thresh, _R2_TIP, html_tip=True))
 
     _sim_days_widget = mo.md("")
     if _any_non_ts and not _any_ts:
@@ -5025,22 +5177,54 @@ def _fitting_display(
     ]) if True else mo.md("")
 
     mo.vstack([
-        mo.md("## Fitting"),
-        mo.md("### Fit Targets"),
-        *_target_cards,
-        mo.hstack([add_target_btn, del_target_btn], justify="start"),
-        _sim_days_widget,
-        mo.md("### Parameters to Fit"),
-        fit_params_multiselect,
-        _seed_scale_note,
-        _bounds_section,
-        mo.md("### Epidemic Start Date"),
-        _start_offset_section,
-        mo.md("### Method and Hyperparameters"),
-        fit_method,
-        mo.hstack(_hyper, justify="start"),
-        mo.md("### Run"),
-        fit_run_button,
+        mo.Html(
+            f'<div style="font-size:1.35rem;font-weight:800;color:{_ACC};">Fitting</div>'
+            '<div style="color:#777;margin:.1rem 0 .2rem;">Calibrate model '
+            "parameters to observed data.</div>"
+        ),
+        section_card(
+            step_header("①", "Fit Targets",
+                        "The data series / totals the model is calibrated against. "
+                        "Click a target to expand it.",
+                        accent=_ACC),
+            mo.vstack([
+                mo.accordion(_target_acc, multiple=True),
+                mo.hstack([add_target_btn, del_target_btn,
+                           mo.md(f"*{_n} of 20 targets*")],
+                          justify="start", align="center"),
+                _sim_days_widget,
+            ]),
+            accent=_ACC,
+        ),
+        section_card(
+            step_header("②", "Parameters to Fit",
+                        "Pick which parameters to estimate and their search bounds.",
+                        accent=_ACC),
+            mo.vstack([
+                fit_params_multiselect,
+                _seed_scale_note,
+                _bounds_section,
+            ]),
+            accent=_ACC,
+        ),
+        section_card(
+            step_header("③", "Epidemic Start Date",
+                        "Optionally fit an offset for when the epidemic seeds.",
+                        accent=_ACC),
+            _start_offset_section,
+            accent=_ACC,
+        ),
+        section_card(
+            step_header("④", "Method & Run",
+                        "Choose the optimiser, set its hyperparameters, then run.",
+                        accent=_ACC),
+            mo.vstack([
+                fit_method,
+                mo.hstack(_hyper, justify="start"),
+                fit_run_button,
+            ]),
+            accent=_ACC,
+        ),
     ])
     return
 
@@ -6450,8 +6634,10 @@ def _forecast_display(
     forecast_use_fitted, forecast_params_path, forecast_from_fitted_state,
     forecast_horizon, forecast_n_reps, forecast_stochastic, forecast_run_button,
     fit_result, mo, main_tab, json, Path,
+    step_header, section_card, CLT_ACCENT,
 ):
     mo.stop(main_tab.value != "Forecast", None)
+    _ACC = CLT_ACCENT["forecast"]
     _path_w = forecast_params_path if not forecast_use_fitted.value else mo.md("")
 
     # Multi-set note — shown when AR or gradient replications produced multiple param sets
@@ -6540,18 +6726,36 @@ def _forecast_display(
             )
 
     mo.vstack([
-        mo.md("## Forecast"),
-        mo.md("**Step 1 — Fitted parameters**"),
-        forecast_use_fitted,
-        _path_w,
-        mo.md("**Step 2 — Settings**"),
-        mo.hstack([forecast_horizon, forecast_n_reps], justify="start"),
-        forecast_stochastic,
-        forecast_from_fitted_state,
-        _ar_note,
-        _fitted_state_note,
-        mo.md("**Step 3 — Run**"),
-        forecast_run_button,
+        mo.Html(
+            f'<div style="font-size:1.35rem;font-weight:800;color:{_ACC};">Forecast</div>'
+            '<div style="color:#777;margin:.1rem 0 .2rem;">Project the model forward '
+            "using fitted parameters.</div>"
+        ),
+        section_card(
+            step_header("①", "Fitted parameters",
+                        "Use the fit from the Fitting tab, or load a saved fit JSON.",
+                        accent=_ACC),
+            mo.vstack([forecast_use_fitted, _path_w]),
+            accent=_ACC,
+        ),
+        section_card(
+            step_header("②", "Settings",
+                        "Forecast horizon, replicates, and stochasticity.",
+                        accent=_ACC),
+            mo.vstack([
+                mo.hstack([forecast_horizon, forecast_n_reps], justify="start"),
+                forecast_stochastic,
+                forecast_from_fitted_state,
+                _ar_note,
+                _fitted_state_note,
+            ]),
+            accent=_ACC,
+        ),
+        section_card(
+            step_header("③", "Run", "Generate the forecast ensemble.", accent=_ACC),
+            forecast_run_button,
+            accent=_ACC,
+        ),
     ])
     return
 
@@ -6872,8 +7076,9 @@ def _forecast_results_display(forecast_result, forecast_chart_style, np, plt, mo
 # ============================================================
 
 @app.cell
-def _export_display(config_dict, fit_result, output_dir, json, mo, main_tab, num_age_groups, num_risk_groups, sim_days, sim_mode, n_reps, timesteps, start_date_input, analysis_scenarios):
+def _export_display(config_dict, fit_result, output_dir, json, mo, main_tab, num_age_groups, num_risk_groups, sim_days, sim_mode, n_reps, timesteps, start_date_input, analysis_scenarios, step_header, section_card, CLT_ACCENT):
     mo.stop(main_tab.value != "Export", None)
+    _ACC = CLT_ACCENT["export"]
     _config_str = json.dumps(config_dict, indent=2)
     _fitted_str = json.dumps(fit_result.best_params if fit_result is not None else {}, indent=2)
 
@@ -7102,14 +7307,44 @@ print(f"Results saved to {_db}")
             kind="info",
         )
 
+    _how_to = mo.callout(
+        mo.md(
+            "**How to run**\n\n"
+            "1. Download `run_simulation.py`, `model_config.json`, and "
+            "`fitted_params.json` below into one folder.\n"
+            "2. (Optional) edit the `SCENARIOS` block and top constants in the script.\n"
+            "3. Run `python run_simulation.py` — results are written to a "
+            "`simulation_output/` folder alongside the script."
+        ),
+        kind="info",
+    )
     mo.vstack([
-        mo.md("## Export"),
-        mo.md("### Generated script  *(edit `SCENARIOS` and top constants before running)*"),
-        _scen_note,
-        mo.accordion({"run_simulation.py": mo.md(f"```python\n{_script}\n```")}),
-        mo.md("### Downloads"),
-        mo.hstack([_config_dl, _script_dl, _fitted_dl], justify="start"),
-        mo.md(f"*Outputs auto-saved to `{output_dir}/`*"),
+        mo.Html(
+            f'<div style="font-size:1.35rem;font-weight:800;color:{_ACC};">Export</div>'
+            '<div style="color:#777;margin:.1rem 0 .2rem;">Generate a standalone '
+            "script to run this model outside the notebook.</div>"
+        ),
+        section_card(
+            step_header("①", "Generated script",
+                        "A runnable run_simulation.py — edit SCENARIOS and the top "
+                        "constants before running.",
+                        accent=_ACC),
+            mo.vstack([
+                _how_to,
+                _scen_note,
+                mo.accordion({"run_simulation.py": mo.md(f"```python\n{_script}\n```")}),
+            ]),
+            accent=_ACC,
+        ),
+        section_card(
+            step_header("②", "Downloads",
+                        "Grab the script and its input files.", accent=_ACC),
+            mo.vstack([
+                mo.hstack([_config_dl, _script_dl, _fitted_dl], justify="start"),
+                mo.md(f"*Outputs auto-saved to `{output_dir}/`*"),
+            ]),
+            accent=_ACC,
+        ),
     ])
     return
 
@@ -7402,8 +7637,10 @@ def _analysis_display(
     analysis_sens_subpop_sel, analysis_sens_subpop_sliders,
     analysis_scalar_subpop_sels, analysis_array_subpop_sels,
     analysis_scalar_subpop_inputs, analysis_array_subpop_scales,
+    step_header, section_card, CLT_ACCENT,
 ):
     mo.stop(main_tab.value != "Analysis", None)
+    _ACC = CLT_ACCENT["analysis"]
     _n_sc = int(analysis_n_scenarios.value)
     _n_values = int(analysis_n_values.value)
     _scalar_names = list(ANALYSIS_SCALAR_PARAMS.keys())
@@ -7529,19 +7766,38 @@ def _analysis_display(
 
     _tab_body = {"Sensitivity": _sens_ui, "Scenario": _scen_ui}
     mo.vstack([
-        mo.md("## Analysis"),
-        analysis_sub_tab,
-        _tab_body.get(analysis_sub_tab.value, mo.md("")),
-        mo.md("---\n**Run settings**"),
-        mo.hstack([analysis_sim_days, analysis_n_reps, analysis_timesteps], justify="start"),
-        mo.hstack([
-            analysis_stochastic,
-            mo.md("*Ignored — using 1 replicate.*") if not analysis_stochastic.value else mo.md(""),
-        ], justify="start"),
-        mo.hstack([analysis_subpop_selector, analysis_age_selector], justify="start"),
-        mo.md("**Compartments / metrics to display:**"),
-        mo.hstack(list(analysis_comp_checkboxes), wrap=True, justify="start"),
-        analysis_run_button,
+        mo.Html(
+            f'<div style="font-size:1.35rem;font-weight:800;color:{_ACC};">Analysis</div>'
+            '<div style="color:#777;margin:.1rem 0 .2rem;">Sweep parameters or compare '
+            "scenarios.</div>"
+        ),
+        section_card(
+            step_header("①", "Design",
+                        "Define a sensitivity sweep or a set of scenarios.",
+                        accent=_ACC),
+            mo.vstack([
+                analysis_sub_tab,
+                _tab_body.get(analysis_sub_tab.value, mo.md("")),
+            ]),
+            accent=_ACC,
+        ),
+        section_card(
+            step_header("②", "Run settings",
+                        "Horizon, replicates, slices, and which compartments to display.",
+                        accent=_ACC),
+            mo.vstack([
+                mo.hstack([analysis_sim_days, analysis_n_reps, analysis_timesteps], justify="start"),
+                mo.hstack([
+                    analysis_stochastic,
+                    mo.md("*Ignored — using 1 replicate.*") if not analysis_stochastic.value else mo.md(""),
+                ], justify="start"),
+                mo.hstack([analysis_subpop_selector, analysis_age_selector], justify="start"),
+                mo.md("**Compartments / metrics to display:**"),
+                mo.hstack(list(analysis_comp_checkboxes), wrap=True, justify="start"),
+                analysis_run_button,
+            ]),
+            accent=_ACC,
+        ),
     ])
     return
 
@@ -7820,7 +8076,7 @@ def _analysis_plot_compartments(
             return _total.sum(axis=(1, 2))
         return _total[:, int(age_sel.split()[-1]), :].sum(axis=1)
 
-    _fig, _axes = plt.subplots(_n_combos, 1, figsize=(11, 4 * _n_combos), squeeze=False)
+    _fig, _axes = plt.subplots(_n_combos, 1, figsize=(11, min(4 * _n_combos, 80)), squeeze=False)
 
     for _c_idx, (_sp, _ag) in enumerate(_combos):
         _ax = _axes[_c_idx, 0]
@@ -8121,7 +8377,7 @@ def _analysis_plot_daily_metrics(
             return _total.sum(axis=(1, 2))
         return _total[:, int(age_sel.split()[-1]), :].sum(axis=1)
 
-    _fig, _axes = plt.subplots(_n_combos, 1, figsize=(11, 4 * _n_combos), squeeze=False)
+    _fig, _axes = plt.subplots(_n_combos, 1, figsize=(11, min(4 * _n_combos, 80)), squeeze=False)
 
     for _c_idx, (_sp, _ag) in enumerate(_combos):
         _ax = _axes[_c_idx, 0]
@@ -8192,7 +8448,7 @@ def _analysis_plot_cumulative_boxplot(
 
     _fig, _axes = plt.subplots(
         _n_combos, _n_met,
-        figsize=(max(5 * _n_met, 6), 5 * _n_combos),
+        figsize=(max(5 * _n_met, 6), min(5 * _n_combos, 80)),
         squeeze=False,
     )
 
@@ -8252,7 +8508,7 @@ def _analysis_plot_age_bars(
         return np.array(_per_age + [float(_total.sum())])
 
     _n_plots = len(_sel_subpops) * len(_sel_metrics)
-    _fig, _axes = plt.subplots(_n_plots, 1, figsize=(10, 5 * _n_plots), squeeze=False)
+    _fig, _axes = plt.subplots(_n_plots, 1, figsize=(10, min(5 * _n_plots, 80)), squeeze=False)
     _ax_idx = 0
 
     for _sp in _sel_subpops:

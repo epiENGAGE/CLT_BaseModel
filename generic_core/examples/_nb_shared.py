@@ -516,3 +516,126 @@ def _helpers(Path, SimpleNamespace, json, np, pd):
         read_initial_conditions,
     )
 
+
+# ---------------------------------------------------------------------------
+# Shared visual style layer
+# ---------------------------------------------------------------------------
+
+
+@app.cell
+def _clt_style_helpers(mo):
+    import html as _html
+    import random as _random
+
+    # Per-tab accent colors — keep section badges/headers visually distinct so
+    # the user always knows which part of the workflow they are in.
+    CLT_ACCENT = {
+        "population": "#2e7d6b",  # teal
+        "builder":    "#3b6ea5",  # blue
+        "fitting":    "#9c5fb5",  # purple
+        "forecast":   "#c2792e",  # amber
+        "export":     "#557a46",  # green
+        "analysis":   "#b5495b",  # rose
+    }
+
+    def tip_label(label_text="", tip_text="", *, html_tip=False, width=None):
+        """Inline ⓘ hover tooltip, optionally preceded by ``label_text``.
+
+        ``html_tip=False`` (default): ``tip_text`` is plain text, HTML-escaped,
+        shown with line breaks preserved (pre-wrap). ``html_tip=True``:
+        ``tip_text`` is treated as raw HTML (use ``<br>`` for breaks).
+
+        The ``<style>`` is emitted inline (scoped to a unique id) rather than
+        relying on a global stylesheet, so the tooltip still hides correctly
+        when it renders inside a shadow-DOM component such as ``mo.accordion``
+        or ``mo.ui.tabs`` (a global stylesheet would not reach inside those)."""
+        if html_tip:
+            _body = tip_text.replace("\n", "<br>")
+            _ws = "normal"
+            _w = 520 if width is None else width
+        else:
+            _body = _html.escape(tip_text)
+            _ws = "pre-wrap"
+            _w = 300 if width is None else width
+        _uid = _random.randint(10**7, 10**8 - 1)
+        _lead = f"{label_text}&nbsp;" if label_text else ""
+        return mo.Html(
+            f"<style>"
+            f"#tip{_uid}{{position:relative;display:inline-block;cursor:help;"
+            f"color:#888;font-size:0.8em;vertical-align:middle;}}"
+            f"#tip{_uid}>span{{visibility:hidden;opacity:0;transition:opacity .15s;"
+            f"transition-delay:.2s;position:absolute;bottom:120%;left:0;"
+            f"display:block;box-sizing:border-box;"
+            f"background:#222;color:#fff;border-radius:4px;padding:6px 10px;"
+            f"width:{_w}px;font-size:12px;line-height:1.5;white-space:{_ws};"
+            f"pointer-events:none;z-index:9999;}}"
+            f"#tip{_uid}:hover>span{{visibility:visible;opacity:1;}}"
+            # Radix's accordion content panel keeps a permanent
+            # `overflow-hidden` class (for its open/close animation), which
+            # clips this absolutely-positioned popup when a tooltip lives
+            # inside an accordion item. Lifting overflow on the open panel
+            # only takes effect once it's fully open, so it doesn't disturb
+            # the collapse/expand animation itself.
+            f'div[data-state="open"].overflow-hidden{{overflow:visible;}}'
+            f"</style>"
+            f"<span>{_lead}"
+            f'<span id="tip{_uid}">ⓘ<span>{_body}</span></span>'
+            f"</span>"
+        )
+
+    def with_tip(label_text, tip_text, widget, **kw):
+        """Label + ⓘ tooltip on the left, widget on the right."""
+        return mo.hstack(
+            [tip_label(label_text, tip_text, **kw), widget],
+            justify="start", align="center",
+        )
+
+    def wtip(widget, tip_text, **kw):
+        """Widget on the left, ⓘ tooltip on the right. The widget sits in a
+        fit-content box so radio/checkbox widgets don't stretch and shove the
+        icon far to the right."""
+        return mo.Html(
+            '<div style="display:inline-flex;align-items:center;gap:4px;">'
+            f'<div style="width:fit-content;">{widget}</div>'
+            f'{tip_label("", tip_text, **kw)}'
+            "</div>"
+        )
+
+    def step_header(n, title, subtitle=None, accent=None):
+        """Bold numbered step/section header: colored badge + accented title.
+
+        Styles are inline (no shared stylesheet) so the header renders
+        correctly even inside shadow-DOM components."""
+        _acc = accent or "#3b6ea5"
+        _sub = (
+            f'<div style="color:#777;font-size:.82rem;margin:.05rem 0 0 2.25rem;">'
+            f"{_html.escape(str(subtitle))}</div>"
+            if subtitle else ""
+        )
+        return mo.Html(
+            '<div style="display:flex;align-items:center;gap:.55rem;'
+            'margin:.1rem 0 .15rem;">'
+            '<span style="display:inline-flex;align-items:center;'
+            "justify-content:center;min-width:1.7em;height:1.7em;padding:0 .45em;"
+            f"border-radius:999px;background:{_acc};color:#fff;font-weight:700;"
+            f'font-size:.95rem;line-height:1;flex:none;">{_html.escape(str(n))}</span>'
+            f'<span style="font-size:1.06rem;font-weight:700;color:{_acc};">'
+            f"{_html.escape(str(title))}</span>"
+            f"</div>{_sub}"
+        )
+
+    def section_card(header, body, accent=None):
+        """Wrap ``header`` + ``body`` in a bordered card with a colored accent
+        stripe down the left edge."""
+        _stripe = accent or "#9aa7b8"
+        return mo.vstack([header, body], gap=0.5).style({
+            "border": "1px solid rgba(127,127,127,0.25)",
+            "border-left": f"4px solid {_stripe}",
+            "border-radius": "10px",
+            "padding": "0.8rem 1rem",
+            "margin": "0.45rem 0",
+            "background": "rgba(127,127,127,0.03)",
+        })
+
+    return CLT_ACCENT, tip_label, with_tip, wtip, step_header, section_card
+

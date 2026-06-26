@@ -287,8 +287,10 @@ def _analysis_display(
     analysis_sens_subpop_sel, analysis_sens_subpop_sliders,
     analysis_scalar_subpop_sels, analysis_array_subpop_sels,
     analysis_scalar_subpop_inputs, analysis_array_subpop_scales,
+    step_header, section_card, CLT_ACCENT,
 ):
     mo.stop(main_tab.value != "Analysis", None)
+    _ACC = CLT_ACCENT["analysis"]
     _n_sc = int(analysis_n_scenarios.value)
     _n_values = int(analysis_n_values.value)
     _scalar_names = list(ANALYSIS_SCALAR_PARAMS.keys())
@@ -414,19 +416,38 @@ def _analysis_display(
 
     _tab_body = {"Sensitivity": _sens_ui, "Scenario": _scen_ui}
     mo.vstack([
-        mo.md("## Analysis"),
-        analysis_sub_tab,
-        _tab_body.get(analysis_sub_tab.value, mo.md("")),
-        mo.md("---\n**Run settings**"),
-        mo.hstack([analysis_sim_days, analysis_n_reps, analysis_timesteps], justify="start"),
-        mo.hstack([
-            analysis_stochastic,
-            mo.md("*Ignored — using 1 replicate.*") if not analysis_stochastic.value else mo.md(""),
-        ], justify="start"),
-        mo.hstack([analysis_subpop_selector, analysis_age_selector], justify="start"),
-        mo.md("**Compartments / metrics to display:**"),
-        mo.hstack(list(analysis_comp_checkboxes), wrap=True, justify="start"),
-        analysis_run_button,
+        mo.Html(
+            f'<div style="font-size:1.35rem;font-weight:800;color:{_ACC};">Analysis</div>'
+            '<div style="color:#777;margin:.1rem 0 .2rem;">Sweep parameters or compare '
+            "scenarios.</div>"
+        ),
+        section_card(
+            step_header("①", "Design",
+                        "Define a sensitivity sweep or a set of scenarios.",
+                        accent=_ACC),
+            mo.vstack([
+                analysis_sub_tab,
+                _tab_body.get(analysis_sub_tab.value, mo.md("")),
+            ]),
+            accent=_ACC,
+        ),
+        section_card(
+            step_header("②", "Run settings",
+                        "Horizon, replicates, slices, and which compartments to display.",
+                        accent=_ACC),
+            mo.vstack([
+                mo.hstack([analysis_sim_days, analysis_n_reps, analysis_timesteps], justify="start"),
+                mo.hstack([
+                    analysis_stochastic,
+                    mo.md("*Ignored — using 1 replicate.*") if not analysis_stochastic.value else mo.md(""),
+                ], justify="start"),
+                mo.hstack([analysis_subpop_selector, analysis_age_selector], justify="start"),
+                mo.md("**Compartments / metrics to display:**"),
+                mo.hstack(list(analysis_comp_checkboxes), wrap=True, justify="start"),
+                analysis_run_button,
+            ]),
+            accent=_ACC,
+        ),
     ])
     return
 
@@ -705,7 +726,7 @@ def _analysis_plot_compartments(
             return _total.sum(axis=(1, 2))
         return _total[:, int(age_sel.split()[-1]), :].sum(axis=1)
 
-    _fig, _axes = plt.subplots(_n_combos, 1, figsize=(11, 4 * _n_combos), squeeze=False)
+    _fig, _axes = plt.subplots(_n_combos, 1, figsize=(11, min(4 * _n_combos, 80)), squeeze=False)
 
     for _c_idx, (_sp, _ag) in enumerate(_combos):
         _ax = _axes[_c_idx, 0]
@@ -1006,7 +1027,7 @@ def _analysis_plot_daily_metrics(
             return _total.sum(axis=(1, 2))
         return _total[:, int(age_sel.split()[-1]), :].sum(axis=1)
 
-    _fig, _axes = plt.subplots(_n_combos, 1, figsize=(11, 4 * _n_combos), squeeze=False)
+    _fig, _axes = plt.subplots(_n_combos, 1, figsize=(11, min(4 * _n_combos, 80)), squeeze=False)
 
     for _c_idx, (_sp, _ag) in enumerate(_combos):
         _ax = _axes[_c_idx, 0]
@@ -1077,7 +1098,7 @@ def _analysis_plot_cumulative_boxplot(
 
     _fig, _axes = plt.subplots(
         _n_combos, _n_met,
-        figsize=(max(5 * _n_met, 6), 5 * _n_combos),
+        figsize=(max(5 * _n_met, 6), min(5 * _n_combos, 80)),
         squeeze=False,
     )
 
@@ -1137,7 +1158,7 @@ def _analysis_plot_age_bars(
         return np.array(_per_age + [float(_total.sum())])
 
     _n_plots = len(_sel_subpops) * len(_sel_metrics)
-    _fig, _axes = plt.subplots(_n_plots, 1, figsize=(10, 5 * _n_plots), squeeze=False)
+    _fig, _axes = plt.subplots(_n_plots, 1, figsize=(10, min(5 * _n_plots, 80)), squeeze=False)
     _ax_idx = 0
 
     for _sp in _sel_subpops:

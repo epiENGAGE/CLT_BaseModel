@@ -253,7 +253,6 @@ class ConfigDrivenSubpopModel(clt.SubpopModel):
                 )
                 delay_param = schedule_config.get("vax_protection_delay_days_param")
                 delay_days = int(self.params.params.get(delay_param, 0)) if delay_param else 0
-                # Values in timeseries_df are already shifted by delay_days
                 reset_date = reset_date + datetime.timedelta(days=delay_days)
                 mask &= timeseries_df.index >= reset_date
 

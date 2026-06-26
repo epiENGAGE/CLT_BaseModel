@@ -29,8 +29,10 @@ def _forecast_display(
     forecast_use_fitted, forecast_params_path, forecast_from_fitted_state,
     forecast_horizon, forecast_n_reps, forecast_stochastic, forecast_run_button,
     fit_result, mo, main_tab, json, Path,
+    step_header, section_card, CLT_ACCENT,
 ):
     mo.stop(main_tab.value != "Forecast", None)
+    _ACC = CLT_ACCENT["forecast"]
     _path_w = forecast_params_path if not forecast_use_fitted.value else mo.md("")
 
     # Multi-set note — shown when AR or gradient replications produced multiple param sets
@@ -119,18 +121,36 @@ def _forecast_display(
             )
 
     mo.vstack([
-        mo.md("## Forecast"),
-        mo.md("**Step 1 — Fitted parameters**"),
-        forecast_use_fitted,
-        _path_w,
-        mo.md("**Step 2 — Settings**"),
-        mo.hstack([forecast_horizon, forecast_n_reps], justify="start"),
-        forecast_stochastic,
-        forecast_from_fitted_state,
-        _ar_note,
-        _fitted_state_note,
-        mo.md("**Step 3 — Run**"),
-        forecast_run_button,
+        mo.Html(
+            f'<div style="font-size:1.35rem;font-weight:800;color:{_ACC};">Forecast</div>'
+            '<div style="color:#777;margin:.1rem 0 .2rem;">Project the model forward '
+            "using fitted parameters.</div>"
+        ),
+        section_card(
+            step_header("①", "Fitted parameters",
+                        "Use the fit from the Fitting tab, or load a saved fit JSON.",
+                        accent=_ACC),
+            mo.vstack([forecast_use_fitted, _path_w]),
+            accent=_ACC,
+        ),
+        section_card(
+            step_header("②", "Settings",
+                        "Forecast horizon, replicates, and stochasticity.",
+                        accent=_ACC),
+            mo.vstack([
+                mo.hstack([forecast_horizon, forecast_n_reps], justify="start"),
+                forecast_stochastic,
+                forecast_from_fitted_state,
+                _ar_note,
+                _fitted_state_note,
+            ]),
+            accent=_ACC,
+        ),
+        section_card(
+            step_header("③", "Run", "Generate the forecast ensemble.", accent=_ACC),
+            forecast_run_button,
+            accent=_ACC,
+        ),
     ])
     return
 

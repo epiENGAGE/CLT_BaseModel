@@ -175,6 +175,130 @@ def test_scheduled_exact_rejected_in_jointly_distributed():
 
 
 # ---------------------------------------------------------------------------
+# 4b. Pre-simulation history of a scheduled_exact transition (vaccination
+#     before the simulation start date) feeding into the initial compartment
+#     values -- exercised directly against generic_core, no notebook involved.
+# ---------------------------------------------------------------------------
+
+def _build_scheduled_exact_model(start_date, reset_param_value, *, with_reset_key=True):
+    """Build a minimal S->V ConfigDrivenSubpopModel with a vaccine_schedule CSV
+    starting well before start_date, to exercise pre-simulation accounting."""
+    import pandas as pd
+    from generic_core.generic_model import (
+        ConfigDrivenSubpopModel,
+        build_state_from_config,
+        build_params_from_config,
+    )
+
+    rate_config = {"schedule": "vax_sched"}
+    if with_reset_key:
+        rate_config["compartment_reset_date_mm_dd_param"] = "vaccinated_compartment_reset_date_mm_dd"
+
+    config_dict = {
+        "compartments": ["S", "V"],
+        "params": {
+            "num_age_groups": 1,
+            "num_risk_groups": 1,
+            "vax_protection_delay_days": 0,
+            "vaccinated_compartment_reset_date_mm_dd": reset_param_value,
+        },
+        "transitions": [
+            {
+                "name": "S_to_V",
+                "origin": "S",
+                "destination": "V",
+                "rate_template": "scheduled_exact",
+                "rate_config": rate_config,
+            }
+        ],
+        "schedules": [
+            {
+                "name": "vax_sched",
+                "schedule_template": "vaccine_schedule",
+                "schedule_config": {
+                    "df_attribute": "vax_sched_df",
+                    "vax_protection_delay_days_param": "vax_protection_delay_days",
+                },
+            }
+        ],
+    }
+
+    # Daily proportion of S vaccinated: 0.1/day for 5 days starting 2024-08-01,
+    # well before start_date (2024-10-01) -- mirrors a CSV with pre-sim history.
+    dates = [f"2024-08-0{d}" for d in range(1, 6)]
+    df = pd.DataFrame({
+        "date": dates,
+        "daily_vaccines": [json.dumps([[0.1]])] * len(dates),
+    })
+
+    class _SchedulesInput:
+        def __init__(self, df):
+            self.vax_sched_df = df
+
+    schedules_input = _SchedulesInput(df)
+    model_config = parse_model_config_from_dict(config_dict, schedules_input=schedules_input)
+    A, R = 1, 1
+
+    compartment_init = {"S": np.array([[1000.0]]), "V": np.array([[0.0]])}
+    state_init = build_state_from_config(model_config, compartment_init, {})
+    params = build_params_from_config(model_config, num_age_groups=A, num_risk_groups=R)
+
+    settings = clt.SimulationSettings(
+        timesteps_per_day=1,
+        start_real_date=start_date.isoformat(),
+    )
+
+    return ConfigDrivenSubpopModel(
+        model_config=model_config,
+        state_init=state_init,
+        params=params,
+        simulation_settings=settings,
+        RNG=np.random.Generator(np.random.MT19937(0)),
+        schedules_input=schedules_input,
+        name="subpop",
+    )
+
+
+def test_scheduled_exact_replays_pre_simulation_history_into_compartments():
+    """A vaccine schedule with 5 days of history before start_date, and no
+    reset date set (None), must replay all 5 days into V at sim start."""
+    model = _build_scheduled_exact_model(
+        start_date=datetime.date(2024, 10, 1), reset_param_value=None
+    )
+    # 1000 * 0.1 = 100/day for 5 days, depleting S each day: 100, 90, 81, 72.9->73, 65.6->66
+    # exact replay of rint(rate * remaining), capped at remaining.
+    s = 1000.0
+    moved_total = 0.0
+    for _ in range(5):
+        moved = min(round(0.1 * s), s)
+        s -= moved
+        moved_total += moved
+    np.testing.assert_allclose(model.compartments["V"].current_val, [[moved_total]])
+    np.testing.assert_allclose(model.compartments["S"].current_val, [[1000.0 - moved_total]])
+    assert moved_total > 0
+
+
+def test_scheduled_exact_reset_date_excludes_history_before_it():
+    """Setting the reset-date param to a date after all CSV history must
+    yield a zero adjustment (no vaccines counted)."""
+    model = _build_scheduled_exact_model(
+        start_date=datetime.date(2024, 10, 1), reset_param_value="09_15"
+    )
+    np.testing.assert_allclose(model.compartments["V"].current_val, [[0.0]])
+    np.testing.assert_allclose(model.compartments["S"].current_val, [[1000.0]])
+
+
+def test_scheduled_exact_no_reset_key_means_no_adjustment():
+    """If rate_config omits 'compartment_reset_date_mm_dd_param' entirely,
+    pre-simulation history must be ignored (existing/back-compat behavior)."""
+    model = _build_scheduled_exact_model(
+        start_date=datetime.date(2024, 10, 1), reset_param_value=None, with_reset_key=False
+    )
+    np.testing.assert_allclose(model.compartments["V"].current_val, [[0.0]])
+    np.testing.assert_allclose(model.compartments["S"].current_val, [[1000.0]])
+
+
+# ---------------------------------------------------------------------------
 # 4. Regression: optional vax_induced_saturation_param on the torch path
 # ---------------------------------------------------------------------------
 

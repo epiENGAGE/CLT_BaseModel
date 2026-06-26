@@ -230,35 +230,20 @@ def _fitting_display(
     fit_method, fit_lr, fit_n_iter, fit_r2_thresh, fit_n_replications, fit_run_button,
     mo, main_tab,
     num_age_groups, num_risk_groups, is_metapop,
+    tip_label, wtip,
+    step_header, section_card, CLT_ACCENT,
 ):
     mo.stop(main_tab.value != "Fitting", None)
+    _ACC = CLT_ACCENT["fitting"]
     _n = get_n_targets()
     _selected_params = list(fit_params_multiselect.value)
     _any_non_ts = any(fit_target_mode.value[_k] in ("scalar", "proportion") for _k in range(_n))
     _any_ts = any(fit_target_mode.value[_k] == "ts" for _k in range(_n))
 
-    # ── tooltip helpers ───────────────────────────────────────────────────────
-    import html as _html
-    import random as _random
-
-    def _tip_label(tip_text, width=520):
-        _uid = _random.randint(10**7, 10**8 - 1)
-        _body = tip_text.replace("\n", "<br>")
-        return mo.Html(
-            f"<style>#tip{_uid}{{position:relative;display:inline-block;"
-            f"cursor:help;color:#888;font-size:0.8em;vertical-align:middle;}}"
-            f"#tip{_uid}>span{{visibility:hidden;opacity:0;"
-            f"transition:opacity .15s;transition-delay:.2s;"
-            f"position:absolute;bottom:120%;left:0;"
-            f"background:#222;color:#fff;border-radius:4px;"
-            f"padding:6px 10px;width:{width}px;font-size:12px;line-height:1.6;"
-            f"white-space:normal;pointer-events:none;z-index:9999;}}"
-            f"#tip{_uid}:hover>span{{visibility:visible;opacity:1;}}</style>"
-            f'<span id="tip{_uid}">ⓘ<span>{_body}</span></span>'
-        )
-
-    def _wtip(widget, tip_text):
-        return mo.hstack([widget, _tip_label(tip_text)], justify="start", align="center")
+    # Fitting tooltips carry rich HTML (the shared helpers escape plain text by
+    # default, so pass html_tip=True here).
+    def _tip(tip_text):
+        return tip_label("", tip_text, html_tip=True)
 
     _PROPORTION_TIP = (
         "<b>Proportions mode</b><br><br>"
@@ -278,7 +263,7 @@ def _fitting_display(
     )
 
     # ── target cards ──────────────────────────────────────────────────────────
-    _target_cards = []
+    _target_acc = {}
     for _k in range(_n):
         _src = fit_target_src.value[_k]
         _mode = fit_target_mode.value[_k]
@@ -335,7 +320,7 @@ def _fitting_display(
         _prop_tip_row = mo.md("")
         if _mode == "proportion":
             _prop_tip_row = mo.hstack(
-                [mo.md("*Proportions quick reference*"), _tip_label(_PROPORTION_TIP)],
+                [mo.md("*Proportions quick reference*"), _tip(_PROPORTION_TIP)],
                 justify="start", align="center",
             )
 
@@ -348,8 +333,9 @@ def _fitting_display(
             _slice_items.append(fit_target_risk[_k])
         _slice_ui = mo.hstack(_slice_items, justify="start") if _slice_items else mo.md("")
 
-        _target_cards.append(mo.vstack([
-            mo.md(f"#### Target {_k + 1}"),
+        _tvar = str(fit_target_vars.value[_k]).strip()
+        _tlabel = f"Target {_k + 1}  ·  {_mode}" + (f"  ·  {_tvar}" if _tvar else "")
+        _target_acc[_tlabel] = mo.vstack([
             fit_target_src[_k],
             _data_input,
             _fname_note,
@@ -359,8 +345,7 @@ def _fitting_display(
             fit_target_vars[_k],
             mo.hstack([fit_target_weight[_k]], justify="start"),
             _slice_ui,
-            mo.md("---"),
-        ]))
+        ])
 
     # ── parameter bounds ──────────────────────────────────────────────────────
     if _selected_params:
@@ -420,12 +405,12 @@ def _fitting_display(
     )
 
     _method_val = fit_method.value
-    _hyper = [_wtip(fit_n_iter, _ITER_TIP)]
+    _hyper = [wtip(fit_n_iter, _ITER_TIP, html_tip=True)]
     if _method_val != "ar":
-        _hyper = [_wtip(fit_lr, _LR_TIP)] + _hyper
-        _hyper.append(_wtip(fit_n_replications, _REP_TIP))
+        _hyper = [wtip(fit_lr, _LR_TIP, html_tip=True)] + _hyper
+        _hyper.append(wtip(fit_n_replications, _REP_TIP, html_tip=True))
     if _method_val == "ar":
-        _hyper.append(_wtip(fit_r2_thresh, _R2_TIP))
+        _hyper.append(wtip(fit_r2_thresh, _R2_TIP, html_tip=True))
 
     _sim_days_widget = mo.md("")
     if _any_non_ts and not _any_ts:
@@ -459,22 +444,54 @@ def _fitting_display(
     ]) if True else mo.md("")
 
     mo.vstack([
-        mo.md("## Fitting"),
-        mo.md("### Fit Targets"),
-        *_target_cards,
-        mo.hstack([add_target_btn, del_target_btn], justify="start"),
-        _sim_days_widget,
-        mo.md("### Parameters to Fit"),
-        fit_params_multiselect,
-        _seed_scale_note,
-        _bounds_section,
-        mo.md("### Epidemic Start Date"),
-        _start_offset_section,
-        mo.md("### Method and Hyperparameters"),
-        fit_method,
-        mo.hstack(_hyper, justify="start"),
-        mo.md("### Run"),
-        fit_run_button,
+        mo.Html(
+            f'<div style="font-size:1.35rem;font-weight:800;color:{_ACC};">Fitting</div>'
+            '<div style="color:#777;margin:.1rem 0 .2rem;">Calibrate model '
+            "parameters to observed data.</div>"
+        ),
+        section_card(
+            step_header("①", "Fit Targets",
+                        "The data series / totals the model is calibrated against. "
+                        "Click a target to expand it.",
+                        accent=_ACC),
+            mo.vstack([
+                mo.accordion(_target_acc, multiple=True),
+                mo.hstack([add_target_btn, del_target_btn,
+                           mo.md(f"*{_n} of 20 targets*")],
+                          justify="start", align="center"),
+                _sim_days_widget,
+            ]),
+            accent=_ACC,
+        ),
+        section_card(
+            step_header("②", "Parameters to Fit",
+                        "Pick which parameters to estimate and their search bounds.",
+                        accent=_ACC),
+            mo.vstack([
+                fit_params_multiselect,
+                _seed_scale_note,
+                _bounds_section,
+            ]),
+            accent=_ACC,
+        ),
+        section_card(
+            step_header("③", "Epidemic Start Date",
+                        "Optionally fit an offset for when the epidemic seeds.",
+                        accent=_ACC),
+            _start_offset_section,
+            accent=_ACC,
+        ),
+        section_card(
+            step_header("④", "Method & Run",
+                        "Choose the optimiser, set its hyperparameters, then run.",
+                        accent=_ACC),
+            mo.vstack([
+                fit_method,
+                mo.hstack(_hyper, justify="start"),
+                fit_run_button,
+            ]),
+            accent=_ACC,
+        ),
     ])
     return
 

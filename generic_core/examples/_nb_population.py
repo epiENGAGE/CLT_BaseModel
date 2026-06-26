@@ -98,11 +98,12 @@ def _population_structure_show(
     metapop_folder_input,
     validate_metapop_folder,
     cmf,
+    step_header, section_card, CLT_ACCENT,
 ):
     mo.stop(main_tab.value != "Population & Geography", None)
+    _ACC = CLT_ACCENT["population"]
 
     _parts = [
-        mo.md("## Population Structure"),
         mo.md(
             "Define the population dimensions and geography here. The rest of the "
             "model (compartments, transitions, parameters, …) is built in the "
@@ -156,7 +157,13 @@ def _population_structure_show(
                 kind="info",
             ))
 
-    mo.vstack(_parts)
+    section_card(
+        step_header("①", "Population Structure",
+                    "Age groups, risk groups, and single-population vs. metapopulation.",
+                    accent=_ACC),
+        mo.vstack(_parts),
+        accent=_ACC,
+    )
     return
 
 
@@ -344,22 +351,29 @@ def _geo_show(
     geo_subpop_names, geo_subpop_kind, geo_subpop_state, geo_subpop_country,
     geo_fetch_button,
     fetched_contact_matrices, fetched_matrices_scope, fetched_matrices_errors,
+    step_header, section_card, CLT_ACCENT,
 ):
     mo.stop(main_tab.value != "Population & Geography", None)
-
-    _parts = [mo.md("## Contact Matrices (geography)")]
+    _ACC = CLT_ACCENT["population"]
+    _header = step_header(
+        "②", "Contact Matrices (geography)",
+        "Optionally fetch age-structured contact matrices for a US state or country.",
+        accent=_ACC,
+    )
 
     if age_group_mode != "Named age bands" and num_age_groups != 1:
-        mo.stop(True, mo.vstack([
-            *_parts,
+        mo.stop(True, section_card(
+            _header,
             mo.callout(
                 mo.md("Switch to **Named age bands** above to fetch contact matrices "
                       "for a geography. In count-only mode with A > 1, provide "
                       "contact-matrix CSVs in Model Builder → Step 4 instead."),
                 kind="info",
             ),
-        ]))
+            accent=_ACC,
+        ))
 
+    _parts = []
     if not cmf.epydemix_available():
         _parts.append(mo.callout(
             mo.md("The optional **epydemix** package is not installed, so live fetching "
@@ -373,26 +387,29 @@ def _geo_show(
         "matrices (Mistry 2021, via epydemix-data) for your age bands."
     ))
 
+    # Fetch controls collapse into an accordion to keep the tab tidy.
+    _ctrl = []
     if is_metapop:
-        _parts.append(geo_scope_radio)
-
+        _ctrl.append(geo_scope_radio)
     if is_metapop and geo_scope_radio.value == "Per-subpopulation":
         if not geo_subpop_names:
-            _parts.append(mo.callout(
+            _ctrl.append(mo.callout(
                 mo.md("No subpopulations found — set a valid metapop folder above."),
                 kind="warn",
             ))
         for _i, _name in enumerate(geo_subpop_names):
             _sel = (geo_subpop_state[_i] if geo_subpop_kind[_i].value == "US state"
                     else geo_subpop_country[_i])
-            _parts.append(mo.hstack([mo.md(f"**{_name}**"), geo_subpop_kind[_i], _sel],
-                                    justify="start"))
+            _ctrl.append(mo.hstack([mo.md(f"**{_name}**"), geo_subpop_kind[_i], _sel],
+                                   justify="start"))
     else:
-        _parts.append(geo_kind_radio)
-        _parts.append(geo_state_dropdown if geo_kind_radio.value == "US state"
-                      else geo_country_input)
-
-    _parts.append(geo_fetch_button)
+        _ctrl.append(geo_kind_radio)
+        _ctrl.append(geo_state_dropdown if geo_kind_radio.value == "US state"
+                     else geo_country_input)
+    _ctrl.append(geo_fetch_button)
+    _parts.append(mo.accordion(
+        {"Fetch contact matrices for a geography": mo.vstack(_ctrl)},
+    ))
 
     if fetched_matrices_errors.get("error"):
         _parts.append(mo.callout(mo.md(f"**Fetch failed:** {fetched_matrices_errors['error']}"),
@@ -407,7 +424,7 @@ def _geo_show(
             kind="success",
         ))
 
-    mo.vstack(_parts)
+    section_card(_header, mo.vstack(_parts), accent=_ACC)
     return
 
 
@@ -494,33 +511,10 @@ def _population_show(
     num_risk_groups, age_groups, num_age_groups,
     population_by_subpop, population_source, population_errors, pop_subpop_names,
     param_grid_columns, pd,
+    tip_label, step_header, section_card, CLT_ACCENT,
 ):
     mo.stop(main_tab.value != "Population & Geography", None)
-
-    import html as _html
-    import random as _random
-
-    def _tip_label(label_text, tip_text):
-        """Render a field label with an inline ⓘ hover tooltip using CSS only."""
-        _uid = _random.randint(10**7, 10**8 - 1)
-        _esc = _html.escape(tip_text)
-        return mo.Html(
-            f"<style>"
-            f"#tip{_uid}{{position:relative;display:inline-block;"
-            f"cursor:help;color:#888;font-size:0.8em;vertical-align:middle;}}"
-            f"#tip{_uid}>span{{visibility:hidden;opacity:0;"
-            f"transition:opacity .15s;transition-delay:.2s;"
-            f"position:absolute;bottom:120%;left:0;"
-            f"background:#222;color:#fff;border-radius:4px;"
-            f"padding:6px 10px;width:280px;font-size:12px;line-height:1.5;"
-            f"white-space:pre-wrap;pointer-events:none;z-index:9999;}}"
-            f"#tip{_uid}:hover>span{{visibility:visible;opacity:1;}}"
-            f"</style>"
-            f"<span>"
-            f"{label_text}&nbsp;"
-            f'<span id="tip{_uid}">ⓘ<span>{_esc}</span></span>'
-            f"</span>"
-        )
+    _ACC = CLT_ACCENT["population"]
 
     _CSV_FORMAT_TIP = (
         "Required columns: age, population\n\n"
@@ -537,7 +531,6 @@ def _population_show(
     )
 
     _parts = [
-        mo.md("## Population sizes (per age / risk group)"),
         mo.md(
             "Population totals per age group are fetched for the chosen geography "
             "(US states and countries supported via epydemix), or loaded from a CSV "
@@ -555,7 +548,7 @@ def _population_show(
     else:
         _parts.append(
             mo.hstack(
-                [population_csv_input, _tip_label("", _CSV_FORMAT_TIP)],
+                [population_csv_input, tip_label("", _CSV_FORMAT_TIP)],
                 justify="start", align="center", gap=0.5,
             )
         )
@@ -572,13 +565,23 @@ def _population_show(
         if _arr is None:
             continue
         _label = "Population" if _name == "aggregate_pop" else f"Population — {_name}"
-        _df = pd.DataFrame(
-            [{"risk_group": _r, **{_c: _arr[_a, _r] for _a, _c in enumerate(_cols)}}
-             for _r in range(_arr.shape[1])]
-        )
+        _rows = [
+            {"risk_group": str(_r), **{_c: _arr[_a, _r] for _a, _c in enumerate(_cols)}}
+            for _r in range(_arr.shape[1])
+        ]
+        # Totals row: sum across risk groups for each age band.
+        _rows.append({"risk_group": "Σ all risk",
+                      **{_c: _arr[_a, :].sum() for _a, _c in enumerate(_cols)}})
+        _df = pd.DataFrame(_rows)
         _parts.append(mo.md(f"**{_label}** (total {_arr.sum():,.0f})"))
         _parts.append(mo.ui.table(_df, selection=None))
 
-    mo.vstack(_parts)
+    section_card(
+        step_header("③", "Population sizes",
+                    "Per age / risk-group population counts used as denominators.",
+                    accent=_ACC),
+        mo.vstack(_parts),
+        accent=_ACC,
+    )
     return
 
