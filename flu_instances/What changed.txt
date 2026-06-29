@@ -1,3 +1,15 @@
+06/26/2026
+Updated HR_to_R rate and HD_to_D_rate given addition of 2024-2025 data and revised cleaning protocol, updated for all input files.
+
+Updated mobility matrix for Austin and Austin3 based on 2024_2025 data.  Don't have estimates for 2023-2024, so used the same matrix for both years. 
+
+Updated Austin, Austin3, Dallas Hospital excel files using ratio of #H/#ED based on 2024-2025 data. Updated in scripts what the target is.
+
+Update M0 estimates.  Now proportion of infections by age/subpopulation and population size varies each season.  Also estimate is for 10/1/2024 and 10/1/2023.
+
+Updated vaccination rates for 2024-2025 for Austin/Austin3/Dallas, based on ratios across cities given TX-BRFSS 2024 data for all three.  Use age specific ratios for both Austin and Dallas, since data supported that.  Since no data on children in BRFSS, used the ratios seen in the T-VFC data for proportion of children eligible for VFC and same as Houston for proportion of children aren't eligible (have no better source of data). Didn't change vaccination rates for 2023-2024 [data didn't support using age specific ratios or changing anything other than Austin].
+
+
 05/20/2026
 vax_induced_hosp_risk_reduce wasn't set up properly for 2 risk groups
 Small updates to how calculate M(0), including fixed problem with 2 age groups.  
