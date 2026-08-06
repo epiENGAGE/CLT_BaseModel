@@ -11,7 +11,24 @@ authors = [
 ]
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "corner>=2.2.3",
+    "emcee>=3.1.6",
+    "pyabc>=0.12.18",
+    "xarray>=2026.4.0",
+    # Pygments 2.20.0 made HtmlFormatter escape its `filename` option
+    # (`html.escape(options.get('filename', ''))`). pymdown-extensions passes
+    # `filename=title`, and `title` is None for any code block without an
+    # explicit title, so rendering raises
+    #   AttributeError: 'NoneType' object has no attribute 'replace'
+    # This breaks `mo.md()` on any fenced code block containing a blank line
+    # followed by an indented line — i.e. virtually every real Python snippet,
+    # including the model-builder notebook's Export tab. Still unfixed upstream
+    # as of pymdown-extensions 11.0.1, so constrain Pygments instead. marimo
+    # allows `pygments>=2.19,<3`, so <2.20 resolves to 2.19.2 (matching the pin
+    # already in requirements.txt). Revisit once pymdownx stops passing None.
+    "pygments<2.20",
+]
 
 # Optional extras. Install with e.g.: pip install -e ".[contact_matrices]"
 # - contact_matrices: enables the in-notebook contact-matrix fetch in the model
