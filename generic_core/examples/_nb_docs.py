@@ -96,7 +96,7 @@ any setting changes, so you never lose your work.
    two columns; all columns whose names are not `date`, `day`, `time`, or `week` are
    treated as the observed values (the first such column is used).
 2. **Target** — Choose which model output to fit.  This can be any compartment name or
-   any transition variable name (as listed in Step 8 of Model Builder).
+   any transition variable name (as listed in Step 9 of Model Builder).
 3. **Parameters and bounds** — Enter a comma-separated list of parameter names to fit,
    then provide bounds as a JSON object: `{"beta_baseline": [0.05, 0.8]}`.  If you
    omit bounds for a parameter, the notebook guesses ±80 % around the current value.
@@ -248,15 +248,17 @@ the scheduled transfer deterministically on the first timestep of each day.
 
 How to set it up in **Model Builder**:
 
-1. **Step 2 — Compartments:** add the destination compartment (e.g. `V`).
-2. **Step 3 — Transitions:** add a transition `S → V` with rate template
+1. **Step 1 — Compartments:** add the destination compartment (e.g. `V`).
+2. **Step 2 — Transitions:** add a transition `S → V` with rate template
    `scheduled_exact`. It references a schedule by name (the daily-vaccines
    schedule).
-3. **Step 5 — Schedules:** supply the vaccines schedule, either as a constant
+3. **Step 4 — Schedules:** supply the vaccines schedule, either as a constant
    value or via a `vaccines_<name>.csv` (column `daily_vaccines`, a JSON A×R
-   array). **The schedule value is a daily _proportion_ of the origin
-   compartment** (0–1), not an absolute count; it is rounded to an integer and
-   capped at the available population each day.
+   array). **The schedule value is a daily _proportion_ of the origin +
+   destination compartments** (0–1, e.g. `S + V`, the not-yet-infected pool —
+   vaccinating someone doesn't shrink the base future proportions are applied
+   to; only infection does), not an absolute count; it is rounded to an
+   integer and capped at the available origin-compartment population each day.
 
 Notes:
 - `scheduled_exact` transitions are deterministic. They cannot be placed in a

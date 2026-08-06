@@ -28,7 +28,7 @@ def _forecast_ui(mo):
 def _forecast_display(
     forecast_use_fitted, forecast_params_path, forecast_from_fitted_state,
     forecast_horizon, forecast_n_reps, forecast_stochastic, forecast_run_button,
-    fit_result, mo, main_tab, json, Path,
+    fit_result, is_metapop, mo, main_tab, json, Path,
     step_header, section_card, CLT_ACCENT,
 ):
     mo.stop(main_tab.value != "Forecast", None)
@@ -40,6 +40,7 @@ def _forecast_display(
     _is_ar_fitted = False
     _n_accepted = 0
     _fit_method_display = "ar"
+    _mt_note = mo.md("")
     if forecast_use_fitted.value:
         _is_ar_fitted = (
             fit_result is not None
@@ -48,6 +49,26 @@ def _forecast_display(
         if _is_ar_fitted:
             _n_accepted = len(fit_result.accepted_params)
             _fit_method_display = fit_result.method
+        if fit_result is not None and any(_k.startswith("m_dlog_") for _k in fit_result.best_params):
+            if is_metapop:
+                _mt_note = mo.callout(
+                    mo.md(
+                        "**Time-varying transmission m(t)** was fitted on a single population, but "
+                        "will be reconstructed and broadcast **uniformly** to every subpopulation in "
+                        "this metapop run — exact over the fit period, held flat at its last value "
+                        "for the forecast horizon."
+                    ),
+                    kind="info",
+                )
+            else:
+                _mt_note = mo.callout(
+                    mo.md(
+                        "**Time-varying transmission m(t)** will be reconstructed from the fitted "
+                        "`m_dlog_*` log-increments — exact over the fit period, held flat at its "
+                        "last value for the forecast horizon."
+                    ),
+                    kind="info",
+                )
     else:
         _pp = forecast_params_path.value.strip()
         if _pp:
@@ -59,6 +80,25 @@ def _forecast_display(
                     _is_ar_fitted = True
                     _n_accepted = len(_loaded_accepted)
                     _fit_method_display = _loaded_preview.get("method", "ar")
+                _loaded_best = _loaded_preview.get("best_params", _loaded_preview)
+                if isinstance(_loaded_best, dict) and any(_k.startswith("m_dlog_") for _k in _loaded_best):
+                    if is_metapop:
+                        _mt_note = mo.callout(
+                            mo.md(
+                                "**Time-varying transmission (`m_dlog_*`) is single-population only** — "
+                                "ignored for this metapop run."
+                            ),
+                            kind="warn",
+                        )
+                    else:
+                        _mt_note = mo.callout(
+                            mo.md(
+                                "**Time-varying transmission m(t)** will be reconstructed from the "
+                                "fitted `m_dlog_*` log-increments — exact over the fit period, held "
+                                "flat at its last value for the forecast horizon."
+                            ),
+                            kind="info",
+                        )
             except Exception:
                 pass
 
@@ -130,7 +170,7 @@ def _forecast_display(
             step_header("①", "Fitted parameters",
                         "Use the fit from the Fitting tab, or load a saved fit JSON.",
                         accent=_ACC),
-            mo.vstack([forecast_use_fitted, _path_w]),
+            mo.vstack([forecast_use_fitted, _path_w, _mt_note]),
             accent=_ACC,
         ),
         section_card(
@@ -165,12 +205,16 @@ def _run_forecast(
     build_compartment_init, start_date_input, timesteps, rng_seed,
     transition_vars_input,
     make_single_pop_metapop, make_metapop_from_folder, extract_history,
-    np, json, mo, Path, build_scalar_array, datetime,
+    np, json, mo, Path, build_scalar_array, datetime, SimpleNamespace,
+    loaded_schedule_dfs,
 ):
     forecast_result = None
     if forecast_run_button.value:
         _fitted_params = {}
-        _fit_meta = {"num_days": 0, "method": "ar", "accepted_params": []}
+        _fit_meta = {
+            "num_days": 0, "method": "ar", "accepted_params": [],
+            "scale_groups": {}, "tv_knot_spacing_days": 30,
+        }
         if forecast_use_fitted.value:
             mo.stop(
                 fit_result is None,
@@ -181,6 +225,8 @@ def _run_forecast(
                 "num_days": fit_result.num_days,
                 "method": fit_result.method,
                 "accepted_params": list(fit_result.accepted_params),
+                "scale_groups": dict(getattr(fit_result, "scale_groups", {}) or {}),
+                "tv_knot_spacing_days": int(getattr(fit_result, "tv_knot_spacing_days", 30) or 30),
             }
         else:
             _pp = forecast_params_path.value.strip()
@@ -194,6 +240,8 @@ def _run_forecast(
                             "num_days": _loaded.get("num_days", 0),
                             "method": _loaded.get("method", "ar"),
                             "accepted_params": _loaded.get("accepted_params", []),
+                            "scale_groups": _loaded.get("scale_groups", {}) or {},
+                            "tv_knot_spacing_days": int(_loaded.get("tv_knot_spacing_days", 30) or 30),
                         }
                     else:
                         _fitted_params = _loaded
@@ -211,6 +259,7 @@ def _run_forecast(
         _tvs = [v.strip() for v in transition_vars_input.value.split(",") if v.strip()]
 
         _ci = None
+        _pop_arr = None
         if not is_metapop:
             # Initial conditions from the Step 6 tables via config_dict.
             _ic_entry = config_dict.get("initial_conditions", {}).get("aggregate_pop", {})
@@ -222,10 +271,133 @@ def _run_forecast(
             }
             _ci, _ = build_compartment_init(_seed_arrays, _pop_arr, compartments)
 
+        # Fitted params can carry non-model keys: seed_scale_<comp> scales the
+        # seeded compartments directly (mirrors fitting.py's
+        # _scale_compartment_init) rather than being a config["params"] entry;
+        # phi and m_dlog_* (time-varying transmission log-increments) aren't
+        # applied at all here (m(t) reconstruction isn't implemented in the
+        # Forecast tab) — stripped out so they don't pollute param_overrides.
+        _NON_MODEL_PREFIXES = ("seed_scale_", "m_dlog_")
+        _NON_MODEL_KEYS = {"phi"}
+
+        def _seed_scales_from_pset(_pset):
+            return {
+                _k[len("seed_scale_"):]: float(_v)
+                for _k, _v in _pset.items()
+                if _k.startswith("seed_scale_") and _k[len("seed_scale_"):] in compartments
+            }
+
+        def _strip_non_model_keys(_pset):
+            return {
+                _k: _v for _k, _v in _pset.items()
+                if _k not in _NON_MODEL_KEYS and not any(_k.startswith(_p) for _p in _NON_MODEL_PREFIXES)
+            }
+
+        _ci_cache = {}
+
+        def _get_ci(_pset_idx):
+            if _ci is None:
+                return None
+            if _pset_idx not in _ci_cache:
+                _seed_scales = _seed_scales_from_pset(_param_sets[_pset_idx])
+                if _seed_scales:
+                    from generic_core.fitting import _scale_compartment_init
+                    _A, _R = _pop_arr.shape
+                    _ci_cache[_pset_idx] = _scale_compartment_init(_ci, _seed_scales, compartments, _A, _R)
+                else:
+                    _ci_cache[_pset_idx] = _ci
+            return _ci_cache[_pset_idx]
+
         _histories = []
 
-        # Build param sets and run schedule (shared by both forecast paths)
-        _param_sets = _fit_meta["accepted_params"] if _fit_meta["accepted_params"] else [_fitted_params]
+        # Build param sets and run schedule (shared by both forecast paths).
+        # prepare_param_sets reassembles MCMC/ABC-SMC per-element sampler columns
+        # (`pn|a0`, `pn|a1`, ... — AR/gradient record one array-valued `pn`
+        # directly) and expands linked-scale multipliers into concrete
+        # base-param overrides (base := config_baseline × multiplier), so a
+        # granular or linked param applies the same way regardless of which
+        # method produced it. Same helper the Analysis and Export tabs use.
+        from generic_core.fitting import prepare_param_sets as _prepare_param_sets
+        _param_sets = _prepare_param_sets(
+            _fit_meta["accepted_params"] if _fit_meta["accepted_params"] else [_fitted_params],
+            _fit_meta.get("scale_groups", {}) or {},
+            config_dict.get("params", {}) or {},
+        )
+
+        # Reconstruct the fitted time-varying transmission multiplier m(t) from
+        # its log-increments (per param set — MCMC/ABC posterior draws each
+        # carry their own m_dlog_* trajectory) and wire it into every
+        # force_of_infection transition via a 'transmission_multiplier'
+        # schedule (mirrors generic_core.fitting._inject_tv_transmission).
+        # Exact over the fit period, held flat at its last value beyond it. In
+        # the metapop case, the same single-population-fitted m(t) trajectory
+        # is broadcast uniformly to every subpopulation (see
+        # make_metapop_from_folder's transmission_multiplier_df param).
+        _tv_spacing = int(_fit_meta.get("tv_knot_spacing_days", 30) or 30)
+        _tv_cfg = config_dict
+        _has_any_mt = any(
+            any(_k.startswith("m_dlog_") for _k in _p) for _p in _param_sets
+        )
+        if _has_any_mt:
+            from generic_core.fitting import (
+                _inject_tv_transmission, _tv_knot_days,
+                build_transmission_multiplier_array as _build_transmission_multiplier_array,
+            )
+            import pandas as _pd
+            _tv_cfg, _n_foi = _inject_tv_transmission(config_dict)
+            if not _n_foi:
+                _tv_cfg = config_dict
+                _has_any_mt = False
+
+        _mt_fit_cache = {}
+
+        def _get_mt_fit(_pset_idx):
+            if _pset_idx not in _mt_fit_cache:
+                _pset = _param_sets[_pset_idx]
+                _incrs = sorted(
+                    (
+                        (int(_k[len("m_dlog_"):]), float(_v))
+                        for _k, _v in _pset.items()
+                        if _k.startswith("m_dlog_") and _k[len("m_dlog_"):].isdigit()
+                    ),
+                    key=lambda _t: _t[0],
+                )
+                if not _incrs or _fit_n <= 0:
+                    _mt_fit_cache[_pset_idx] = None
+                else:
+                    _knots = _tv_knot_days(_fit_n, _tv_spacing)
+                    _mt_fit_cache[_pset_idx] = _build_transmission_multiplier_array(
+                        [_v for _, _v in _incrs], _knots, _fit_n,
+                    )
+            return _mt_fit_cache[_pset_idx]
+
+        def _get_schedule_dfs(_pset_idx, num_days, start_date, flat_only=False):
+            # The uploaded schedule CSVs (humidity / school-work calendar /
+            # mobility / vaccination) always apply — over the forecast horizon
+            # as well as the fit period. m(t), when fitted, is layered on top;
+            # it is an extra FOI multiplier, not a replacement for them.
+            if not _has_any_mt:
+                return loaded_schedule_dfs
+            _m_fit = _get_mt_fit(_pset_idx)
+            if _m_fit is None:
+                return loaded_schedule_dfs
+            if flat_only:
+                _vals = np.full(num_days, _m_fit[-1])
+            elif num_days <= len(_m_fit):
+                _vals = _m_fit[:num_days]
+            else:
+                _vals = np.concatenate([_m_fit, np.full(num_days - len(_m_fit), _m_fit[-1])])
+            _dates = _pd.date_range(start=start_date, periods=num_days, freq="D").date
+            _df = _pd.DataFrame({"date": _dates, "transmission_multiplier": _vals})
+            return SimpleNamespace(
+                **{
+                    _f: getattr(loaded_schedule_dfs, _f, None)
+                    for _f in ("absolute_humidity_df", "school_work_calendar_df",
+                               "mobility_df", "daily_vaccines_df")
+                },
+                transmission_multiplier_df=_df,
+            )
+
         _n_accepted = len(_param_sets)
         _is_ar = _n_accepted > 1  # distribute across AR accepted sets OR gradient replications
         _rng_sched = np.random.default_rng(_seed_b)
@@ -283,20 +455,25 @@ def _run_forecast(
                         if _pset_idx not in _warmup_cache:
                             if not is_metapop:
                                 _wm, _, _ = make_single_pop_metapop(
-                                    config_dict, _start, _fit_n, _ci,
+                                    _tv_cfg, _start, _fit_n, _get_ci(_pset_idx),
                                     seed_offset=_pset_idx, seed_base=_seed_b, ts_per_day=_ts,
                                     stochastic=False, tvs=_tvs, save_daily=True,
-                                    param_overrides=_pset or None,
+                                    param_overrides=_strip_non_model_keys(_pset) or None,
                                     travel_config=metapop_travel_config,
+                                    schedule_dfs=_get_schedule_dfs(_pset_idx, _fit_n, _start),
                                 )
                             else:
+                                _wm_sched = _get_schedule_dfs(_pset_idx, _fit_n, _start)
                                 _wm, _ = make_metapop_from_folder(
-                                    metapop_folder_input.value, config_dict, _start, _fit_n,
+                                    metapop_folder_input.value, _tv_cfg, _start, _fit_n,
                                     list(compartments),
                                     seed_offset=_pset_idx, seed_base=_seed_b, ts_per_day=_ts,
                                     stochastic=False, tvs=_tvs, save_daily=True,
-                                    param_overrides=_pset or None,
+                                    param_overrides=_strip_non_model_keys(_pset) or None,
                                     travel_config=metapop_travel_config,
+                                    transmission_multiplier_df=(
+                                        getattr(_wm_sched, "transmission_multiplier_df", None)
+                                    ),
                                 )
                             _wm.simulate_until_day(_fit_n)
                             _warmup_cache[_pset_idx] = (
@@ -309,22 +486,27 @@ def _run_forecast(
                         if not is_metapop:
                             _end_comp, _end_epi = _end_states[0]
                             _fm, _, _ = make_single_pop_metapop(
-                                config_dict, _fcast_start, _horizon, _end_comp,
+                                _tv_cfg, _fcast_start, _horizon, _end_comp,
                                 seed_offset=_traj_idx, seed_base=_seed_b, ts_per_day=_ts,
                                 stochastic=_stoch, tvs=_tvs, save_daily=True,
                                 epi_metric_init=_end_epi or None,
-                                param_overrides=_pset or None,
+                                param_overrides=_strip_non_model_keys(_pset) or None,
                                 travel_config=metapop_travel_config,
+                                schedule_dfs=_get_schedule_dfs(_pset_idx, _horizon, _fcast_start, flat_only=True),
                             )
                         else:
+                            _fm_sched = _get_schedule_dfs(_pset_idx, _horizon, _fcast_start, flat_only=True)
                             _fm, _ = make_metapop_from_folder(
-                                metapop_folder_input.value, config_dict, _fcast_start, _horizon,
+                                metapop_folder_input.value, _tv_cfg, _fcast_start, _horizon,
                                 list(compartments),
                                 seed_offset=_traj_idx, seed_base=_seed_b, ts_per_day=_ts,
                                 stochastic=_stoch, tvs=_tvs, save_daily=True,
-                                param_overrides=_pset or None,
+                                param_overrides=_strip_non_model_keys(_pset) or None,
                                 travel_config=metapop_travel_config,
                                 init_states_override=_end_states,
+                                transmission_multiplier_df=(
+                                    getattr(_fm_sched, "transmission_multiplier_df", None)
+                                ),
                             )
                         _fm.simulate_until_day(_horizon)
                         _fcast_hist = extract_history(_fm, list(compartments), tvs=_tvs)
@@ -346,19 +528,24 @@ def _run_forecast(
                         _pset = _param_sets[_pset_idx]
                         if not is_metapop:
                             _m, _, _ = make_single_pop_metapop(
-                                config_dict, _start, _total_days, _ci,
+                                _tv_cfg, _start, _total_days, _get_ci(_pset_idx),
                                 seed_offset=_traj_idx, seed_base=_seed_b, ts_per_day=_ts,
                                 stochastic=_stoch, tvs=_tvs, save_daily=True,
-                                param_overrides=_pset or None,
+                                param_overrides=_strip_non_model_keys(_pset) or None,
                                 travel_config=metapop_travel_config,
+                                schedule_dfs=_get_schedule_dfs(_pset_idx, _total_days, _start),
                             )
                         else:
+                            _std_sched = _get_schedule_dfs(_pset_idx, _total_days, _start)
                             _m, _ = make_metapop_from_folder(
-                                metapop_folder_input.value, config_dict, _start, _total_days, list(compartments),
+                                metapop_folder_input.value, _tv_cfg, _start, _total_days, list(compartments),
                                 seed_offset=_traj_idx, seed_base=_seed_b, ts_per_day=_ts,
                                 stochastic=_stoch, tvs=_tvs, save_daily=True,
-                                param_overrides=_pset or None,
+                                param_overrides=_strip_non_model_keys(_pset) or None,
                                 travel_config=metapop_travel_config,
+                                transmission_multiplier_df=(
+                                    getattr(_std_sched, "transmission_multiplier_df", None)
+                                ),
                             )
                         _m.simulate_until_day(_total_days)
                         _histories.append(extract_history(_m, list(compartments), tvs=_tvs))

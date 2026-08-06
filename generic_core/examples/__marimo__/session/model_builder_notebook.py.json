@@ -7,494 +7,1445 @@
   "cells": [
     {
       "id": "Hbol",
-      "code_hash": "90efa97b7fce6bb7411c20a2500ffb95",
-      "outputs": [],
+      "code_hash": "a84df2ae530cf5380075a36c9999f5b8",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "MJUe",
-      "code_hash": "dfce28750c835abdfcb70af53134d2ea",
-      "outputs": [],
+      "code_hash": "ac5f32dd97e8751e47a09d265bebedae",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "vblA",
-      "code_hash": "aa7fb9c6ba99217b2883d67bac6e63cc",
-      "outputs": [],
+      "code_hash": "65a4808559594cb71e28283a185c73a0",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "bkHC",
-      "code_hash": "0cf7b5dbd653e327154af5b77a14f5bd",
-      "outputs": [],
+      "code_hash": "aa7fb9c6ba99217b2883d67bac6e63cc",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "lEQa",
-      "code_hash": "bf4ebf7cbe5c8080036fc2bb3d974633",
-      "outputs": [],
+      "code_hash": "0cf7b5dbd653e327154af5b77a14f5bd",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "PKri",
-      "code_hash": "793dc9f5012bdb9121c1db2e01c921c2",
-      "outputs": [],
+      "code_hash": "bf4ebf7cbe5c8080036fc2bb3d974633",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "Xref",
-      "code_hash": "88bbe25c3a3707038a2bd8dc6c4a9384",
-      "outputs": [],
+      "code_hash": "7b1913d777b17ee87cab4cc97e57cbc1",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/html": "<style title=\"marimo-tab-width\">[role=\"tablist\"] { width: 100%; }[role=\"tablist\"] [role=\"tab\"] { flex: 1; text-align: center; }</style>"
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "SFPL",
-      "code_hash": "6389a30ddca71ca7dfee264a067831fa",
-      "outputs": [],
+      "code_hash": "bdf6b9b236e9cfbeab642c8fab1a624a",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "BYtC",
-      "code_hash": "b23a0a8c9df12348aa38f681539c500b",
-      "outputs": [],
+      "code_hash": "88bbe25c3a3707038a2bd8dc6c4a9384",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "RGSE",
-      "code_hash": "7dd7feacc6b1563bc58da9ad87590acd",
-      "outputs": [],
+      "code_hash": "6389a30ddca71ca7dfee264a067831fa",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "Kclp",
-      "code_hash": "901b222a241e2ccb8208f223a701b462",
-      "outputs": [],
+      "code_hash": "b23a0a8c9df12348aa38f681539c500b",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/html": "<div style='display: flex;flex: 1;flex-direction: column;justify-content: flex-start;align-items: normal;flex-wrap: nowrap;gap: 0.5rem'><marimo-ui-element object-id='SFPL-0' random-id='c2e1af8e-f8c1-0c88-22b0-ce7a23e3152f'><marimo-tabs data-initial-value='&quot;&quot;' data-label='null' data-tabs='[&quot;&lt;span class=&#92;&quot;markdown prose dark:prose-invert contents&#92;&quot;&gt;&lt;span class=&#92;&quot;paragraph&#92;&quot;&gt;Population &amp;amp; Geography&lt;/span&gt;&lt;/span&gt;&quot;,&quot;&lt;span class=&#92;&quot;markdown prose dark:prose-invert contents&#92;&quot;&gt;&lt;span class=&#92;&quot;paragraph&#92;&quot;&gt;Model Builder&lt;/span&gt;&lt;/span&gt;&quot;,&quot;&lt;span class=&#92;&quot;markdown prose dark:prose-invert contents&#92;&quot;&gt;&lt;span class=&#92;&quot;paragraph&#92;&quot;&gt;Analysis&lt;/span&gt;&lt;/span&gt;&quot;,&quot;&lt;span class=&#92;&quot;markdown prose dark:prose-invert contents&#92;&quot;&gt;&lt;span class=&#92;&quot;paragraph&#92;&quot;&gt;Fitting&lt;/span&gt;&lt;/span&gt;&quot;,&quot;&lt;span class=&#92;&quot;markdown prose dark:prose-invert contents&#92;&quot;&gt;&lt;span class=&#92;&quot;paragraph&#92;&quot;&gt;Forecast&lt;/span&gt;&lt;/span&gt;&quot;,&quot;&lt;span class=&#92;&quot;markdown prose dark:prose-invert contents&#92;&quot;&gt;&lt;span class=&#92;&quot;paragraph&#92;&quot;&gt;Export&lt;/span&gt;&lt;/span&gt;&quot;,&quot;&lt;span class=&#92;&quot;markdown prose dark:prose-invert contents&#92;&quot;&gt;&lt;span class=&#92;&quot;paragraph&#92;&quot;&gt;Documentation&lt;/span&gt;&lt;/span&gt;&quot;]'><div data-kind='tab'><span class=\"markdown prose dark:prose-invert contents\"></span></div><div data-kind='tab'><span class=\"markdown prose dark:prose-invert contents\"></span></div><div data-kind='tab'><span class=\"markdown prose dark:prose-invert contents\"></span></div><div data-kind='tab'><span class=\"markdown prose dark:prose-invert contents\"></span></div><div data-kind='tab'><span class=\"markdown prose dark:prose-invert contents\"></span></div><div data-kind='tab'><span class=\"markdown prose dark:prose-invert contents\"></span></div><div data-kind='tab'><span class=\"markdown prose dark:prose-invert contents\"></span></div></marimo-tabs></marimo-ui-element><div style='display: flex;flex: 1;flex-direction: row;justify-content: flex-start;align-items: normal;flex-wrap: nowrap;gap: 0.5rem'><marimo-ui-element object-id='BYtC-0' random-id='54efc9f6-9e46-79f7-d93e-e25da34234ed'><marimo-text data-initial-value='&quot;/Users/rfp437/clt_outputs&quot;' data-label='&quot;&lt;span class=&#92;&quot;markdown prose dark:prose-invert contents&#92;&quot;&gt;&lt;span class=&#92;&quot;paragraph&#92;&quot;&gt;Output directory (auto-saves go here)&lt;/span&gt;&lt;/span&gt;&quot;' data-placeholder='&quot;&quot;' data-kind='&quot;text&quot;' data-full-width='true' data-disabled='false' data-debounce='true'></marimo-text></marimo-ui-element></div></div>"
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "emfo",
-      "code_hash": "467e8825625e20aff29134eaa076d537",
-      "outputs": [],
+      "code_hash": "7dd7feacc6b1563bc58da9ad87590acd",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "Hstk",
-      "code_hash": "63670acc1304de23337d861e0b1905a7",
-      "outputs": [],
+      "code_hash": "54631872f8a47d66fd999e7c4504a619",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "nWHF",
-      "code_hash": "d6f40f1e5920bcfe27d03e0604bc46e9",
-      "outputs": [],
+      "code_hash": "d3e295ad8e866d01f75fe3b1e34adbe9",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "iLit",
-      "code_hash": "707752a453a3432c31fb199efd8d9409",
-      "outputs": [],
+      "code_hash": "cdb74e88358c199fc79f051242e55bc9",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/html": "<details open style=\"border:1px solid rgba(127,127,127,0.25);border-left:4px solid #2e7d6b;border-radius:10px;padding:0.8rem 1rem;margin:0.45rem 0;background:rgba(127,127,127,0.03);\"><summary style=\"cursor:pointer;list-style:none;display:flex;align-items:flex-start;gap:.5rem;\"><span class=\"_clt_acc_arrow\" style=\"display:inline-flex;align-items:center;justify-content:center;height:1.7em;flex:none;transition:transform .15s;\">\u25b6</span><span style=\"flex:1 1 auto;min-width:0;\"><div style=\"display:flex;align-items:center;gap:.55rem;margin:.1rem 0 .15rem;\"><span style=\"display:inline-flex;align-items:center;justify-content:center;min-width:1.7em;height:1.7em;padding:0 .45em;border-radius:999px;background:#2e7d6b;color:#fff;font-weight:700;font-size:.95rem;line-height:1;flex:none;\">\u2460</span><span style=\"font-size:1.06rem;font-weight:700;color:#2e7d6b;\">Population Structure</span></div><div style=\"color:#777;font-size:.82rem;margin:.05rem 0 0 2.25rem;\">Age groups, risk groups, and single-population vs. metapopulation.</div></span></summary><style>summary::-webkit-details-marker{display:none;}details[open]>summary>._clt_acc_arrow{transform:rotate(90deg);}</style><div style=\"margin-top:0.5rem;\"><div style='display: flex;flex: 1;flex-direction: column;justify-content: flex-start;align-items: normal;flex-wrap: nowrap;gap: 0.5rem'><span class=\"markdown prose dark:prose-invert contents\"><span class=\"paragraph\">Define the population dimensions and geography here. The rest of the model (compartments, transitions, parameters, \u2026) is built in the <strong>Model Builder</strong> tab.</span></span><marimo-ui-element object-id='Hstk-0' random-id='31db071d-5688-2a4f-4fe9-5ebfd48d6b34'><marimo-radio data-initial-value='&quot;Count only&quot;' data-label='&quot;&lt;span class=&#92;&quot;markdown prose dark:prose-invert contents&#92;&quot;&gt;&lt;span class=&#92;&quot;paragraph&#92;&quot;&gt;Age-group specification&lt;/span&gt;&lt;/span&gt;&quot;' data-options='[&quot;Count only&quot;,&quot;Named age bands&quot;]' data-inline='false' data-disabled='false'></marimo-radio></marimo-ui-element><marimo-ui-element object-id='Hstk-1' random-id='718ac5e3-9c91-ca8a-4b3a-1349343e383a'><marimo-number data-initial-value='3' data-label='&quot;&lt;span class=&#92;&quot;markdown prose dark:prose-invert contents&#92;&quot;&gt;&lt;span class=&#92;&quot;paragraph&#92;&quot;&gt;Number of age groups (A)&lt;/span&gt;&lt;/span&gt;&quot;' data-start='1' data-stop='20' data-step='1' data-debounce='false' data-full-width='false' data-disabled='false'></marimo-number></marimo-ui-element><marimo-callout-output data-html='&quot;&lt;span class=&#92;&quot;markdown prose dark:prose-invert contents&#92;&quot;&gt;&lt;span class=&#92;&quot;paragraph&#92;&quot;&gt;Count-only mode: contact matrices cannot be fetched (the fetcher needs age-band definitions). For A &amp;gt; 1, either switch to &lt;strong&gt;Named age bands&lt;/strong&gt; to fetch them, or supply contact-matrix CSVs in Model Builder \u2192 Step 4.&lt;/span&gt;&lt;/span&gt;&quot;' data-kind='&quot;info&quot;'></marimo-callout-output><marimo-ui-element object-id='Hstk-3' random-id='39776d81-956e-eab8-73ac-7f07e36a9e89'><marimo-number data-initial-value='2' data-label='&quot;&lt;span class=&#92;&quot;markdown prose dark:prose-invert contents&#92;&quot;&gt;&lt;span class=&#92;&quot;paragraph&#92;&quot;&gt;Number of risk groups (R)&lt;/span&gt;&lt;/span&gt;&quot;' data-start='1' data-stop='10' data-step='1' data-debounce='false' data-full-width='false' data-disabled='false'></marimo-number></marimo-ui-element><marimo-ui-element object-id='Hstk-4' random-id='a629c5ce-01e2-2cd2-2539-695db9beccbd'><marimo-radio data-initial-value='&quot;Metapopulation&quot;' data-label='&quot;&lt;span class=&#92;&quot;markdown prose dark:prose-invert contents&#92;&quot;&gt;&lt;span class=&#92;&quot;paragraph&#92;&quot;&gt;Population mode&lt;/span&gt;&lt;/span&gt;&quot;' data-options='[&quot;Single population&quot;,&quot;Metapopulation&quot;]' data-inline='false' data-disabled='false'></marimo-radio></marimo-ui-element><marimo-ui-element object-id='Hstk-5' random-id='cdc469c7-a5cb-f8a0-5968-494e20c69316'><marimo-text data-initial-value='&quot;generic_core/examples/example_metapop_inputs&quot;' data-label='&quot;&lt;span class=&#92;&quot;markdown prose dark:prose-invert contents&#92;&quot;&gt;&lt;span class=&#92;&quot;paragraph&#92;&quot;&gt;Metapopulation folder path&lt;/span&gt;&lt;/span&gt;&quot;' data-placeholder='&quot;/path/to/metapop_folder/&quot;' data-kind='&quot;text&quot;' data-full-width='true' data-disabled='false' data-debounce='true'></marimo-text></marimo-ui-element><marimo-callout-output data-html='&quot;&lt;span class=&#92;&quot;markdown prose dark:prose-invert contents&#92;&quot;&gt;&lt;ul&gt;&#92;n&lt;li&gt;&lt;strong&gt;metapop_config.json&lt;/strong&gt;: OK (required)&lt;/li&gt;&#92;n&lt;li&gt;&lt;strong&gt;absolute_humidity.csv&lt;/strong&gt;: OK (optional shared)&lt;/li&gt;&#92;n&lt;li&gt;&lt;strong&gt;mobility_modifier.csv&lt;/strong&gt;: OK (optional shared)&lt;/li&gt;&#92;n&lt;li&gt;&lt;strong&gt;subpopulations&lt;/strong&gt;: OK (2: SubpopA, SubpopB)&lt;/li&gt;&#92;n&lt;li&gt;&lt;strong&gt;travel_matrix&lt;/strong&gt;: OK (2\u00d72, rows sum to 1)&lt;/li&gt;&#92;n&lt;li&gt;&lt;strong&gt;initial_conditions_SubpopA.json&lt;/strong&gt;: OK (initial conditions)&lt;/li&gt;&#92;n&lt;li&gt;&lt;strong&gt;school_work_calendar_SubpopA.csv&lt;/strong&gt;: OK (calendar)&lt;/li&gt;&#92;n&lt;li&gt;&lt;strong&gt;vaccines_SubpopA.csv&lt;/strong&gt;: OK (vaccines)&lt;/li&gt;&#92;n&lt;li&gt;&lt;strong&gt;initial_conditions_SubpopB.json&lt;/strong&gt;: OK (initial conditions)&lt;/li&gt;&#92;n&lt;li&gt;&lt;strong&gt;school_work_calendar_SubpopB.csv&lt;/strong&gt;: OK (calendar)&lt;/li&gt;&#92;n&lt;li&gt;&lt;strong&gt;vaccines_SubpopB.csv&lt;/strong&gt;: OK (vaccines)&lt;/li&gt;&#92;n&lt;/ul&gt;&lt;/span&gt;&quot;' data-kind='&quot;success&quot;'></marimo-callout-output></div></div></details>"
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "ZHCJ",
-      "code_hash": "cc81c51dbdb4accf2c38e00f047e9323",
-      "outputs": [],
+      "code_hash": "90c135fec64739bf4a4599319da1c719",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "ROlb",
-      "code_hash": "3c76dfbf16b580dceb42cb90e105a2f4",
-      "outputs": [],
+      "code_hash": "431f19fe7bfa854c5c5c6a3f3ec1617f",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "qnkX",
-      "code_hash": "795c2773f3201139370cf09326176515",
-      "outputs": [],
+      "code_hash": "bd081e487fe68c5d5c36a88bd44059ba",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "TqIu",
-      "code_hash": "1a3982b7bd715236863892e2e388ad6e",
-      "outputs": [],
+      "code_hash": "4db6b80521073e7fd8af0fcc310c0e7d",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "Vxnm",
-      "code_hash": "ffdefcfb92fa54dbbf9083cb5a92935e",
-      "outputs": [],
+      "code_hash": "f00936db095a0840c6d911e44ded41d7",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "DnEU",
-      "code_hash": "d3f4ed1df28db3c933cef8e14ac98397",
-      "outputs": [],
+      "code_hash": "3211907ca0df1a582d02609f0281c53e",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "ulZA",
-      "code_hash": "c4c83445d944be2367b6136e8e677f96",
-      "outputs": [],
+      "code_hash": "f30030679c78ae6d4b9d47d9a2a1d92d",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/html": "<details open style=\"border:1px solid rgba(127,127,127,0.25);border-left:4px solid #2e7d6b;border-radius:10px;padding:0.8rem 1rem;margin:0.45rem 0;background:rgba(127,127,127,0.03);\"><summary style=\"cursor:pointer;list-style:none;display:flex;align-items:flex-start;gap:.5rem;\"><span class=\"_clt_acc_arrow\" style=\"display:inline-flex;align-items:center;justify-content:center;height:1.7em;flex:none;transition:transform .15s;\">\u25b6</span><span style=\"flex:1 1 auto;min-width:0;\"><div style=\"display:flex;align-items:center;gap:.55rem;margin:.1rem 0 .15rem;\"><span style=\"display:inline-flex;align-items:center;justify-content:center;min-width:1.7em;height:1.7em;padding:0 .45em;border-radius:999px;background:#2e7d6b;color:#fff;font-weight:700;font-size:.95rem;line-height:1;flex:none;\">\u2461</span><span style=\"font-size:1.06rem;font-weight:700;color:#2e7d6b;\">Contact Matrices (geography)</span></div><div style=\"color:#777;font-size:.82rem;margin:.05rem 0 0 2.25rem;\">Optionally fetch age-structured contact matrices for a US state or country.</div></span></summary><style>summary::-webkit-details-marker{display:none;}details[open]>summary>._clt_acc_arrow{transform:rotate(90deg);}</style><div style=\"margin-top:0.5rem;\"><marimo-callout-output data-html='&quot;&lt;span class=&#92;&quot;markdown prose dark:prose-invert contents&#92;&quot;&gt;&lt;span class=&#92;&quot;paragraph&#92;&quot;&gt;Switch to &lt;strong&gt;Named age bands&lt;/strong&gt; above to fetch contact matrices for a geography. In count-only mode with A &amp;gt; 1, provide contact-matrix CSVs in Model Builder \u2192 Step 4 instead.&lt;/span&gt;&lt;/span&gt;&quot;' data-kind='&quot;info&quot;'></marimo-callout-output></div></details>"
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "ecfG",
-      "code_hash": "1c8c5bf55c272f29eab3612ee7e14be3",
-      "outputs": [],
+      "code_hash": "c46896a74acae593cb84b72badff8756",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "Pvdt",
-      "code_hash": "cf506d99dc36a7913425cb4005b13be4",
-      "outputs": [],
+      "code_hash": "d8adcf4e5dd72405e42b3d5a2c3c94cd",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/html": "<details open style=\"border:1px solid rgba(127,127,127,0.25);border-left:4px solid #2e7d6b;border-radius:10px;padding:0.8rem 1rem;margin:0.45rem 0;background:rgba(127,127,127,0.03);\"><summary style=\"cursor:pointer;list-style:none;display:flex;align-items:flex-start;gap:.5rem;\"><span class=\"_clt_acc_arrow\" style=\"display:inline-flex;align-items:center;justify-content:center;height:1.7em;flex:none;transition:transform .15s;\">\u25b6</span><span style=\"flex:1 1 auto;min-width:0;\"><div style=\"display:flex;align-items:center;gap:.55rem;margin:.1rem 0 .15rem;\"><span style=\"display:inline-flex;align-items:center;justify-content:center;min-width:1.7em;height:1.7em;padding:0 .45em;border-radius:999px;background:#2e7d6b;color:#fff;font-weight:700;font-size:.95rem;line-height:1;flex:none;\">\u2462</span><span style=\"font-size:1.06rem;font-weight:700;color:#2e7d6b;\">Population sizes</span></div><div style=\"color:#777;font-size:.82rem;margin:.05rem 0 0 2.25rem;\">Per age / risk-group population counts used as denominators.</div></span></summary><style>summary::-webkit-details-marker{display:none;}details[open]>summary>._clt_acc_arrow{transform:rotate(90deg);}</style><div style=\"margin-top:0.5rem;\"><div style='display: flex;flex: 1;flex-direction: column;justify-content: flex-start;align-items: normal;flex-wrap: nowrap;gap: 0.5rem'><span class=\"markdown prose dark:prose-invert contents\"><span class=\"paragraph\">Population totals per age group are fetched for the chosen geography (US states and countries supported via epydemix), or loaded from a CSV for custom / per-subpopulation populations.</span></span><marimo-ui-element object-id='TqIu-0' random-id='bcfd541f-861c-ff9d-6fd6-97795986961c'><marimo-radio data-initial-value='&quot;Fetch from geography&quot;' data-label='&quot;&lt;span class=&#92;&quot;markdown prose dark:prose-invert contents&#92;&quot;&gt;&lt;span class=&#92;&quot;paragraph&#92;&quot;&gt;Population source&lt;/span&gt;&lt;/span&gt;&quot;' data-options='[&quot;Fetch from geography&quot;,&quot;CSV file&quot;]' data-inline='false' data-disabled='false'></marimo-radio></marimo-ui-element><span class=\"markdown prose dark:prose-invert contents\"><span class=\"paragraph\"><strong>Risk-group split</strong> \u2014 the fetched (age-only) population is split across risk groups by these fractions (renormalised to sum to 1):</span></span><div style='display: flex;flex: 1;flex-direction: row;justify-content: flex-start;align-items: normal;flex-wrap: nowrap;gap: 0.5rem'><marimo-ui-element object-id='TqIu-3' random-id='70c448e1-f1b9-076a-7a12-716caa26c1d0'><marimo-number data-initial-value='0.5' data-label='&quot;&lt;span class=&#92;&quot;markdown prose dark:prose-invert contents&#92;&quot;&gt;&lt;span class=&#92;&quot;paragraph&#92;&quot;&gt;risk 0&lt;/span&gt;&lt;/span&gt;&quot;' data-start='0.0' data-stop='1.0' data-debounce='false' data-full-width='false' data-disabled='false'></marimo-number></marimo-ui-element><marimo-ui-element object-id='TqIu-4' random-id='2fd24d7a-78ec-1093-1a9e-3d867e110ddb'><marimo-number data-initial-value='0.5' data-label='&quot;&lt;span class=&#92;&quot;markdown prose dark:prose-invert contents&#92;&quot;&gt;&lt;span class=&#92;&quot;paragraph&#92;&quot;&gt;risk 1&lt;/span&gt;&lt;/span&gt;&quot;' data-start='0.0' data-stop='1.0' data-debounce='false' data-full-width='false' data-disabled='false'></marimo-number></marimo-ui-element></div><marimo-callout-output data-html='&quot;&lt;span class=&#92;&quot;markdown prose dark:prose-invert contents&#92;&quot;&gt;&lt;span class=&#92;&quot;paragraph&#92;&quot;&gt;No population fetched yet \u2014 choose a geography and press &lt;strong&gt;Fetch contact matrices &amp;amp; population&lt;/strong&gt; above.&lt;/span&gt;&lt;/span&gt;&quot;' data-kind='&quot;info&quot;'></marimo-callout-output><span class=\"markdown prose dark:prose-invert contents\"><span class=\"paragraph\"><strong>Population \u2014 SubpopA</strong> (total 250,000)</span></span><marimo-ui-element object-id='Pvdt-0' random-id='ffcc4ed7-0506-e4ee-c833-510e1cc34a15'><marimo-table data-initial-value='[]' data-label='null' data-data='&quot;[{&#92;&quot;risk_group&#92;&quot;:&#92;&quot;0&#92;&quot;,&#92;&quot;age0&#92;&quot;:41666.666666666664,&#92;&quot;age1&#92;&quot;:41666.666666666664,&#92;&quot;age2&#92;&quot;:41666.666666666664},{&#92;&quot;risk_group&#92;&quot;:&#92;&quot;1&#92;&quot;,&#92;&quot;age0&#92;&quot;:41666.666666666664,&#92;&quot;age1&#92;&quot;:41666.666666666664,&#92;&quot;age2&#92;&quot;:41666.666666666664},{&#92;&quot;risk_group&#92;&quot;:&#92;&quot;&#92;&#92;u03a3 all risk&#92;&quot;,&#92;&quot;age0&#92;&quot;:83333.33333333333,&#92;&quot;age1&#92;&quot;:83333.33333333333,&#92;&quot;age2&#92;&quot;:83333.33333333333}]&quot;' data-total-rows='3' data-total-columns='4' data-max-columns='50' data-banner-text='&quot;&quot;' data-pagination='false' data-page-size='10' data-field-types='[[&quot;risk_group&quot;,[&quot;string&quot;,&quot;object&quot;]],[&quot;age0&quot;,[&quot;number&quot;,&quot;float64&quot;]],[&quot;age1&quot;,[&quot;number&quot;,&quot;float64&quot;]],[&quot;age2&quot;,[&quot;number&quot;,&quot;float64&quot;]]]' data-show-filters='true' data-show-download='true' data-show-column-summaries='false' data-show-data-types='true' data-show-page-size-selector='false' data-show-column-explorer='true' data-show-chart-builder='true' data-row-headers='[]' data-has-stable-row-id='false' data-lazy='false' data-preload='false' data-download-file-name='&quot;_cell_Pvdt_df&quot;'></marimo-table></marimo-ui-element><span class=\"markdown prose dark:prose-invert contents\"><span class=\"paragraph\"><strong>Population \u2014 SubpopB</strong> (total 250,000)</span></span><marimo-ui-element object-id='Pvdt-1' random-id='fbac93c9-2c84-9fcb-a010-c1e35b1fec33'><marimo-table data-initial-value='[]' data-label='null' data-data='&quot;[{&#92;&quot;risk_group&#92;&quot;:&#92;&quot;0&#92;&quot;,&#92;&quot;age0&#92;&quot;:41666.666666666664,&#92;&quot;age1&#92;&quot;:41666.666666666664,&#92;&quot;age2&#92;&quot;:41666.666666666664},{&#92;&quot;risk_group&#92;&quot;:&#92;&quot;1&#92;&quot;,&#92;&quot;age0&#92;&quot;:41666.666666666664,&#92;&quot;age1&#92;&quot;:41666.666666666664,&#92;&quot;age2&#92;&quot;:41666.666666666664},{&#92;&quot;risk_group&#92;&quot;:&#92;&quot;&#92;&#92;u03a3 all risk&#92;&quot;,&#92;&quot;age0&#92;&quot;:83333.33333333333,&#92;&quot;age1&#92;&quot;:83333.33333333333,&#92;&quot;age2&#92;&quot;:83333.33333333333}]&quot;' data-total-rows='3' data-total-columns='4' data-max-columns='50' data-banner-text='&quot;&quot;' data-pagination='false' data-page-size='10' data-field-types='[[&quot;risk_group&quot;,[&quot;string&quot;,&quot;object&quot;]],[&quot;age0&quot;,[&quot;number&quot;,&quot;float64&quot;]],[&quot;age1&quot;,[&quot;number&quot;,&quot;float64&quot;]],[&quot;age2&quot;,[&quot;number&quot;,&quot;float64&quot;]]]' data-show-filters='true' data-show-download='true' data-show-column-summaries='false' data-show-data-types='true' data-show-page-size-selector='false' data-show-column-explorer='true' data-show-chart-builder='true' data-row-headers='[]' data-has-stable-row-id='false' data-lazy='false' data-preload='false' data-download-file-name='&quot;_cell_Pvdt_df&quot;'></marimo-table></marimo-ui-element></div></div></details>"
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "ZBYS",
-      "code_hash": "b6ab8978fa1108431118dfce7bab88ef",
-      "outputs": [],
+      "code_hash": "866a1f16f714e73ee7111e3583037bc2",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "aLJB",
-      "code_hash": "74d5cc36c6612032873dda14540e0ffc",
-      "outputs": [],
+      "code_hash": "382c1624e5cf1fe2c1d55408d541b644",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "nHfw",
-      "code_hash": "a435afd4b61074170d0afa03933e0ba9",
-      "outputs": [],
+      "code_hash": "ec883f430f348db786f8257ec3e9a4f0",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "xXTn",
-      "code_hash": "ea24d4722a3b70b071e236b72ad36ad3",
-      "outputs": [],
+      "code_hash": "5e3d12122a2499701d64902a2126d113",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "AjVT",
-      "code_hash": "469c70a510481ea5c239b05a79b04819",
-      "outputs": [],
+      "code_hash": "5dc914b4725c0d976f1fc8cd4680f8dc",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "pHFh",
-      "code_hash": "e26b418cf9e93e2f88754c40d51982ae",
-      "outputs": [],
+      "code_hash": "63670acc1304de23337d861e0b1905a7",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "NCOB",
-      "code_hash": "5c18dbb38bacbdd3a678fd47b20eb01d",
-      "outputs": [],
+      "code_hash": "d6f40f1e5920bcfe27d03e0604bc46e9",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "aqbW",
-      "code_hash": "6764cab8a212d853202fa77b876848f9",
-      "outputs": [],
+      "code_hash": "08f12c92989c81019a2edfd49bddc211",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "TRpd",
-      "code_hash": "2c33b18b6046b86c6815bcfa0ec04258",
-      "outputs": [],
+      "code_hash": "ead96019bc31a553a44975b587deeba6",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "TXez",
-      "code_hash": "4666d783c0c71c02b6d2b3ee724e391d",
-      "outputs": [],
+      "code_hash": "a32a5ce8af9fed413862cb15f0e40603",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "dNNg",
-      "code_hash": "e70ba3c468de953c6f7d20b87ce08ee7",
-      "outputs": [],
+      "code_hash": "d3f4ed1df28db3c933cef8e14ac98397",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "yCnT",
-      "code_hash": "6becbbd6d3cb4663777d5772785ab5c9",
-      "outputs": [],
+      "code_hash": "c4c83445d944be2367b6136e8e677f96",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "wlCL",
-      "code_hash": "2d0cf827fc12a35d3667f7115d823fbe",
-      "outputs": [],
+      "code_hash": "f6546a157fb006826dca2e4de94e77ea",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "kqZH",
-      "code_hash": "b2484e521d76d9213ffc9484351b0e07",
-      "outputs": [],
+      "code_hash": "cf506d99dc36a7913425cb4005b13be4",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "wAgl",
-      "code_hash": "1a82c86e884f10c9c5ef72b9bf4f4cd2",
-      "outputs": [],
+      "code_hash": "0f08209c06d78a8b5d4aaa0c2093d204",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "rEll",
-      "code_hash": "fb719336e9acd4f8198594f6e947d950",
-      "outputs": [],
+      "code_hash": "9400f102c26b5827adef436bfbb80214",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "dGlV",
-      "code_hash": "83f09ae85a44eecc36bcc23d10f768bd",
-      "outputs": [],
+      "code_hash": "e0cb4898db5b91c983d93adcffd1723f",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "SdmI",
-      "code_hash": "de43fa99e02ca0f28715bf8dc4463259",
-      "outputs": [],
+      "code_hash": "5a7bb5bab6bb4a3a3abeb44edc1fc5ba",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "lgWD",
-      "code_hash": "0235af271608bfa4453d98950681c8ab",
-      "outputs": [],
+      "code_hash": "2aef33ca8075635dc580577d228cdfb4",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "yOPj",
-      "code_hash": "66da7c00c0bdeca1e97b1362a90bde2f",
-      "outputs": [],
+      "code_hash": "d48c7305746141262e8ecb8df158dd55",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "fwwy",
-      "code_hash": "4e718929cb6b876b7768f7e7fd6f7da3",
-      "outputs": [],
+      "code_hash": "2caa91ba86e7abd7fff14e87a3fafc5a",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "LJZf",
-      "code_hash": "894f0bdd861c864fd3c94decac707278",
-      "outputs": [],
+      "code_hash": "c648bd93b9c46394874f98272dbe01b6",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "urSm",
-      "code_hash": "dc0fb80eb4d24bdec30975bfa61ce683",
-      "outputs": [],
+      "code_hash": "7faaa649d94fcf9e143b545bb46fe5ec",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "jxvo",
-      "code_hash": "cac7e69f022681fb7f9229e20e0b51b4",
-      "outputs": [],
+      "code_hash": "16ea236beacf61430bcdb36b5bf326a2",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "mWxS",
-      "code_hash": "904a5b21e1a56e2dcdbe0d761b180602",
-      "outputs": [],
+      "code_hash": "c8641107ff727b7cc8d409e7004e2040",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "CcZR",
-      "code_hash": "a257c866d068c11ceb94dbc0f5c101ab",
-      "outputs": [],
+      "code_hash": "af26e36008ecafd04cd3ba54cf93425a",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "YWSi",
-      "code_hash": "1c97cfc6e6495c863ab3deece0022e05",
-      "outputs": [],
+      "code_hash": "882a0ded48aaf4976e182a7af76427ec",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "zlud",
-      "code_hash": "a4e39a44d6618a56a512166d799a6c06",
-      "outputs": [],
+      "code_hash": "eb99339274c6f88d42a362d1304d112b",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "tZnO",
-      "code_hash": "9836bee689b404d693648195051323a4",
-      "outputs": [],
+      "code_hash": "1a82c86e884f10c9c5ef72b9bf4f4cd2",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "xvXZ",
-      "code_hash": "96c2956cca211661696f19fc5c8b1169",
-      "outputs": [],
+      "code_hash": "6cc25145d545990fb4a3b26ce2f8cc71",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "CLip",
-      "code_hash": "163f20686942a265b65c3a2eca7eff6c",
-      "outputs": [],
+      "code_hash": "0c39a5ec8769db4c81c0051a75412fd8",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "YECM",
-      "code_hash": "cddebaad3d227638c5dc771d8ac96608",
-      "outputs": [],
+      "code_hash": "8e6337049814f1edff6691c29c44cc3f",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "cEAS",
-      "code_hash": "fc2d8e2d21d1abce46b74fc6c84b8101",
-      "outputs": [],
+      "code_hash": "0235af271608bfa4453d98950681c8ab",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "iXej",
-      "code_hash": "2b579865587929a4d110f197c119c0a0",
-      "outputs": [],
+      "code_hash": "186a863ef8c1b9890a6a669da2fd817a",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "EJmg",
-      "code_hash": "b84e7e4b4a38937c99c3e81d700c04d3",
-      "outputs": [],
+      "code_hash": "016bb5156fb9937bd2e8474bf3066784",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "UmEG",
-      "code_hash": "588bbb2483e5497107161f0be8c89a06",
-      "outputs": [],
+      "code_hash": "894f0bdd861c864fd3c94decac707278",
+      "outputs": [
+        {
+          "type": "error",
+          "ename": "ancestor-stopped",
+          "evalue": "This cell wasn't run because an ancestor was stopped with `mo.stop`: ",
+          "traceback": []
+        }
+      ],
       "console": []
     },
     {
       "id": "vEBW",
-      "code_hash": "77d0a0d2bf38a1eb57d06453afe79818",
-      "outputs": [],
+      "code_hash": "9cd4e2b36e1d0235c5d645ea2880d0a1",
+      "outputs": [
+        {
+          "type": "error",
+          "ename": "ancestor-stopped",
+          "evalue": "This cell wasn't run because an ancestor was stopped with `mo.stop`: ",
+          "traceback": []
+        }
+      ],
       "console": []
     },
     {
       "id": "kLmu",
-      "code_hash": "4640aa6002b64828521d7a66c4b21c7d",
-      "outputs": [],
+      "code_hash": "49ddac0664fe7ac9360f28125beb4d95",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "IpqN",
-      "code_hash": "a29d96bc8969c6c35c7443f6c9d41519",
-      "outputs": [],
+      "code_hash": "813c0440572c7d64f39745066de8303f",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "dxZZ",
-      "code_hash": "4d44c07b60cdf44ad013595f4b542bae",
-      "outputs": [],
+      "code_hash": "32f5bf2c718cf7e0f8677fc4f718dd58",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "dlnW",
-      "code_hash": "29b391267209eb73eff4adb7f1f47f81",
-      "outputs": [],
+      "code_hash": "03f89ef0144c8b9b5f5ab8da3ec2588f",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "TTti",
-      "code_hash": "afd4cb32d86894d5ba35d0a12c8ae8d1",
-      "outputs": [],
+      "code_hash": "e83929bc8f7d1cef2cf6c79dfd2c5a71",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "RKFZ",
-      "code_hash": "c21931af33f1cfd663b920088e0643ca",
-      "outputs": [],
+      "code_hash": "7394fbca122127ef5841db1762dfaf62",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "IaQp",
-      "code_hash": "8f9c22f5097c03db91a8dcd5ffbaabf3",
-      "outputs": [],
+      "code_hash": "a83a57ba4dbe7d13a5d31be552078207",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "IWgg",
-      "code_hash": "7ddaa7c5d6538dbb17d284ce8aa970d5",
-      "outputs": [],
+      "code_hash": "f20d864b9a5e0cc1ee5f043e2a2af88e",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "fCoF",
-      "code_hash": "7d155539649e351c3b5d70b838ba3535",
-      "outputs": [],
+      "code_hash": "a504596be1827a40e0a43e1e2d29b693",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "LkGn",
-      "code_hash": "a4668ff85f3691609e54048d3afeb6b6",
-      "outputs": [],
+      "code_hash": "9b40604265afe62be2563151bfafb84e",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "zVRe",
-      "code_hash": "dd7878b33b67db4c20de6c3e8daec229",
-      "outputs": [],
+      "code_hash": "ba6cf80e8cc3df3bcfe84f189a2b827e",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "woaO",
-      "code_hash": "b0a54bba12970edf58ace2d27095976b",
-      "outputs": [],
+      "code_hash": "53394f2c2306a03cfa8116f7556fe081",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "HnMC",
-      "code_hash": "c20c0bc02a9586a0b2c17be35c5f4843",
-      "outputs": [],
+      "code_hash": "c01faa7b082c689cbda8d9e5054d4838",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "wadT",
-      "code_hash": "5678aad76334b843812cef0f1ea35199",
-      "outputs": [],
+      "code_hash": "bfd3d4fe551bcc7000c4417e0c3ce449",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "VCRE",
-      "code_hash": "bf80b7e072d83449713fbeaa074c27d6",
-      "outputs": [],
+      "code_hash": "96c2956cca211661696f19fc5c8b1169",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "hgqU",
-      "code_hash": "df8f207f2e1256c0245ad0d1bb23fa51",
-      "outputs": [],
+      "code_hash": "8fd0806d887ba6e4495e874acdbe72f0",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "PSUk",
-      "code_hash": "a919e25486c3aee059da4de20e32df11",
-      "outputs": [],
+      "code_hash": "fc7e6b7f6d7a107cf2151dffc4afa61c",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "mfOT",
-      "code_hash": "5ea322e583b44969a21abdb1363f4253",
-      "outputs": [],
+      "code_hash": "1c5d5e0426dce1d62b92cf648cd7face",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "vGiW",
-      "code_hash": "11b4892bfd5740f0c4191e43d6d7b6f5",
-      "outputs": [],
+      "code_hash": "8a0e6d96eac510f9995bdf96659775b0",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "SYQT",
-      "code_hash": "497cc11414f7d5b685f64387b570b5a8",
-      "outputs": [],
+      "code_hash": "cddebaad3d227638c5dc771d8ac96608",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     },
     {
       "id": "bMrW",
-      "code_hash": "9e22d015a19de565a37f4cfe94180881",
-      "outputs": [],
+      "code_hash": "5cdb7aa45bf8728e401d65f046054f0a",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "PSQn",
+      "code_hash": "c14cf9e6c08ca972a6104120e6178a90",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "OfTS",
+      "code_hash": "b84e7e4b4a38937c99c3e81d700c04d3",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "lQxp",
+      "code_hash": "bd752ea20b25d70f1dfd7af2c9c4bb22",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "Plbk",
+      "code_hash": "8eaba600b294478b6c3bc152176fe4be",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "rSYo",
+      "code_hash": "d4f4ab9e5857ccb301b2f7f3203d5142",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "HuZB",
+      "code_hash": "4640aa6002b64828521d7a66c4b21c7d",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "WfYj",
+      "code_hash": "d841ff59d358594830e3d2ce449df1dc",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "Ynfw",
+      "code_hash": "78fa243ae687d5950470a031eaef52e7",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "LqFA",
+      "code_hash": "4d44c07b60cdf44ad013595f4b542bae",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "uDnK",
+      "code_hash": "29b391267209eb73eff4adb7f1f47f81",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "aWBL",
+      "code_hash": "412430d043d34886d7b2ec7f5fa8152e",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "MIsd",
+      "code_hash": "27a49ecdc2dc1b5e8ac9c08400757c28",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "IrqS",
+      "code_hash": "c21931af33f1cfd663b920088e0643ca",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "Lpqv",
+      "code_hash": "8f9c22f5097c03db91a8dcd5ffbaabf3",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "upgv",
+      "code_hash": "43d0e6fa334f8e8d182b52195b530b50",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "WJUG",
+      "code_hash": "3586b517042eb30a7951203685943c09",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "pCao",
+      "code_hash": "a4668ff85f3691609e54048d3afeb6b6",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "wEIy",
+      "code_hash": "dd7878b33b67db4c20de6c3e8daec229",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "wlyU",
+      "code_hash": "f4b05bd49c92c04a3d8a7364d4527762",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "PieA",
+      "code_hash": "c20c0bc02a9586a0b2c17be35c5f4843",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "GrQN",
+      "code_hash": "ff3eab7e18c415dc51ed6a18039ed51f",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "Ilkb",
+      "code_hash": "7316f7c55eb82d276f6f7a4201112d64",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "mySd",
+      "code_hash": "bf80b7e072d83449713fbeaa074c27d6",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "vGkK",
+      "code_hash": "df8f207f2e1256c0245ad0d1bb23fa51",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "zmIa",
+      "code_hash": "a919e25486c3aee059da4de20e32df11",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "NOfw",
+      "code_hash": "3181f8e564229e417be666395b661b69",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "jXAc",
+      "code_hash": "6c579fcd0041d03ca8575efb7c94ecf1",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "mSxP",
+      "code_hash": "176ea0db92c9abcf523f9ef92643e101",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "IZEX",
+      "code_hash": "fb640a971633225761c22b5afee70f38",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
       "console": []
     }
   ]

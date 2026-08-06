@@ -8,6 +8,7 @@ def _imports():
     import json
     import io
     import copy
+    import re
     import sqlite3
     import datetime
     from pathlib import Path
@@ -58,11 +59,13 @@ def _imports():
         summarize_outcomes as _generic_summarize_outcomes,
     )
     from generic_core.calibration import compute_rsquared
-
-    FitResult = namedtuple("FitResult", ["best_params", "loss_curve", "num_days", "observed", "method", "accepted_params", "sim_trajectories", "fit_targets", "target_labels", "target_weights", "target_modes", "r2_threshold", "n_ar_accepted"], defaults=[None, None])
+    from generic_core.fitting import (
+        FitResult, FitTarget, FitConfig, run_fit,
+        fit_result_to_dict, fit_result_from_dict,
+    )
 
     return (
-        Path, SimpleNamespace, namedtuple, copy, sqlite3, datetime,
+        Path, SimpleNamespace, namedtuple, copy, re, sqlite3, datetime,
         clt, flu, gc, cmf, io, json, mo, np, pd, plt,
         ConfigDrivenMetapopModel, ConfigDrivenSubpopModel,
         build_state_from_config, build_params_from_config,
@@ -74,7 +77,8 @@ def _imports():
         daily_transition_sum, compartment_timeseries,
         _generic_attack_rate, _generic_summarize_outcomes,
         compute_rsquared,
-        FitResult,
+        FitResult, FitTarget, FitConfig, run_fit,
+        fit_result_to_dict, fit_result_from_dict,
     )
 
 
@@ -85,6 +89,11 @@ def _imports():
 
 @app.cell
 def _helpers(Path, SimpleNamespace, json, np, pd):
+    from generic_core.model_factory import (
+        build_scalar_array,
+        build_notebook_schedules_input,
+    )
+
     def parse_csv_list(text: str) -> list[str]:
         """Split a comma-separated string into a list of trimmed, non-empty items."""
         return [_item.strip() for _item in text.split(",") if _item.strip()]
@@ -92,75 +101,6 @@ def _helpers(Path, SimpleNamespace, json, np, pd):
     def rel_inf_param_name(compartment: str) -> str:
         """Auto-generated parameter name for a compartment's relative infectiousness."""
         return f"{compartment}_relative_infectiousness"
-
-    def build_scalar_array(value, num_age_groups: int = 1, num_risk_groups: int = 1) -> "np.ndarray":
-        """Return an (A×R) array filled with ``value``."""
-        return np.full((num_age_groups, num_risk_groups), float(value), dtype=float)
-
-    def build_notebook_schedules_input(
-        start_date,
-        num_days: int,
-        absolute_humidity: float,
-        mobility_value: float,
-        daily_vaccines_value,  # float, or an A×R nested list to vary by age/risk group
-        num_age_groups: int = 1,
-        num_risk_groups: int = 1,
-        absolute_humidity_df=None,
-        school_work_calendar_df=None,
-        mobility_df=None,
-        daily_vaccines_df=None,
-    ) -> "SimpleNamespace":
-        """Assemble a schedules-input namespace for the model from the per-schedule
-        DataFrames, falling back to constant-valued DataFrames where a df is None."""
-        _horizon = max(int(num_days) + 14, 370)
-        _dates = pd.date_range(start=start_date, periods=_horizon, freq="D").date
-
-        _ah_df = absolute_humidity_df
-        if _ah_df is None:
-            _ah_df = pd.DataFrame({
-                "date": _dates,
-                "absolute_humidity": [float(absolute_humidity)] * _horizon,
-            })
-
-        _cal_df = school_work_calendar_df
-        if _cal_df is None:
-            _cal_df = pd.DataFrame({
-                "date": _dates,
-                "is_school_day": [1.0] * _horizon,
-                "is_work_day": [1.0] * _horizon,
-            })
-
-        _mob_payload = json.dumps(
-            np.full((num_age_groups, num_risk_groups), float(mobility_value)).tolist()
-        )
-        _mob_df = mobility_df
-        if _mob_df is None:
-            _mob_df = pd.DataFrame({
-                "day_of_week": [
-                    "monday", "tuesday", "wednesday", "thursday",
-                    "friday", "saturday", "sunday",
-                ],
-                "mobility_modifier": [_mob_payload] * 7,
-            })
-
-        if isinstance(daily_vaccines_value, (list, tuple)):
-            _vax_arr = np.asarray(daily_vaccines_value, dtype=float)
-        else:
-            _vax_arr = np.full((num_age_groups, num_risk_groups), float(daily_vaccines_value))
-        _vax_payload = json.dumps(_vax_arr.tolist())
-        _vax_df = daily_vaccines_df
-        if _vax_df is None:
-            _vax_df = pd.DataFrame({
-                "date": _dates,
-                "daily_vaccines": [_vax_payload] * _horizon,
-            })
-
-        return SimpleNamespace(
-            absolute_humidity_df=_ah_df,
-            school_work_calendar_df=_cal_df,
-            mobility_df=_mob_df,
-            daily_vaccines_df=_vax_df,
-        )
 
     def load_csv_validated(path_str: str, required_columns) -> tuple:
         """Load a CSV from path_str and validate column names.
@@ -451,49 +391,10 @@ def _helpers(Path, SimpleNamespace, json, np, pd):
                 return None, f"Row {_row_i}: population '{_row['population']}' is not numeric."
         return _pop, None
 
-    def build_compartment_init(seed_arrays, population_AR, compartments):
-        """Build a {compartment: A×R array} init dict from seed counts + population.
-
-        ``seed_arrays`` maps non-first compartment names to A×R arrays of seeded
-        counts. The first compartment receives ``population − Σ seeds`` per cell
-        (clamped at 0). Returns ``(comp_init, overflow)`` where ``overflow`` is
-        True if any cell's seeds exceeded its population."""
-        _pop = np.asarray(population_AR, dtype=float)
-        _seed_total = np.zeros_like(_pop)
-        _comp_init = {}
-        for _c in compartments[1:] if len(compartments) > 1 else []:
-            _arr = np.asarray(seed_arrays.get(_c, np.zeros_like(_pop)), dtype=float)
-            _comp_init[_c] = _arr
-            _seed_total = _seed_total + _arr
-        _remainder = _pop - _seed_total
-        _overflow = bool(np.any(_remainder < 0))
-        if compartments:
-            _comp_init[compartments[0]] = np.clip(_remainder, 0.0, None)
-        for _c in compartments:
-            _comp_init.setdefault(_c, np.zeros_like(_pop))
-        return _comp_init, _overflow
-
-    def read_initial_conditions(config, subpop_name, compartments,
-                                num_age_groups, num_risk_groups):
-        """Read per-subpop initial conditions from ``config['initial_conditions']``.
-
-        Returns a ``{compartment: A×R array}`` init dict (first compartment =
-        population − Σ seeds), or None when the subpop has no entry. Used by the
-        metapop and shared-factory run paths, with the folder JSON as fallback."""
-        _ic = (config or {}).get("initial_conditions", {})
-        _entry = _ic.get(subpop_name)
-        if not _entry:
-            return None
-        _A = int(num_age_groups)
-        _R = int(num_risk_groups)
-        _pop = np.asarray(_entry.get("population",
-                                     np.zeros((_A, _R))), dtype=float)
-        _seeds = {}
-        for _c, _arr in (_entry.get("seeds", {}) or {}).items():
-            if _c in compartments:
-                _seeds[_c] = np.asarray(_arr, dtype=float)
-        _comp_init, _ = build_compartment_init(_seeds, _pop, compartments)
-        return _comp_init
+    from generic_core.model_factory import (
+        build_compartment_init,
+        read_initial_conditions,
+    )
 
     return (
         build_notebook_schedules_input,
@@ -625,17 +526,41 @@ def _clt_style_helpers(mo):
         )
 
     def section_card(header, body, accent=None):
-        """Wrap ``header`` + ``body`` in a bordered card with a colored accent
-        stripe down the left edge."""
+        """Wrap ``header`` + ``body`` in a bordered, collapsible card (a native
+        ``<details>`` accordion, open by default) with a colored accent stripe
+        down the left edge.
+
+        ``header``/``body`` are spliced in via ``.text`` rather than an
+        f-string ``{}`` placeholder: ``Html.__format__`` joins every line with
+        a space (it's meant for inlining short snippets into markdown), which
+        silently collapses any ``<pre>`` blocks nested inside ``body`` (e.g.
+        the config-preview JSON) onto a single line.
+        """
         _stripe = accent or "#9aa7b8"
-        return mo.vstack([header, body], gap=0.5).style({
-            "border": "1px solid rgba(127,127,127,0.25)",
-            "border-left": f"4px solid {_stripe}",
-            "border-radius": "10px",
-            "padding": "0.8rem 1rem",
-            "margin": "0.45rem 0",
-            "background": "rgba(127,127,127,0.03)",
-        })
+        _header_html = header.text if isinstance(header, mo.Html) else header
+        _body_html = body.text if isinstance(body, mo.Html) else body
+        return mo.Html(
+            '<details open style="'
+            "border:1px solid rgba(127,127,127,0.25);"
+            f"border-left:4px solid {_stripe};"
+            "border-radius:10px;"
+            "padding:0.8rem 1rem;"
+            "margin:0.45rem 0;"
+            'background:rgba(127,127,127,0.03);">'
+            '<summary style="cursor:pointer;list-style:none;'
+            'display:flex;align-items:flex-start;gap:.5rem;">'
+            '<span class="_clt_acc_arrow" style="display:inline-flex;'
+            "align-items:center;justify-content:center;height:1.7em;"
+            'flex:none;transition:transform .15s;">▶</span>'
+            f'<span style="flex:1 1 auto;min-width:0;">{_header_html}</span>'
+            "</summary>"
+            "<style>"
+            "summary::-webkit-details-marker{display:none;}"
+            'details[open]>summary>._clt_acc_arrow{transform:rotate(90deg);}'
+            "</style>"
+            f'<div style="margin-top:0.5rem;">{_body_html}</div>'
+            "</details>"
+        )
 
     return CLT_ACCENT, tip_label, with_tip, wtip, step_header, section_card
 

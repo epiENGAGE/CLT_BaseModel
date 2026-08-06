@@ -8,9 +8,9 @@ def _builder_overview(mo, main_tab, CLT_ACCENT):
     _ACC = CLT_ACCENT["builder"]
     _steps = [
         ("0", "Load config"), ("1", "Compartments"), ("2", "Transitions"),
-        ("3", "Parameters"), ("4", "Schedules"), ("4", "Immunity"),
-        ("5", "Diagram"), ("6", "Initial conditions"), ("7", "Sim settings"),
-        ("8", "Config preview"), ("9", "Run"),
+        ("3", "Parameters"), ("4", "Schedules"), ("5", "Immunity"),
+        ("6", "Diagram"), ("7", "Initial conditions"), ("8", "Sim settings"),
+        ("9", "Config preview"), ("10", "Run"),
     ]
     _chips = "".join(
         '<span style="display:inline-flex;align-items:center;gap:.35rem;'
@@ -233,7 +233,7 @@ Available templates:
 **Step 3 — Parameters**
 Numeric sliders appear automatically for every parameter name referenced by your transitions.
 
-**Step 4 — Schedules and Immunity**
+**Step 4 — Schedules**
 For rate templates that use schedules (humidity, mobility, vaccines):
 - Choose *constant* to use a single scalar value for the whole simulation.
 - Choose *csv* to load a real time-varying schedule from a CSV file.
@@ -243,11 +243,14 @@ them in the Population & Geography tab, or load a saved config that already has 
 embedded. Risk groups (R > 1) affect transition and susceptibility parameters but do not
 require separate contact matrices.
 
-**Step 5 — Model diagram**
+**Step 5 — Immunity**
+Cumulative infection- and vaccine-induced immunity metrics (M / MV) and their waning.
+
+**Step 6 — Model diagram**
 Auto-generated from your compartments and transitions. Requires `graphviz`; falls back
 to a simple matplotlib diagram if not installed.
 
-**Step 6 — Initial conditions**
+**Step 7 — Initial conditions**
 Seed each compartment by age and risk group (absolute counts) in an editable table;
 the first compartment receives the remaining population per cell. Population totals
 come from the **Population & Geography** tab (fetched per age group, split across risk
@@ -255,14 +258,14 @@ groups, or loaded from a CSV). In metapopulation mode, pick a subpopulation to e
 table — these override `initial_conditions_{name}.json` in the metapop folder, which is
 used as a fallback for any subpop left without seeds.
 
-**Step 7 — Simulation settings**
+**Step 8 — Simulation settings**
 Days, deterministic vs. stochastic, number of replicates, RNG seed, timesteps per day.
 
-**Step 8 — Config preview and download**
+**Step 9 — Config preview and download**
 The full config JSON (including file paths and age/risk group settings) is shown and
 can be downloaded. The downloaded file can be re-loaded in Step 0.
 
-**Step 9 — Run**
+**Step 10 — Run**
 Press the *Run simulation* button. Results appear as epidemic curves and a summary table.
         """),
 
@@ -295,8 +298,9 @@ The JSON array shape must be A rows × R columns.
 
 **`vaccines_{name}.csv`** — per-subpop, date-indexed, JSON A×R array per row
 
-Each value is the **proportion** of that age×risk group vaccinated on that day
-(i.e. daily count ÷ group population), not a raw count.
+Each value is the **proportion** of that age×risk group's not-yet-infected
+pool (origin + destination compartment, e.g. daily count ÷ (S + V)) vaccinated
+on that day, not a raw count.
 ```
 date,daily_vaccines
 2024-01-01,"[[0.000417, 0.000667], [0.000288, 0.000615], [0.001563, 0.003]]"
@@ -369,8 +373,8 @@ Example `initial_conditions_West.json`:
 }
 ```
 
-Per-subpop initial conditions seeded in the **Step 6** tables take precedence over this
-file. The file is used as a fallback for any subpopulation left without seeds in Step 6.
+Per-subpop initial conditions seeded in the **Step 7** tables take precedence over this
+file. The file is used as a fallback for any subpopulation left without seeds in Step 7.
 If neither is present, all compartments are initialised to zero and the simulation will
 stop with an error when the model has more than one age or risk group.
 
@@ -714,7 +718,7 @@ def _transition_show(
         "Higher r → stronger rate reduction.\n"
         "Example: r_inf = 0.5, M = 1 → rate halved.\n\n"
         "Requires at least one of M or MV to be enabled\n"
-        "in Step 4, otherwise immunity_force stays at 1."
+        "in Step 5, otherwise immunity_force stays at 1."
     )
 
     def _immunity_checkbox(checkbox):
@@ -789,7 +793,8 @@ def _transition_show(
                     "The count is rounded to the nearest integer and capped at\n"
                     "the origin compartment's current population -- this is a\n"
                     "deterministic, exact transfer, not a stochastic rate.\n\n"
-                    "Configure the underlying data source and delay in Step 4.",
+                    "Configure the underlying data source in Step 4 and the "
+                    "transfer delay in Step 5.",
                     t_schedule_name[_i],
                 ),
             ])
@@ -1172,7 +1177,7 @@ def _schedule_and_immunity_ui(
     # writing into this state dict — a single long-lived widget reused across
     # subpops would reset to its construction-time default each time the
     # selector switches back to a previously-edited subpop (see _init_ui's
-    # get_seed_values/set_seed_values, which hit the same issue for Step 6).
+    # get_seed_values/set_seed_values, which hit the same issue for Step 7).
     get_subpop_vax_values, set_subpop_vax_values = mo.state(
         dict(loaded_config.get("subpop_daily_vaccines", {}) or {})
     )
@@ -1514,8 +1519,9 @@ def _schedule_csv_show(
         if vax_mode.value == "constant":
             _vax_const_tip = (
                 "Each value is the proportion of that age/risk group's "
-                "population vaccinated per day (e.g. 0.001 = 0.1% of the "
-                "group vaccinated that day) — not a raw dose count.\n\n"
+                "not-yet-infected pool (origin + destination compartment, e.g. "
+                "S + V) vaccinated per day (e.g. 0.001 = 0.1% of that pool "
+                "vaccinated that day) — not a raw dose count.\n\n"
                 "Off: one value broadcasts to every age/risk group.\n"
                 "Vary by age/risk group: enter a separate proportion per cell."
             )
@@ -1571,7 +1577,8 @@ def _schedule_csv_show(
             _parts.append(wtip(
                 vax_path,
                 "CSV columns: date, daily_vaccines — each value is the "
-                "proportion of that age×risk group vaccinated on that day "
+                "proportion of that age×risk group's not-yet-infected pool "
+                "(origin + destination compartment) vaccinated on that day "
                 "(JSON A×R array per row), not a raw count.",
             ))
             if vax_path.value.strip():
@@ -1628,6 +1635,21 @@ def _schedule_csv_show(
             _no_csv_inline = []
             _no_csv_unset = []
 
+            def _inline_contact_matrix_source(_mname):
+                # Inline values can live at top level (single-subpop configs)
+                # or per-subpopulation under "subpop_params" (metapop configs).
+                # Returns a human-readable source label, or None if absent.
+                if is_array_param(loaded_config, _mname):
+                    return "the loaded config"
+                _subpop_params = loaded_config.get("subpop_params", {})
+                _sps_with_value = [
+                    _sp for _sp, _entry in _subpop_params.items()
+                    if isinstance(_entry, dict) and isinstance(_entry.get(_mname), list)
+                ]
+                if _sps_with_value:
+                    return "per-subpopulation overrides (`subpop_params`) in the loaded config"
+                return None
+
             _parts.append(wtip(total_contact_csv_path, _contact_csv_tip))
             if total_contact_csv_path.value.strip():
                 _total_contact_mat, _tc_err = load_contact_matrix_csv(
@@ -1641,8 +1663,8 @@ def _schedule_csv_show(
                         mo.md(f"Total contact matrix: {num_age_groups}×{num_age_groups} loaded."),
                         kind="success",
                     ))
-            elif is_array_param(loaded_config, "total_contact_matrix"):
-                _no_csv_inline.append("total")
+            elif (_tc_src := _inline_contact_matrix_source("total_contact_matrix")):
+                _no_csv_inline.append(("total", _tc_src))
             else:
                 _no_csv_unset.append("total")
 
@@ -1659,8 +1681,8 @@ def _schedule_csv_show(
                         mo.md(f"School contact matrix: {num_age_groups}×{num_age_groups} loaded."),
                         kind="success",
                     ))
-            elif is_array_param(loaded_config, "school_contact_matrix"):
-                _no_csv_inline.append("school")
+            elif (_sc_src := _inline_contact_matrix_source("school_contact_matrix")):
+                _no_csv_inline.append(("school", _sc_src))
             else:
                 _no_csv_unset.append("school")
 
@@ -1677,19 +1699,21 @@ def _schedule_csv_show(
                         mo.md(f"Work contact matrix: {num_age_groups}×{num_age_groups} loaded."),
                         kind="success",
                     ))
-            elif is_array_param(loaded_config, "work_contact_matrix"):
-                _no_csv_inline.append("work")
+            elif (_wc_src := _inline_contact_matrix_source("work_contact_matrix")):
+                _no_csv_inline.append(("work", _wc_src))
             else:
                 _no_csv_unset.append("work")
 
             if _no_csv_inline:
-                _parts.append(mo.callout(
-                    mo.md(
-                        "No CSV set for **" + ", ".join(_no_csv_inline) + "** — using the "
-                        "**inline config value(s)** from the loaded config."
-                    ),
-                    kind="success",
-                ))
+                _by_source = {}
+                for _label, _src in _no_csv_inline:
+                    _by_source.setdefault(_src, []).append(_label)
+                _lines = [
+                    "Using **" + ", ".join(_labels) + "** contact matrix value(s) from "
+                    + _src + " (no separate CSV needed)."
+                    for _src, _labels in _by_source.items()
+                ]
+                _parts.append(mo.callout(mo.md("\n\n".join(_lines)), kind="success"))
             if _no_csv_unset:
                 _parts.append(mo.callout(
                     mo.md(
@@ -1873,7 +1897,7 @@ def _schedule_and_immunity_show(
         _parts.append(mo.md("*Dynamic immunity metrics disabled.*"))
 
     section_card(
-        step_header(4, "Immunity",
+        step_header(5, "Immunity",
                     "Cumulative infection- and vaccine-induced immunity metrics "
                     "(M / MV) and their waning.",
                     accent=_ACC),
@@ -1884,7 +1908,7 @@ def _schedule_and_immunity_show(
 
 
 # ---------------------------------------------------------------------------
-# Step 5 — Model Diagram
+# Step 6 — Model Diagram
 # ---------------------------------------------------------------------------
 
 
@@ -1934,17 +1958,21 @@ def _diagram(
                 # rather than the destination compartment.
                 _tnode = f"_t{_i}"
                 _dot.node(_tnode, shape="point", width="0.01", label="")
-                _dot.edge(_origin, _tnode, arrowhead="none", label=_label)
-                _dot.edge(_tnode, _dest)
+                # High weight + shared group keep the origin->tnode->dest pair
+                # collinear; without it the dashed foi edge below pulls the
+                # point node off the line and the transition edge kinks.
+                _dot.edge(_origin, _tnode, arrowhead="none", label=_label,
+                          weight="100", group=f"_g{_i}")
+                _dot.edge(_tnode, _dest, weight="100", group=f"_g{_i}")
             else:
                 _dot.edge(_origin, _dest, label=_label)
         for _c, _i in _foi_links:
-            # constraint=false: keep this edge out of graphviz's rank/position
-            # solver so it doesn't drag the point node off the straight line
-            # of the transition edge it's attached to (causes a visible kink).
+            # constraint=false + weight=0: keep this edge out of graphviz's
+            # rank/position solver entirely so it can't drag the point node
+            # off the straight line of the transition edge (causes a kink).
             _dot.edge(
                 _c, f"_t{_i}", style="dashed", color="#ffa64d", arrowhead="empty",
-                constraint="false",
+                constraint="false", weight="0",
             )
         _inner = mo.image(_dot.pipe(format="png"), width="100%")
     except Exception as _exc:
@@ -2005,7 +2033,7 @@ def _diagram(
         _inner = mo.vstack(_fallback_parts)
 
     section_card(
-        step_header(5, "Model Diagram",
+        step_header(6, "Model Diagram",
                     "Auto-generated compartment-flow diagram from your transitions.",
                     accent=_ACC),
         _inner,
@@ -2015,7 +2043,7 @@ def _diagram(
 
 
 # ---------------------------------------------------------------------------
-# Step 6 — Initial Conditions
+# Step 7 — Initial Conditions
 # ---------------------------------------------------------------------------
 
 
@@ -2123,7 +2151,7 @@ def _init_show(
         ))
 
     section_card(
-        step_header(6, "Initial Conditions",
+        step_header(7, "Initial Conditions",
                     "Seed the compartments by age / risk group; the first "
                     "compartment absorbs the remaining population.",
                     accent=_ACC),
@@ -2134,13 +2162,18 @@ def _init_show(
 
 
 # ---------------------------------------------------------------------------
-# Step 7 — Simulation Settings
+# Step 8 — Simulation Settings
 # ---------------------------------------------------------------------------
 
 
 @app.cell
-def _sim_settings_ui(mo, loaded_config):
+def _sim_settings_ui(mo, loaded_config, get_restored_config):
     _sim = loaded_config.get("simulation_settings", {})
+    # A restored fit_config.json (Fitting tab, see _fit_config_upload_ui)
+    # carries the exact run_kwargs (start date, timesteps, RNG seed) used by
+    # that saved run — applied here as this cell's real default whenever it
+    # reruns, same as every other restored hyperparameter widget in Fitting.
+    _restored_kwargs = (get_restored_config() or {}).get("run_kwargs", {})
     sim_days = mo.ui.number(start=10, stop=730, step=10, value=250, label="Simulation days")
     sim_mode = mo.ui.radio(
         options=["Deterministic", "Stochastic"],
@@ -2148,10 +2181,18 @@ def _sim_settings_ui(mo, loaded_config):
         label="Simulation mode",
     )
     n_reps = mo.ui.number(start=1, stop=100, step=1, value=10, label="Replicates")
-    rng_seed = mo.ui.number(start=0, stop=99999, step=1, value=42, label="RNG seed")
-    timesteps = mo.ui.number(start=1, stop=24, step=1, value=7, label="Timesteps per day")
+    rng_seed = mo.ui.number(
+        start=0, stop=99999, step=1,
+        value=int(_restored_kwargs.get("seed_base", 42)),
+        label="RNG seed",
+    )
+    timesteps = mo.ui.number(
+        start=1, stop=24, step=1,
+        value=int(_restored_kwargs.get("ts_per_day", 7)),
+        label="Timesteps per day",
+    )
     start_date_input = mo.ui.text(
-        value=_sim.get("start_real_date", "2024-01-01"),
+        value=_restored_kwargs.get("start_date", _sim.get("start_real_date", "2024-01-01")),
         label="Simulation start date (YYYY-MM-DD)",
     )
     transition_vars_input = mo.ui.text(
@@ -2172,7 +2213,7 @@ def _sim_settings_show(
     mo.stop(main_tab.value != "Model Builder", None)
     _ACC = CLT_ACCENT["builder"]
     section_card(
-        step_header(7, "Simulation Settings",
+        step_header(8, "Simulation Settings",
                     "Horizon, deterministic vs. stochastic mode, RNG seed, and "
                     "which transition variables to record.",
                     accent=_ACC),
@@ -2376,6 +2417,32 @@ def _build_config(
             "rate_config": _rate_config,
         })
 
+    # --- 2b. TRANSITION GROUPS ---
+    # Any compartment with two or more sampled outflows must have them drawn
+    # jointly (one multinomial split of the origin) rather than each sampling
+    # its own marginal — independent draws can sum past the origin's population
+    # and push it negative. The builder UI has no group editor, so derive one
+    # group per such compartment here; the parser rejects the config outright
+    # otherwise (see generic_core.config_parser._validate_competing_transitions).
+    # scheduled_exact flows are deterministic and clamped, and cannot be group
+    # members, so they are excluded. The per-group 'transition_type' is
+    # informational — at run time the group uses the simulation-wide transition
+    # type from SimulationSettings.
+    _outflows_by_origin = {}
+    for _t in _transitions:
+        if _t["rate_template"] == "scheduled_exact" or not _t["origin"] or not _t["name"]:
+            continue
+        _outflows_by_origin.setdefault(_t["origin"], []).append(_t["name"])
+    _transition_groups = [
+        {
+            "name": f"{_origin}_outflows",
+            "transition_type": "multinom",
+            "members": _names,
+        }
+        for _origin, _names in _outflows_by_origin.items()
+        if len(_names) > 1
+    ]
+
     # --- 3. CONTACT MATRIX PARAMS ---
     if uses_contact_matrix:
         if _A == 1:
@@ -2539,7 +2606,7 @@ def _build_config(
 
     # --- 7. INITIAL CONDITIONS (per subpopulation) ---
     # Per-subpop population (A×R) plus per-compartment seed counts (A×R) from the
-    # Step 6 tables. The first compartment is reconstructed at run time as
+    # Step 7 tables. The first compartment is reconstructed at run time as
     # population − Σ seeds, so only the seeds are stored here.
     _age_cols_ic = param_grid_columns(age_groups, _A)
     _seed_comps = compartments[1:] if len(compartments) > 1 else []
@@ -2571,7 +2638,7 @@ def _build_config(
         "compartments": compartments,
         "params": params_dict,
         "transitions": _transitions,
-        "transition_groups": [],
+        "transition_groups": _transition_groups,
         "epi_metrics": _epi_metrics,
         "schedules": _schedules,
         "age_risk": {
@@ -2637,7 +2704,7 @@ def _build_config(
 
 
 # ---------------------------------------------------------------------------
-# Step 8 — Config Preview
+# Step 9 — Config Preview
 # ---------------------------------------------------------------------------
 
 
@@ -2659,14 +2726,17 @@ def _config_preview(
             kind="warn",
         ))
     section_card(
-        step_header(8, "Config Preview",
+        step_header(9, "Config Preview",
                     "The assembled model config JSON — review or download it.",
                     accent=_ACC),
         mo.vstack([
             *_warn_block,
             mo.accordion({
                 "View / download config JSON": mo.vstack([
-                    mo.md(f"```json\n{json_str}\n```"),
+                    mo.ui.code_editor(
+                        value=json_str, language="json",
+                        disabled=True, min_height=300, max_height=600,
+                    ),
                     mo.download(
                         data=json_str.encode(),
                         filename="model_config.json",
@@ -2682,7 +2752,7 @@ def _config_preview(
 
 
 # ---------------------------------------------------------------------------
-# Step 9 — Run
+# Step 10 — Run
 # ---------------------------------------------------------------------------
 
 
@@ -2700,7 +2770,7 @@ def _run_section_display(
     mo.stop(main_tab.value != "Model Builder", None)
     _ACC = CLT_ACCENT["builder"]
     section_card(
-        step_header(9, "Run",
+        step_header(10, "Run",
                     "Run the model and view trajectories below.", accent=_ACC),
         run_button,
         accent=_ACC,
@@ -2754,7 +2824,7 @@ def _run_sim(
     mo.stop(main_tab.value != "Model Builder", None)
     mo.stop(not run_button.value, mo.md(""))
 
-    # Runs the preview simulation for Step 9. Structure of this cell:
+    # Runs the preview simulation for Step 10. Structure of this cell:
     #   - run settings (stochastic/deterministic, reps, days, timesteps)
     #   - nested helper _build_schedules_input_for_subpop(...)
     #   - nested helper _run_once(...)         — single-population path
@@ -2899,7 +2969,7 @@ def _run_sim(
 
     # ---- Single-population path ----
     if not is_metapop:
-        # Initial conditions come from the Step 6 tables via config_dict
+        # Initial conditions come from the Step 7 tables via config_dict
         # (population A×R per cell, minus the per-compartment seed grids).
         _ic_entry = config_dict.get("initial_conditions", {}).get("aggregate_pop", {})
         _pop_arr = np.asarray(_ic_entry.get("population", np.zeros((_A, _R))), dtype=float)
@@ -3022,7 +3092,7 @@ def _run_sim(
                     ).get(_sp_name),
                 )
 
-                # Initial conditions: the in-notebook Step 6 tables take precedence
+                # Initial conditions: the in-notebook Step 7 tables take precedence
                 # when they carry seeds, else the per-subpop folder JSON, else the
                 # table's population-only (all-susceptible) state.
                 _sp_epi_init = {}
@@ -3048,7 +3118,7 @@ def _run_sim(
                     mo.stop(
                         _A > 1 or _R > 1,
                         mo.callout(mo.md(f"**Missing:** initial conditions for `{_sp_name}` — "
-                                         f"seed it in Step 6 or provide "
+                                         f"seed it in Step 7 or provide "
                                          f"`initial_conditions_{_sp_name}.json`."), kind="danger"),
                     )
 

@@ -10,23 +10,244 @@ def _analysis_sub_tab(mo):
 
 
 @app.cell
+def _analysis_fitted_params_ui(mo):
+    analysis_use_fitted = mo.ui.switch(label="Override baseline with fitted params", value=False)
+    analysis_fitted_source = mo.ui.radio(
+        options=["Fitting tab result", "Upload JSON file"],
+        value="Fitting tab result",
+        label="Source",
+    )
+    analysis_fitted_params_path = mo.ui.text(
+        label="Fitted params JSON path",
+        placeholder="~/clt_outputs/fitted_params.json",
+        full_width=True,
+    )
+    return analysis_use_fitted, analysis_fitted_source, analysis_fitted_params_path
+
+
+@app.cell
+def _analysis_fitted_params_load(
+    analysis_use_fitted, analysis_fitted_source, analysis_fitted_params_path,
+    fit_result, config_dict, is_metapop, json, Path, np, mo,
+):
+    analysis_fitted_params = {}
+    analysis_fitted_tv_increments = None
+    analysis_fitted_tv_spacing = 30
+    analysis_fitted_num_days = 0
+    # Full, unexpanded fitted-params structure (best_params/scale_groups/
+    # num_days/tv_knot_spacing_days/accepted_params) for the Export tab —
+    # analysis_fitted_params has already been flattened/expanded/filtered for
+    # in-notebook use and has lost the info needed to reproduce seed_scale_*/
+    # m(t) in the exported run_simulation.py script.
+    analysis_fitted_full = {}
+    analysis_fitted_note = mo.md("")
+    if analysis_use_fitted.value:
+        _raw = None
+        _scale_groups = {}
+        _tv_spacing = 30
+        _fit_num_days = 0
+        _err = None
+        if analysis_fitted_source.value == "Fitting tab result":
+            if fit_result is not None:
+                _raw = dict(fit_result.best_params)
+                _scale_groups = dict(getattr(fit_result, "scale_groups", {}) or {})
+                _tv_spacing = int(getattr(fit_result, "tv_knot_spacing_days", 30) or 30)
+                _fit_num_days = int(fit_result.num_days)
+                analysis_fitted_full = {
+                    "best_params": fit_result.best_params,
+                    "num_days": fit_result.num_days,
+                    "method": fit_result.method,
+                    "accepted_params": fit_result.accepted_params,
+                    "scale_groups": fit_result.scale_groups,
+                    "tv_knot_spacing_days": fit_result.tv_knot_spacing_days,
+                }
+            else:
+                _err = "No fitting results available. Run fitting first, or switch to 'Upload JSON file'."
+        else:
+            _pp = analysis_fitted_params_path.value.strip()
+            if not _pp:
+                _err = "Enter a path to a fitted params JSON file."
+            else:
+                try:
+                    with open(Path(_pp).expanduser()) as _f:
+                        _loaded = json.load(_f)
+                    _raw = _loaded.get("best_params", _loaded) if isinstance(_loaded, dict) else {}
+                    _scale_groups = dict(_loaded.get("scale_groups", {}) or {}) if isinstance(_loaded, dict) else {}
+                    _tv_spacing = int(_loaded.get("tv_knot_spacing_days", 30) or 30) if isinstance(_loaded, dict) else 30
+                    _fit_num_days = int(_loaded.get("num_days", 0) or 0) if isinstance(_loaded, dict) else 0
+                    analysis_fitted_full = (
+                        _loaded if isinstance(_loaded, dict) and "best_params" in _loaded
+                        else {"best_params": _raw}
+                    )
+                except Exception as _exc:
+                    _err = f"Could not load fitted params: {_exc}"
+
+        if _err is not None:
+            analysis_fitted_note = mo.callout(mo.md(f"**{_err}**"), kind="warn")
+        else:
+            # MCMC/ABC-SMC record one posterior column per age/risk element
+            # (`pn|a0`, `pn|a1`, ...) rather than one array-valued `pn` entry
+            # (AR/gradient do the latter directly) — reassemble first so a
+            # granular param applies the same way regardless of method.
+            from generic_core.fitting import merge_param_slots as _merge_param_slots
+            _raw = _merge_param_slots(_raw)
+            # Expand linked-scale multipliers (from AR/gradient fits) into concrete
+            # base-param overrides, same as the Forecast tab does.
+            _out = {_k: _v for _k, _v in _raw.items() if _k not in _scale_groups}
+            if _scale_groups:
+                _baselines = config_dict.get("params", {}) or {}
+                for _m, _bases in _scale_groups.items():
+                    if _m not in _raw:
+                        continue
+                    _mult_raw = _raw[_m]
+                    _mult = (
+                        np.asarray(_mult_raw, dtype=float)
+                        if isinstance(_mult_raw, (list, tuple))
+                        else float(_mult_raw)
+                    )
+                    for _b in _bases:
+                        _bl = _baselines.get(_b)
+                        if isinstance(_bl, (list, tuple)) or isinstance(_mult, np.ndarray):
+                            _out[_b] = (np.asarray(_bl, dtype=float) * _mult).tolist()
+                        elif _bl is not None:
+                            _out[_b] = float(_bl) * _mult
+
+            # m_dlog_* are the log-increments of the fitted time-varying
+            # transmission multiplier m(t) (single-population only); phi is
+            # the NB2 observation-noise dispersion param. Neither is a
+            # config["params"] entry, so both are pulled out of the flat
+            # scalar-override dict — m(t) is reconstructed separately below
+            # (see _run_analysis), phi is simply not a model parameter.
+            _mdlog_items = sorted(
+                (
+                    (int(_k[len("m_dlog_"):]), float(_v))
+                    for _k, _v in _out.items()
+                    if _k.startswith("m_dlog_") and _k[len("m_dlog_"):].isdigit()
+                ),
+                key=lambda _t: _t[0],
+            )
+            _has_mt = bool(_mdlog_items)
+
+            # Keep both scalar and array-valued overrides (the latter mainly
+            # from linked scale groups expanded above, e.g. IHR_scale ->
+            # I_to_H_prop/IV_to_H_prop) — _analysis_param_catalog applies
+            # either kind directly.
+            analysis_fitted_params = {
+                _k: (_v if isinstance(_v, list) else float(_v))
+                for _k, _v in _out.items()
+                if _k != "phi" and not _k.startswith("m_dlog_")
+            }
+            _n = len(analysis_fitted_params)
+            _msgs = []
+            if _n:
+                _names = ", ".join(f"`{_k}`" for _k in sorted(analysis_fitted_params))
+                _msgs.append(
+                    f"**{_n} fitted parameter(s)** ({_names}) will override the baseline "
+                    "used for sensitivity/scenario analysis."
+                )
+            else:
+                _msgs.append("No matching parameters found in the fitted params.")
+            if _has_mt:
+                if _fit_num_days <= 0:
+                    _msgs.append(
+                        "**Time-varying transmission (`m_dlog_*`) found but the fitted params "
+                        "are missing `num_days`** — can't reconstruct m(t) without the fit period "
+                        "length; ignored."
+                    )
+                else:
+                    analysis_fitted_tv_increments = [_v for _, _v in _mdlog_items]
+                    analysis_fitted_tv_spacing = _tv_spacing
+                    analysis_fitted_num_days = _fit_num_days
+                    if is_metapop:
+                        _msgs.append(
+                            f"**Time-varying transmission m(t)** (fitted on a single population) "
+                            f"reconstructed from {len(_mdlog_items)} fitted log-increment(s) over a "
+                            f"{_fit_num_days}-day fit period (knots every {_tv_spacing} day(s)), held "
+                            "flat past it, and **broadcast uniformly to every subpopulation**."
+                        )
+                    else:
+                        _msgs.append(
+                            f"**Time-varying transmission m(t)** reconstructed from "
+                            f"{len(_mdlog_items)} fitted log-increment(s) over a {_fit_num_days}-day "
+                            f"fit period (knots every {_tv_spacing} day(s)), held flat past it."
+                        )
+            analysis_fitted_note = mo.callout(mo.md("\n\n".join(_msgs)), kind="success" if _n or _has_mt else "warn")
+    return (
+        analysis_fitted_params, analysis_fitted_note,
+        analysis_fitted_tv_increments, analysis_fitted_tv_spacing, analysis_fitted_num_days,
+        analysis_fitted_full,
+    )
+
+
+@app.cell
+def _analysis_fitted_param_sets(analysis_use_fitted, analysis_fitted_full, config_dict):
+    # Accepted parameter sets (MCMC/ABC posterior draws, AR-accepted samples,
+    # or one best per gradient replication) behind the single best set that
+    # _analysis_fitted_params_load extracts. These drive the optional
+    # parameter-uncertainty ensemble in _run_analysis; a fit with a single
+    # accepted set offers no parameter uncertainty to propagate, so the whole
+    # feature stays hidden in that case.
+    analysis_param_sets = []
+    if analysis_use_fitted.value:
+        _accepted = (analysis_fitted_full or {}).get("accepted_params") or []
+        if len(_accepted) > 1:
+            from generic_core.fitting import prepare_param_sets as _prepare_param_sets
+            analysis_param_sets = _prepare_param_sets(
+                _accepted,
+                dict((analysis_fitted_full or {}).get("scale_groups", {}) or {}),
+                config_dict.get("params", {}) or {},
+            )
+    analysis_n_param_sets_avail = len(analysis_param_sets)
+    return analysis_param_sets, analysis_n_param_sets_avail
+
+
+@app.cell
 def _analysis_param_catalog(
     param_names, param_vary_toggles, param_scalar_inputs, param_grid_inputs,
     param_grid_columns, num_age_groups, num_risk_groups, age_groups,
+    analysis_fitted_params,
 ):
     import math as _math
+    import numpy as _np
 
     _A = num_age_groups
     _R = num_risk_groups
     _age_cols = param_grid_columns(age_groups, _A)
+
+    def _fitted_grid(_fv):
+        # Reshape a fitted value onto the builder's (A, R) grid so it can
+        # replace an age/risk-varying baseline. Fitted granular params arrive
+        # as (A, R) nested lists (merge_param_slots / scale-group expansion);
+        # a scalar or per-age vector is broadcast the same way the model
+        # broadcasts a scalar/1-D param_override. Returns None if the shape
+        # can't be matched, in which case the caller keeps the grid values.
+        _arr = _np.asarray(_fv, dtype=float)
+        if _arr.ndim == 0:
+            _arr = _np.full((_A, _R), float(_arr))
+        elif _arr.ndim == 1 and _arr.shape[0] == _A:
+            _arr = _np.repeat(_arr[:, None], _R, axis=1)
+        elif _arr.shape != (_A, _R):
+            return None
+        return [[float(_arr[_a][_r]) for _r in range(_R)] for _a in range(_A)]
+
     _params = {}
     for _name in param_names:
+        # A fitted value always wins over the builder baseline — including for
+        # age/risk-varying params, whose fitted per-element values would
+        # otherwise be silently replaced by the (unfitted) grid, since every
+        # scenario emits `catalog baseline × scale` as an explicit override.
+        _fitted = analysis_fitted_params.get(_name)
         if param_vary_toggles[_name].value:
-            _rows = list(param_grid_inputs[_name].value)
-            _params[_name] = [
-                [float(_rows[_r][_age_cols[_a]]) for _r in range(_R)]
-                for _a in range(_A)
-            ]
+            _grid = _fitted_grid(_fitted) if _fitted is not None else None
+            if _grid is None:
+                _rows = list(param_grid_inputs[_name].value)
+                _grid = [
+                    [float(_rows[_r][_age_cols[_a]]) for _r in range(_R)]
+                    for _a in range(_A)
+                ]
+            _params[_name] = _grid
+        elif _fitted is not None:
+            _params[_name] = list(_fitted) if isinstance(_fitted, list) else float(_fitted)
         else:
             _params[_name] = float(param_scalar_inputs[_name].value)
 
@@ -250,10 +471,25 @@ def _analysis_shared_controls(mo, num_age_groups, is_metapop, metapop_folder_inp
     analysis_n_reps = mo.ui.number(value=1, start=1, stop=100, step=1, label="Replicates per scenario")
     analysis_timesteps = mo.ui.number(start=1, stop=24, step=1, value=7, label="Timesteps per day")
     analysis_stochastic = mo.ui.switch(label="Stochastic", value=False)
+    # Where the spread between replicates comes from. "Transitions only" is the
+    # historical behaviour (every replicate uses the single best fitted param
+    # set, differing only in the transition RNG stream); the other option draws
+    # parameter sets from the fit's accepted/posterior samples and spreads the
+    # replicates across them. Only meaningful with stochastic transitions on
+    # and a fit carrying more than one parameter set — see _analysis_display.
+    analysis_uncertainty_source = mo.ui.radio(
+        options=["Transitions only", "Sampled parameters + transitions"],
+        value="Transitions only",
+        label="Uncertainty source",
+    )
+    analysis_n_param_sets = mo.ui.number(
+        value=10, start=1, stop=1000, step=1, label="Sampled parameter sets",
+    )
     analysis_run_button = mo.ui.run_button(label="Run analysis")
     return (
         analysis_subpop_selector, analysis_age_selector,
-        analysis_sim_days, analysis_n_reps, analysis_timesteps, analysis_stochastic, analysis_run_button,
+        analysis_sim_days, analysis_n_reps, analysis_timesteps, analysis_stochastic,
+        analysis_uncertainty_source, analysis_n_param_sets, analysis_run_button,
     )
 
 
@@ -266,8 +502,12 @@ def _analysis_compartment_selector(mo, compartments, transition_vars_input, n_tr
         if t_name.value[_i].strip()
     ]
     analysis_all_keys = list(compartments) + _tv_keys
+    # Default to the first three compartments only (fewer if the model has
+    # fewer): checking everything puts every compartment and transition
+    # variable on one axis, which is unreadable for anything but a toy model.
+    _default_on = set(list(compartments)[:3])
     analysis_comp_checkboxes = mo.ui.array([
-        mo.ui.checkbox(value=True, label=k) for k in analysis_all_keys
+        mo.ui.checkbox(value=k in _default_on, label=k) for k in analysis_all_keys
     ])
     return analysis_comp_checkboxes, analysis_all_keys
 
@@ -280,13 +520,16 @@ def _analysis_display(
     analysis_n_scenarios, analysis_scenario_names,
     analysis_scenario_scalar_inputs, analysis_scenario_array_scales,
     analysis_subpop_selector, analysis_age_selector,
-    analysis_sim_days, analysis_n_reps, analysis_timesteps, analysis_stochastic, analysis_run_button,
+    analysis_sim_days, analysis_n_reps, analysis_timesteps, analysis_stochastic,
+    analysis_uncertainty_source, analysis_n_param_sets, analysis_run_button,
+    analysis_n_param_sets_avail,
     analysis_comp_checkboxes,
     ANALYSIS_SCALAR_PARAMS, ANALYSIS_ARRAY_PARAMS,
     is_metapop, analysis_sp_names,
     analysis_sens_subpop_sel, analysis_sens_subpop_sliders,
     analysis_scalar_subpop_sels, analysis_array_subpop_sels,
     analysis_scalar_subpop_inputs, analysis_array_subpop_scales,
+    analysis_use_fitted, analysis_fitted_source, analysis_fitted_params_path, analysis_fitted_note,
     step_header, section_card, CLT_ACCENT,
 ):
     mo.stop(main_tab.value != "Analysis", None)
@@ -414,6 +657,46 @@ def _analysis_display(
         _scen_body.append(mo.callout(mo.md("No tunable parameters found in the current config."), kind="info"))
     _scen_ui = mo.vstack(_scen_body)
 
+    # --- Uncertainty-source controls (Run settings) ---
+    # Only offered when there is parameter uncertainty to propagate (a fit with
+    # >1 accepted set) AND stochastic transitions are on — deterministic runs
+    # always collapse to a single run of the best parameter set.
+    _unc_parts = []
+    if analysis_n_param_sets_avail > 1 and analysis_stochastic.value:
+        _unc_parts.append(analysis_uncertainty_source)
+        if analysis_uncertainty_source.value == "Sampled parameters + transitions":
+            _reps_ui = int(analysis_n_reps.value)
+            _k_ui = min(int(analysis_n_param_sets.value), _reps_ui, analysis_n_param_sets_avail)
+            _unc_parts.append(analysis_n_param_sets)
+            _base_ui, _extra_ui = divmod(_reps_ui, _k_ui)
+            _spread = (
+                f"{_base_ui} stochastic rep(s) each"
+                if not _extra_ui
+                else f"{_base_ui}–{_base_ui + 1} stochastic rep(s) each"
+            )
+            _unc_parts.append(mo.callout(
+                mo.md(
+                    f"**{_k_ui} parameter set(s)** drawn at random (without replacement) from the "
+                    f"**{analysis_n_param_sets_avail}** accepted set(s) × {_spread} = "
+                    f"**{_reps_ui} run(s) per scenario**."
+                ),
+                kind="success",
+            ))
+            if int(analysis_n_param_sets.value) > _reps_ui:
+                _unc_parts.append(mo.callout(
+                    mo.md(
+                        f"**Sampled parameter sets ({int(analysis_n_param_sets.value)}) exceeds "
+                        f"replicates per scenario ({_reps_ui})** — clamped to {_k_ui}. Raise the "
+                        "replicate count to simulate more of the posterior."
+                    ),
+                    kind="warn",
+                ))
+    elif analysis_n_param_sets_avail > 1:
+        _unc_parts.append(mo.md(
+            f"*{analysis_n_param_sets_avail} fitted parameter set(s) available — turn on "
+            "**Stochastic** to sample from them.*"
+        ))
+
     _tab_body = {"Sensitivity": _sens_ui, "Scenario": _scen_ui}
     mo.vstack([
         mo.Html(
@@ -422,7 +705,22 @@ def _analysis_display(
             "scenarios.</div>"
         ),
         section_card(
-            step_header("①", "Design",
+            step_header("①", "Fitted parameters",
+                        "Optionally use the fit from the Fitting tab, or a saved fit JSON, "
+                        "as the baseline for sensitivity/scenario analysis.",
+                        accent=_ACC),
+            mo.vstack([
+                analysis_use_fitted,
+                mo.vstack([
+                    analysis_fitted_source,
+                    analysis_fitted_params_path if analysis_fitted_source.value == "Upload JSON file" else mo.md(""),
+                    analysis_fitted_note,
+                ]) if analysis_use_fitted.value else mo.md(""),
+            ]),
+            accent=_ACC,
+        ),
+        section_card(
+            step_header("②", "Design",
                         "Define a sensitivity sweep or a set of scenarios.",
                         accent=_ACC),
             mo.vstack([
@@ -432,15 +730,17 @@ def _analysis_display(
             accent=_ACC,
         ),
         section_card(
-            step_header("②", "Run settings",
+            step_header("③", "Run settings",
                         "Horizon, replicates, slices, and which compartments to display.",
                         accent=_ACC),
             mo.vstack([
                 mo.hstack([analysis_sim_days, analysis_n_reps, analysis_timesteps], justify="start"),
                 mo.hstack([
                     analysis_stochastic,
-                    mo.md("*Ignored — using 1 replicate.*") if not analysis_stochastic.value else mo.md(""),
+                    mo.md("*Ignored — using 1 replicate of the best parameter set.*")
+                    if not analysis_stochastic.value else mo.md(""),
                 ], justify="start"),
+                mo.vstack(_unc_parts) if _unc_parts else mo.md(""),
                 mo.hstack([analysis_subpop_selector, analysis_age_selector], justify="start"),
                 mo.md("**Compartments / metrics to display:**"),
                 mo.hstack(list(analysis_comp_checkboxes), wrap=True, justify="start"),
@@ -468,6 +768,13 @@ def _analysis_define_scenarios(
     _scalar_names = list(ANALYSIS_SCALAR_PARAMS.keys())
     _array_names = list(ANALYSIS_ARRAY_PARAMS.keys())
     _use_subpop = is_metapop and bool(analysis_sp_names)
+    # Each entry is (name, global_overrides, per_subpop_overrides, designed).
+    # `designed` names the params this scenario deliberately sets — the swept
+    # param in Sensitivity, or a cell edited away from the catalog baseline in
+    # Scenario. _run_analysis lets a sampled fitted param set overwrite every
+    # *other* param, so parameter uncertainty is injected without silently
+    # undoing the design. (Both grids are pre-filled from the catalog baseline,
+    # so inequality with it is the edit signal.)
     analysis_scenarios = []
 
     def _make_per_subpop_list(sp_names, sp_to_override_dict):
@@ -482,7 +789,8 @@ def _analysis_define_scenarios(
             _pname = analysis_array_param_sel.value
             _base_arr = np.asarray(ANALYSIS_ARRAY_PARAMS.get(_pname, [1.0]))
             for _i, _v in enumerate(list(dict.fromkeys(analysis_sens_sliders.value))):
-                _global_ov = {_pname: (_base_arr * _v).tolist()}
+                _global_ov = {**ANALYSIS_SCALAR_PARAMS, **ANALYSIS_ARRAY_PARAMS}
+                _global_ov[_pname] = (_base_arr * _v).tolist()
                 _per_subpop = None
                 if _use_subpop:
                     _sel_sps = list(analysis_sens_subpop_sel.value or [])
@@ -495,11 +803,12 @@ def _analysis_define_scenarios(
                                 _sp_scale = float(_sp_vals[_sp_idx][_i])
                                 _sp_ov[_sp] = {_pname: (_base_arr * _sp_scale).tolist()}
                     _per_subpop = _make_per_subpop_list(analysis_sp_names, _sp_ov)
-                analysis_scenarios.append((f"{_pname} ×{_v:.3g}", _global_ov, _per_subpop))
+                analysis_scenarios.append((f"{_pname} ×{_v:.3g}", _global_ov, _per_subpop, {_pname}))
         else:
             _pname = analysis_scalar_param_sel.value
             for _i, _v in enumerate(list(dict.fromkeys(analysis_sens_sliders.value))):
-                _global_ov = {_pname: float(_v)}
+                _global_ov = {**ANALYSIS_SCALAR_PARAMS, **ANALYSIS_ARRAY_PARAMS}
+                _global_ov[_pname] = float(_v)
                 _per_subpop = None
                 if _use_subpop:
                     _sel_sps = list(analysis_sens_subpop_sel.value or [])
@@ -511,19 +820,24 @@ def _analysis_define_scenarios(
                             if _sp_idx < len(_sp_vals) and _i < len(_sp_vals[_sp_idx]):
                                 _sp_ov[_sp] = {_pname: float(_sp_vals[_sp_idx][_i])}
                     _per_subpop = _make_per_subpop_list(analysis_sp_names, _sp_ov)
-                analysis_scenarios.append((f"{_pname}={_v:.4g}", _global_ov, _per_subpop))
+                analysis_scenarios.append((f"{_pname}={_v:.4g}", _global_ov, _per_subpop, {_pname}))
     else:
         _n = int(analysis_n_scenarios.value)
         for j in range(_n):
             _name = analysis_scenario_names.value[j].strip() or f"Scenario {j + 1}"
             _overrides = {}
+            _designed = set()
             for _i, _pn in enumerate(_scalar_names):
-                _overrides[_pn] = float(analysis_scenario_scalar_inputs.value[_i][j])
+                _val = float(analysis_scenario_scalar_inputs.value[_i][j])
+                _overrides[_pn] = _val
+                if _val != float(ANALYSIS_SCALAR_PARAMS[_pn]):
+                    _designed.add(_pn)
             for _k, _pn in enumerate(_array_names):
                 _scale = float(analysis_scenario_array_scales.value[_k][j])
+                _base = np.asarray(ANALYSIS_ARRAY_PARAMS[_pn])
+                _overrides[_pn] = (_base * _scale).tolist()
                 if _scale != 1.0:
-                    _base = np.asarray(ANALYSIS_ARRAY_PARAMS[_pn])
-                    _overrides[_pn] = (_base * _scale).tolist()
+                    _designed.add(_pn)
             _per_subpop = None
             if _use_subpop:
                 _sp_ov_by_name = {}
@@ -547,7 +861,7 @@ def _analysis_define_scenarios(
                                     _base = np.asarray(ANALYSIS_ARRAY_PARAMS[_pn])
                                     _sp_ov_by_name.setdefault(_sp, {})[_pn] = (_base * _sp_scale).tolist()
                 _per_subpop = _make_per_subpop_list(analysis_sp_names, _sp_ov_by_name)
-            analysis_scenarios.append((_name, _overrides, _per_subpop))
+            analysis_scenarios.append((_name, _overrides, _per_subpop, _designed))
 
     return (analysis_scenarios,)
 
@@ -568,13 +882,16 @@ def _analysis_results_reader(get_analysis_results):
 def _run_analysis(
     analysis_run_button, analysis_scenarios,
     analysis_sim_days, analysis_n_reps, analysis_timesteps, analysis_stochastic,
+    analysis_uncertainty_source, analysis_n_param_sets, analysis_param_sets,
     config_dict, compartments, is_metapop,
     metapop_folder_input, metapop_travel_config,
     transition_vars_input,
     build_compartment_init, start_date_input, rng_seed,
     make_single_pop_metapop, make_metapop_from_folder,
-    set_analysis_results,
-    np, mo, build_scalar_array,
+    set_analysis_results, loaded_schedule_dfs,
+    analysis_use_fitted, analysis_fitted_params,
+    analysis_fitted_tv_increments, analysis_fitted_tv_spacing, analysis_fitted_num_days,
+    np, mo, build_scalar_array, SimpleNamespace,
 ):
     mo.stop(not analysis_run_button.value)
 
@@ -593,7 +910,67 @@ def _run_analysis(
     if not _tvs:
         _tvs = [t["name"] for t in config_dict.get("transitions", []) if t.get("name")]
 
-    _ci = None
+    # --- Uncertainty source: which parameter set each replicate runs with ---
+    # "Transitions only" (and every deterministic run) keeps the historical
+    # behaviour: one param set — the fitted best, already folded into the
+    # scenario overrides via the param catalog — with the replicates differing
+    # only in the transition RNG stream. Otherwise draw `_k` sets at random
+    # (without replacement) from the fit's accepted/posterior samples and
+    # spread the replicates evenly across them, so the ensemble carries both
+    # parameter and transition uncertainty. `_run_schedule` is a list of
+    # (param-set index or None, rep index within that set), one entry per run.
+    _use_psets = (
+        _stoch
+        and analysis_uncertainty_source.value == "Sampled parameters + transitions"
+        and len(analysis_param_sets) > 1
+    )
+    if _use_psets:
+        _rng_sched = np.random.default_rng(_seed_b)
+        _k = min(int(analysis_n_param_sets.value), _n_reps, len(analysis_param_sets))
+        _sel = _rng_sched.choice(len(analysis_param_sets), size=_k, replace=False)
+        _psets = [analysis_param_sets[int(_i)] for _i in _sel]
+        _base_r, _extra_r = divmod(_n_reps, _k)
+        _run_schedule = [(_i, _r) for _i in range(_k) for _r in range(_base_r)]
+        if _extra_r:
+            _run_schedule += [
+                (int(_i), _base_r)
+                for _i in _rng_sched.choice(_k, size=_extra_r, replace=False)
+            ]
+    else:
+        _psets = []
+        _run_schedule = [(None, _r) for _r in range(_n_reps)]
+
+    _ci_best = None
+    _sim_config = config_dict
+    # The uploaded schedule CSVs (humidity / school-work calendar / mobility /
+    # vaccination) must be passed through exactly as the Fitting and Forecast
+    # tabs do — omitting them silently substitutes flat constant schedules
+    # (humidity 0, no vaccination), which is a different model from the one that
+    # was fitted and inflates the epidemic by an order of magnitude.
+    _schedule_dfs_best = loaded_schedule_dfs
+    _ci_unscaled = None
+    # NOTE: marimo mangles cell-private (underscore) names, but only rewrites a
+    # reference inside a nested function if the name is already bound at the
+    # cell's top level *earlier in the source*. So every cell-private name a
+    # closure below reads must be pre-bound here, before the `def` — otherwise
+    # the reference stays unmangled and raises NameError at call time.
+    _pop_arr = None
+
+    def _scaled_ci(_pset):
+        # Apply a param set's seed_scale_<comp> entries to the unscaled initial
+        # conditions. Single-population only — the metapop path builds its own
+        # initial conditions per subpop inside make_metapop_from_folder.
+        _seed_scales = {
+            _sk[len("seed_scale_"):]: float(_sv)
+            for _sk, _sv in _pset.items()
+            if _sk.startswith("seed_scale_") and _sk[len("seed_scale_"):] in compartments
+        }
+        if not _seed_scales:
+            return _ci_unscaled
+        from generic_core.fitting import _scale_compartment_init
+        _A, _R = _pop_arr.shape
+        return _scale_compartment_init(_ci_unscaled, _seed_scales, compartments, _A, _R)
+
     if not is_metapop:
         # Initial conditions from the Step 6 tables via config_dict.
         _ic_entry = config_dict.get("initial_conditions", {}).get("aggregate_pop", {})
@@ -603,7 +980,121 @@ def _run_analysis(
             for _c, _a in (_ic_entry.get("seeds", {}) or {}).items()
             if _c in compartments
         }
-        _ci, _ = build_compartment_init(_seed_arrays, _pop_arr, compartments)
+        _ci_unscaled, _ = build_compartment_init(_seed_arrays, _pop_arr, compartments)
+        _ci_best = _ci_unscaled
+
+        # Fitted seed_scale_<comp> params scale the seeded compartments (mirrors
+        # the fitting-time scaling in generic_core.fitting._scale_compartment_init;
+        # they are not config["params"] entries, so param_overrides can't apply them).
+        if analysis_use_fitted.value and analysis_fitted_params:
+            _ci_best = _scaled_ci(analysis_fitted_params)
+
+    # Reconstruct the fitted time-varying transmission multiplier m(t) from its
+    # log-increments and wire it into every force_of_infection transition via a
+    # 'transmission_multiplier' schedule (mirrors
+    # generic_core.fitting._inject_tv_transmission). Held flat at its last
+    # fitted value for any simulated days beyond the fit period. In the metapop
+    # case, the same single-population-fitted m(t) trajectory is broadcast
+    # uniformly to every subpopulation (see make_metapop_from_folder's
+    # transmission_multiplier_df param).
+    _has_mt = False
+    # Imported before the def below (not inside the `if` that uses them) so the
+    # closure's references to these cell-private names get mangled — see the
+    # marimo note above.
+    from generic_core.fitting import (
+        _inject_tv_transmission, _tv_knot_days,
+        build_transmission_multiplier_array as _build_transmission_multiplier_array,
+    )
+    import pandas as _pd
+
+    def _schedule_dfs_for(_increments):
+        # Build the schedule bundle carrying this param set's m(t). Adds m(t)
+        # *alongside* the uploaded schedules rather than replacing them — m(t)
+        # is an extra multiplier on the force of infection, not a substitute
+        # for humidity/calendar/mobility/vaccination.
+        _fit_days = int(analysis_fitted_num_days)
+        _knots = _tv_knot_days(_fit_days, int(analysis_fitted_tv_spacing))
+        _m_fit = _build_transmission_multiplier_array(list(_increments), _knots, _fit_days)
+        if _num_days <= _fit_days:
+            _m_full = _m_fit[:_num_days]
+        else:
+            _m_full = np.concatenate([_m_fit, np.full(_num_days - _fit_days, _m_fit[-1])])
+        _dates = _pd.date_range(start=_start, periods=_num_days, freq="D").date
+        return SimpleNamespace(
+            **{
+                _f: getattr(loaded_schedule_dfs, _f, None)
+                for _f in ("absolute_humidity_df", "school_work_calendar_df",
+                           "mobility_df", "daily_vaccines_df")
+            },
+            transmission_multiplier_df=_pd.DataFrame(
+                {"date": _dates, "transmission_multiplier": _m_full}
+            ),
+        )
+
+    if analysis_use_fitted.value and analysis_fitted_tv_increments:
+        _tv_cfg, _n_foi = _inject_tv_transmission(_sim_config)
+        if _n_foi:
+            # The FOI transitions are rewired to read a 'transmission_multiplier'
+            # schedule once, for every run — only the per-day values differ
+            # between param sets. Accepted sets come from the same fit as the
+            # best set, so if the best set carries m(t) so do the others.
+            _sim_config = _tv_cfg
+            _has_mt = True
+            _schedule_dfs_best = _schedule_dfs_for(analysis_fitted_tv_increments)
+
+    def _pset_increments(_pset):
+        return [
+            _v for _, _v in sorted(
+                (
+                    (int(_pk[len("m_dlog_"):]), float(_pv))
+                    for _pk, _pv in _pset.items()
+                    if _pk.startswith("m_dlog_") and _pk[len("m_dlog_"):].isdigit()
+                ),
+                key=lambda _t: _t[0],
+            )
+        ]
+
+    # Per-param-set initial conditions and m(t) schedules, built lazily and
+    # reused across scenarios (both depend only on the param set, not on the
+    # scenario overrides). _pset_idx None means "the fitted best set" — the
+    # values already computed above, i.e. the pre-existing code path.
+    _ci_cache = {}
+    _sched_cache = {}
+
+    def _get_ci(_pset_idx):
+        if _pset_idx is None or is_metapop:
+            return _ci_best
+        if _pset_idx not in _ci_cache:
+            _ci_cache[_pset_idx] = _scaled_ci(_psets[_pset_idx])
+        return _ci_cache[_pset_idx]
+
+    def _get_schedule_dfs(_pset_idx):
+        if _pset_idx is None or not _has_mt:
+            return _schedule_dfs_best
+        if _pset_idx not in _sched_cache:
+            _incrs = _pset_increments(_psets[_pset_idx])
+            _sched_cache[_pset_idx] = (
+                _schedule_dfs_for(_incrs) if _incrs else _schedule_dfs_best
+            )
+        return _sched_cache[_pset_idx]
+
+    def _apply_pset(_overrides, _pset_idx, _designed):
+        # Layer a sampled param set under the scenario's overrides: the set
+        # supplies every fitted param the design did not deliberately set, so
+        # the ensemble carries parameter uncertainty without undoing the
+        # sensitivity sweep or the edited scenario cells. seed_scale_*/m_dlog_*
+        # /phi are handled elsewhere (_get_ci / _get_schedule_dfs / not a model
+        # param), so they never reach param_overrides.
+        if _pset_idx is None:
+            return _overrides
+        _ov = dict(_overrides or {})
+        for _pk, _pv in _psets[_pset_idx].items():
+            if _pk == "phi" or _pk.startswith("m_dlog_") or _pk.startswith("seed_scale_"):
+                continue
+            if _pk in _designed:
+                continue
+            _ov[_pk] = list(_pv) if isinstance(_pv, (list, tuple)) else float(_pv)
+        return _ov
 
     def _extract_detailed(metapop, comps, tvs=None):
         _out = {}
@@ -625,29 +1116,43 @@ def _run_analysis(
         return _out
 
     _all = {}
-    with mo.status.spinner(f"Running {len(analysis_scenarios)} scenario(s) × {_n_reps} rep(s)..."):
+    _spin = (
+        f"Running {len(analysis_scenarios)} scenario(s) × {len(_run_schedule)} run(s)"
+        + (f" across {len(_psets)} parameter set(s)..." if _use_psets else "...")
+    )
+    with mo.status.spinner(_spin):
         try:
             for _scen_tuple in analysis_scenarios:
                 _scen_name, _overrides = _scen_tuple[0], _scen_tuple[1]
                 _per_subpop = _scen_tuple[2] if len(_scen_tuple) > 2 else None
+                _designed = _scen_tuple[3] if len(_scen_tuple) > 3 else set()
                 _reps_hists = []
-                for _rep in range(_n_reps):
+                # Seed by position in the run schedule, not by the rep index
+                # within a param set, so every run gets a distinct RNG stream
+                # once replicates are spread across sets.
+                for _run_i, (_pset_idx, _rep) in enumerate(_run_schedule):
+                    _run_ov = _apply_pset(_overrides, _pset_idx, _designed)
+                    _run_sched = _get_schedule_dfs(_pset_idx)
                     if not is_metapop:
                         _m, _, _ = make_single_pop_metapop(
-                            config_dict, _start, _num_days, _ci,
-                            seed_offset=_rep, seed_base=_seed_b, ts_per_day=_ts,
+                            _sim_config, _start, _num_days, _get_ci(_pset_idx),
+                            seed_offset=_run_i, seed_base=_seed_b, ts_per_day=_ts,
                             stochastic=_stoch, tvs=_tvs, save_daily=True,
-                            param_overrides=_overrides or None,
+                            param_overrides=_run_ov or None,
                             travel_config=metapop_travel_config,
+                            schedule_dfs=_run_sched,
                         )
                     else:
                         _m, _ = make_metapop_from_folder(
-                            metapop_folder_input.value, config_dict, _start, _num_days, list(compartments),
-                            seed_offset=_rep, seed_base=_seed_b, ts_per_day=_ts,
+                            metapop_folder_input.value, _sim_config, _start, _num_days, list(compartments),
+                            seed_offset=_run_i, seed_base=_seed_b, ts_per_day=_ts,
                             stochastic=_stoch, tvs=_tvs, save_daily=True,
-                            param_overrides=_overrides or None,
+                            param_overrides=_run_ov or None,
                             param_overrides_per_subpop=_per_subpop,
                             travel_config=metapop_travel_config,
+                            transmission_multiplier_df=getattr(
+                                _run_sched, "transmission_multiplier_df", None
+                            ),
                         )
                     _m.simulate_until_day(_num_days)
                     _reps_hists.append(_extract_detailed(_m, list(compartments), tvs=_tvs))
@@ -666,6 +1171,13 @@ def _run_analysis(
         "tvs": _tvs_actual,
         "num_days": _num_days,
         "start_date": _start,
+        # Which sampled param set each replicate used (None when parameter
+        # uncertainty is off) — lets downstream code group replicates by draw.
+        "param_set_indices": [_i for _i, _ in _run_schedule],
+        "uncertainty_source": (
+            "parameters+transitions" if _use_psets
+            else ("transitions" if _stoch else "deterministic")
+        ),
     })
     return
 
@@ -903,10 +1415,26 @@ def _analysis_summary_table(
 
 
 @app.cell
+def _analysis_metric_plot_options(mo):
+    # Extra "duplicate the plots" toggles for the user-defined metric section.
+    # Both are additive: the total-population / daily views are always kept.
+    analysis_metric_per_age = mo.ui.checkbox(
+        value=False,
+        label="Also plot each age group separately (in addition to the totals above)",
+    )
+    analysis_metric_cumulative = mo.ui.checkbox(
+        value=False,
+        label="Also plot cumulative time series (in addition to daily values)",
+    )
+    return analysis_metric_per_age, analysis_metric_cumulative
+
+
+@app.cell
 def _analysis_metric_defs_show(
     mo, main_tab,
     analysis_n_metrics_input, analysis_metric_names, analysis_metric_tvs,
     analysis_plot_metric_sel, transition_vars_input, tv_opts,
+    analysis_metric_per_age, analysis_metric_cumulative,
 ):
     mo.stop(main_tab.value != "Analysis", None)
     _n = int(analysis_n_metrics_input.value)
@@ -936,6 +1464,9 @@ def _analysis_metric_defs_show(
         *_rows,
         mo.md("**Select which metrics to show in the plots below:**"),
         analysis_plot_metric_sel,
+        mo.md("**Extra plot views:**"),
+        analysis_metric_per_age,
+        analysis_metric_cumulative,
     ])
     return
 
@@ -991,7 +1522,8 @@ def _analysis_compute_metric_series(
 def _analysis_plot_daily_metrics(
     analysis_metric_series, analysis_plot_metric_sel,
     analysis_subpop_selector, analysis_age_selector,
-    np, pd, plt, mo, main_tab,
+    analysis_metric_per_age, analysis_metric_cumulative,
+    num_age_groups, np, pd, plt, mo, main_tab,
 ):
     mo.stop(main_tab.value != "Analysis", None)
     mo.stop(
@@ -1008,8 +1540,13 @@ def _analysis_plot_daily_metrics(
     _sp_names = analysis_metric_series["sp_names"]
     _start = analysis_metric_series["start_date"]
     _sel_subpops = analysis_subpop_selector.value or ["all subpops"]
-    _sel_ages = analysis_age_selector.value or ["all ages"]
-    _combos = [(sp, ag) for sp in _sel_subpops for ag in _sel_ages]
+    _sel_ages = list(analysis_age_selector.value or ["all ages"])
+    if analysis_metric_per_age.value:
+        _sel_ages = list(dict.fromkeys(
+            _sel_ages + [f"Age {_a}" for _a in range(num_age_groups)]
+        ))
+    _kinds = ["Daily"] + (["Cumulative"] if analysis_metric_cumulative.value else [])
+    _combos = [(sp, ag, k) for sp in _sel_subpops for ag in _sel_ages for k in _kinds]
     _n_combos = len(_combos)
     _colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
     _LINE_STYLES = ["-", "--", ":", "-."]
@@ -1028,8 +1565,9 @@ def _analysis_plot_daily_metrics(
         return _total[:, int(age_sel.split()[-1]), :].sum(axis=1)
 
     _fig, _axes = plt.subplots(_n_combos, 1, figsize=(11, min(4 * _n_combos, 80)), squeeze=False)
+    _csv_rows = []  # long-format copy of exactly what gets drawn
 
-    for _c_idx, (_sp, _ag) in enumerate(_combos):
+    for _c_idx, (_sp, _ag, _kind) in enumerate(_combos):
         _ax = _axes[_c_idx, 0]
         for _m_idx, _mname in enumerate(_sel_metrics):
             _ls = _LINE_STYLES[_m_idx % len(_LINE_STYLES)]
@@ -1041,23 +1579,42 @@ def _analysis_plot_daily_metrics(
                 if not _rep_arrs:
                     continue
                 _stacked = np.stack(_rep_arrs, axis=0)
+                if _kind == "Cumulative":
+                    _stacked = np.cumsum(_stacked, axis=1)
                 _dates = pd.date_range(start=_start, periods=_stacked.shape[1], freq="D")
                 _med = np.median(_stacked, axis=0)
                 _lo = np.percentile(_stacked, 2.5, axis=0)
                 _hi = np.percentile(_stacked, 97.5, axis=0)
                 _ax.plot(_dates, _med, label=f"{_mname} — {_scen_name}", color=_color, linestyle=_ls)
                 _ax.fill_between(_dates, _lo, _hi, color=_color, alpha=0.15)
+                for _d, _m_v, _lo_v, _hi_v in zip(_dates, _med, _lo, _hi):
+                    _csv_rows.append({
+                        "date": _d.date().isoformat(),
+                        "series": _kind.lower(),
+                        "subpopulation": _sp,
+                        "age_group": _ag,
+                        "metric": _mname,
+                        "scenario": _scen_name,
+                        "median": float(_m_v),
+                        "ci_lower_2.5": float(_lo_v),
+                        "ci_upper_97.5": float(_hi_v),
+                    })
 
         _ax.set_xlabel("Date")
-        _ax.set_ylabel("Daily count")
-        _ax.set_title(f"Daily metric by scenario (median + 95% CI) — {_sp} / {_ag}")
+        _ax.set_ylabel(f"{_kind} count")
+        _ax.set_title(f"{_kind} metric by scenario (median + 95% CI) — {_sp} / {_ag}")
         _handles, _labels_leg = _ax.get_legend_handles_labels()
         if _handles:
             _ax.legend(_handles, _labels_leg, fontsize=8, loc="upper right")
 
     _fig.autofmt_xdate()
     plt.tight_layout()
-    mo.vstack([mo.md("### Analysis — Daily Metric by Scenario"), _fig])
+    _dl = mo.download(
+        data=pd.DataFrame(_csv_rows).to_csv(index=False).encode(),
+        filename="metric_timeseries.csv",
+        label="Download plotted data as CSV",
+    )
+    mo.vstack([mo.md(f"### Analysis — {' / '.join(_kinds)} Metric by Scenario"), _fig, _dl])
     return
 
 
@@ -1065,7 +1622,8 @@ def _analysis_plot_daily_metrics(
 def _analysis_plot_cumulative_boxplot(
     analysis_metric_series, analysis_plot_metric_sel,
     analysis_subpop_selector, analysis_age_selector,
-    np, plt, mo, main_tab,
+    analysis_metric_per_age, num_age_groups,
+    np, pd, plt, mo, main_tab,
 ):
     mo.stop(main_tab.value != "Analysis", None)
     mo.stop(analysis_metric_series is None, mo.md(""))
@@ -1078,7 +1636,11 @@ def _analysis_plot_cumulative_boxplot(
     _metrics = analysis_metric_series["metrics"]
     _sp_names = analysis_metric_series["sp_names"]
     _sel_subpops = analysis_subpop_selector.value or ["all subpops"]
-    _sel_ages = analysis_age_selector.value or ["all ages"]
+    _sel_ages = list(analysis_age_selector.value or ["all ages"])
+    if analysis_metric_per_age.value:
+        _sel_ages = list(dict.fromkeys(
+            _sel_ages + [f"Age {_a}" for _a in range(num_age_groups)]
+        ))
     _combos = [(sp, ag) for sp in _sel_subpops for ag in _sel_ages]
     _n_combos = len(_combos)
     _n_met = len(_sel_metrics)
@@ -1101,6 +1663,7 @@ def _analysis_plot_cumulative_boxplot(
         figsize=(max(5 * _n_met, 6), min(5 * _n_combos, 80)),
         squeeze=False,
     )
+    _csv_rows = []  # per-replicate values behind each box
 
     for _c_idx, (_sp, _ag) in enumerate(_combos):
         for _m_idx, _mname in enumerate(_sel_metrics):
@@ -1112,6 +1675,15 @@ def _analysis_plot_cumulative_boxplot(
                 _vals = [_cum_scalar(_rep, _sp, _ag) for _rep in _mdata[_scen_name]]
                 _vals = [v for v in _vals if v is not None]
                 _box_data.append(_vals if _vals else [0.0])
+                for _r_idx, _v in enumerate(_vals):
+                    _csv_rows.append({
+                        "subpopulation": _sp,
+                        "age_group": _ag,
+                        "metric": _mname,
+                        "scenario": _scen_name,
+                        "replicate": _r_idx,
+                        "cumulative_value": float(_v),
+                    })
             _ax.boxplot(_box_data, tick_labels=_scen_names, vert=True)
             _ax.axhline(0, linestyle="--", color="gray", alpha=0.4)
             _ax.set_ylabel(f"Cumulative {_mname}")
@@ -1119,7 +1691,12 @@ def _analysis_plot_cumulative_boxplot(
             _ax.tick_params(axis="x", rotation=20)
 
     plt.tight_layout()
-    mo.vstack([mo.md("### Analysis — Cumulative Metric Distribution by Scenario"), _fig])
+    _dl = mo.download(
+        data=pd.DataFrame(_csv_rows).to_csv(index=False).encode(),
+        filename="metric_cumulative_by_replicate.csv",
+        label="Download plotted data as CSV",
+    )
+    mo.vstack([mo.md("### Analysis — Cumulative Metric Distribution by Scenario"), _fig, _dl])
     return
 
 
@@ -1127,7 +1704,7 @@ def _analysis_plot_cumulative_boxplot(
 def _analysis_plot_age_bars(
     analysis_metric_series, analysis_plot_metric_sel,
     analysis_subpop_selector,
-    num_age_groups, np, plt, mo, main_tab,
+    num_age_groups, np, pd, plt, mo, main_tab,
 ):
     mo.stop(main_tab.value != "Analysis", None)
     mo.stop(analysis_metric_series is None, mo.md(""))
@@ -1160,6 +1737,7 @@ def _analysis_plot_age_bars(
     _n_plots = len(_sel_subpops) * len(_sel_metrics)
     _fig, _axes = plt.subplots(_n_plots, 1, figsize=(10, min(5 * _n_plots, 80)), squeeze=False)
     _ax_idx = 0
+    _csv_rows = []  # bar heights (mean across replicates)
 
     for _sp in _sel_subpops:
         for _mname in _sel_metrics:
@@ -1181,6 +1759,14 @@ def _analysis_plot_age_bars(
                     color=_colors[_s_idx % len(_colors)],
                     alpha=0.8,
                 )
+                for _lbl, _v in zip(_x_labels, _mean_vals):
+                    _csv_rows.append({
+                        "subpopulation": _sp,
+                        "metric": _mname,
+                        "scenario": _scen_name,
+                        "age_group": _lbl,
+                        "cumulative_mean": float(_v),
+                    })
 
             # Subtle separator before the "Total" bar
             _ax.axvline(x=_n_ages - 0.5, color="gray", linestyle=":", alpha=0.5)
@@ -1193,7 +1779,12 @@ def _analysis_plot_age_bars(
             _ax_idx += 1
 
     plt.tight_layout()
-    mo.vstack([mo.md("### Analysis — Age-stratified Metric by Scenario"), _fig])
+    _dl = mo.download(
+        data=pd.DataFrame(_csv_rows).to_csv(index=False).encode(),
+        filename="metric_age_stratified.csv",
+        label="Download plotted data as CSV",
+    )
+    mo.vstack([mo.md("### Analysis — Age-stratified Metric by Scenario"), _fig, _dl])
     return
 
 
