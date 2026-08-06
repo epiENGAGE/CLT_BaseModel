@@ -17,3 +17,7 @@ generic_core/__pycache__/
 generic_core/examples/__marimo__/
 *.pyc
 __marimo__/
+.history/
+# Large raw gridMET NetCDFs (inputs to
+# generic_core/examples/massachusetts_vax/data/extract_ma_humidity.py)
+*.nc
