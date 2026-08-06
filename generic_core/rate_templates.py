@@ -59,6 +59,16 @@ def _validate_optional_humidity_keys(
             )
 
 
+def _validate_optional_transmission_multiplier(rate_name, rate_config, schedule_names):
+    """Validate the optional time-varying transmission-multiplier schedule key."""
+    sname = rate_config.get("transmission_multiplier_schedule")
+    if sname is not None and sname not in schedule_names:
+        raise ValueError(
+            f"{rate_name}: schedule '{sname}' (from key "
+            "'transmission_multiplier_schedule') not in model schedules"
+        )
+
+
 def _beta_adjusted_np(state, params, rate_config: dict):
     beta_adjusted = params.params[rate_config["beta_param"]]
     if "humidity_impact_param" in rate_config:
@@ -67,6 +77,10 @@ def _beta_adjusted_np(state, params, rate_config: dict):
         beta_adjusted = beta_adjusted * (
             1.0 + humidity_impact * np.exp(-180.0 * absolute_humidity)
         )
+    # Optional time-varying transmission multiplier m(t): a scalar-per-day
+    # schedule that scales beta (e.g. a fitted seasonal/behavioural forcing).
+    if "transmission_multiplier_schedule" in rate_config:
+        beta_adjusted = beta_adjusted * state.schedules[rate_config["transmission_multiplier_schedule"]]
     return beta_adjusted
 
 
@@ -78,6 +92,8 @@ def _beta_adjusted_torch(state_dict: dict, params_dict: dict, rate_config: dict)
         beta_adjusted = beta_adjusted * (
             1.0 + humidity_impact * torch.exp(-180.0 * absolute_humidity)
         )
+    if "transmission_multiplier_schedule" in rate_config:
+        beta_adjusted = beta_adjusted * state_dict[rate_config["transmission_multiplier_schedule"]]
     return beta_adjusted
 
 
@@ -409,6 +425,9 @@ class ForceOfInfectionRate(RateTemplate):
         _validate_optional_humidity_keys(
             "ForceOfInfectionRate", rate_config, param_names, schedule_names
         )
+        _validate_optional_transmission_multiplier(
+            "ForceOfInfectionRate", rate_config, schedule_names
+        )
         _validate_optional_param_key("ForceOfInfectionRate", rate_config, "inf_reduce_param", param_names)
         _validate_optional_param_key("ForceOfInfectionRate", rate_config, "vax_reduce_param", param_names)
         contact_schedule = rate_config["contact_matrix_schedule"]
@@ -555,6 +574,9 @@ class ForceOfInfectionTravelRate(RateTemplate):
         _validate_optional_param_key("ForceOfInfectionTravelRate", rate_config, "beta_param", param_names)
         _validate_optional_humidity_keys(
             "ForceOfInfectionTravelRate", rate_config, param_names, schedule_names
+        )
+        _validate_optional_transmission_multiplier(
+            "ForceOfInfectionTravelRate", rate_config, schedule_names
         )
         _validate_optional_param_key("ForceOfInfectionTravelRate", rate_config, "inf_reduce_param", param_names)
         _validate_optional_param_key("ForceOfInfectionTravelRate", rate_config, "vax_reduce_param", param_names)
