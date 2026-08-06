@@ -21,3 +21,6 @@ __marimo__/
 # Large raw gridMET NetCDFs (inputs to
 # generic_core/examples/massachusetts_vax/data/extract_ma_humidity.py)
 *.nc
+MA_vax/__pycache__/
+MA_vax/outputs_*/
+MA_vax/counterfactual_tables_det_age_ihr_scale/
