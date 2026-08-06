@@ -315,6 +315,7 @@ def parse_model_config_from_dict(
 
     # --- 6. Jointly-distributed consistency check ---
     _validate_jointly_distributed(transitions)
+    _validate_competing_transitions(transitions, groups)
 
     # --- 7. Epi metrics ---
     metrics_raw = raw.get("epi_metrics", [])
@@ -424,4 +425,76 @@ def _validate_jointly_distributed(transitions: list[TransitionConfig]) -> None:
                 f"Transition '{t.name}' references '{jd}' as jointly_distributed_with, "
                 f"but '{jd}' does not reference '{t.name}' back "
                 f"(got '{partner.jointly_distributed_with}')"
+            )
+
+
+def _validate_competing_transitions(
+    transitions: list[TransitionConfig],
+    groups: list[TransitionGroupConfig],
+) -> None:
+    """
+    Check that competing outflows from a compartment are jointly distributed.
+
+    When two or more transitions draw from the same origin compartment, each
+    one sampling its own marginal realization lets their sum exceed the
+    origin's population: the compartment goes negative and the next timestep
+    fails with a Binomial 'n < 0'. They must be declared together in one
+    ``transition_groups`` entry so a single joint (multinomial) draw splits the
+    origin between them.
+
+    ``scheduled_exact`` transitions are excluded: they are deterministic, exact
+    flows already clamped against the origin count (see
+    ``ScheduledTransferVariable``), and the parser rejects them as group
+    members. Note that a compartment with one scheduled_exact outflow *and* one
+    sampled outflow is still not fully protected — the clamp and the marginal
+    draw are computed independently — but that combination cannot be expressed
+    as a group, so it is left alone here.
+
+    Also checks that a group's members all share an origin, since
+    ``create_transition_variable_groups`` takes ``members[0].origin`` as the
+    group's origin and would otherwise silently draw against the wrong
+    compartment.
+    """
+    by_name = {t.name: t for t in transitions}
+
+    for g in groups:
+        origins = {by_name[m].origin for m in g.members}
+        if len(origins) > 1:
+            raise ValueError(
+                f"transition_group '{g.name}': members must all share one origin "
+                f"compartment, got {sorted(origins)}. A group represents a single "
+                "joint draw splitting one compartment between competing branches."
+            )
+
+    grouped: dict[str, str] = {}
+    for g in groups:
+        for m in g.members:
+            grouped[m] = g.name
+
+    outflows: dict[str, list[str]] = {}
+    for t in transitions:
+        if t.rate_template == "scheduled_exact":
+            continue
+        outflows.setdefault(t.origin, []).append(t.name)
+
+    for origin, names in outflows.items():
+        if len(names) < 2:
+            continue
+        ungrouped = [n for n in names if n not in grouped]
+        if ungrouped:
+            raise ValueError(
+                f"Compartment '{origin}' has {len(names)} competing outflows "
+                f"({', '.join(sorted(names))}) but {', '.join(sorted(ungrouped))} "
+                f"{'is' if len(ungrouped) == 1 else 'are'} not in any transition_group. "
+                "Competing outflows must be declared together in one transition_groups "
+                "entry so they are drawn jointly; sampled independently, their sum can "
+                "exceed the origin compartment and drive it negative."
+            )
+        group_names = {grouped[n] for n in names}
+        if len(group_names) > 1:
+            raise ValueError(
+                f"Compartment '{origin}': its competing outflows "
+                f"({', '.join(sorted(names))}) are split across transition_groups "
+                f"{sorted(group_names)}. All outflows from one compartment must belong "
+                "to the same group to be drawn jointly."
             )

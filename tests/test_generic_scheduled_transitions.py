@@ -38,10 +38,14 @@ CASEB_CONFIG_PATH = BASE_PATH / "caseb_flu_generic_metapop_config.json"
 # 1 + 2. ScheduledTransferVariable unit behaviour
 # ---------------------------------------------------------------------------
 
-def _make_stv(origin_val, rate):
+def _make_stv(origin_val, rate, destination_val=None):
     """Build a ScheduledTransferVariable with a fixed origin population and rate."""
     origin = clt.Compartment(np.asarray(origin_val, dtype=float))
-    destination = clt.Compartment(np.zeros_like(np.asarray(origin_val, dtype=float)))
+    destination = clt.Compartment(
+        np.zeros_like(np.asarray(origin_val, dtype=float))
+        if destination_val is None
+        else np.asarray(destination_val, dtype=float)
+    )
     stv = ScheduledTransferVariable(origin, destination, schedule_name="vax_sched")
     # current_rate is the daily proportion of the origin compartment to move
     # (set by the simulation loop from the schedule value before realization).
@@ -77,6 +81,25 @@ def test_scheduled_exact_caps_at_origin_population():
     stv = _make_stv([[100.0]], [[2.0]])
     realized = stv.get_scheduled_exact_realization(None, num_timesteps=1)
     np.testing.assert_array_equal(realized, np.array([[100.0]]))
+
+
+def test_scheduled_exact_proportion_applies_to_origin_plus_destination():
+    # vax_pool="susceptible": the proportion is taken against origin+destination
+    # (everyone not yet infected), not the origin alone -- already-vaccinated
+    # people stay in the base, so a constant schedule keeps moving a constant
+    # count instead of decaying as the origin drains.
+    # (800 + 200) * 0.1 = 100, NOT 800 * 0.1 = 80.
+    stv = _make_stv([[800.0]], [[0.1]], destination_val=[[200.0]])
+    realized = stv.get_scheduled_exact_realization(None, num_timesteps=1)
+    np.testing.assert_array_equal(realized, np.array([[100.0]]))
+
+
+def test_scheduled_exact_pool_count_still_capped_at_origin():
+    # The pool is origin+destination, but only the origin's people can move:
+    # (50 + 950) * 0.5 = 500 wanted, capped at the 50 actually in the origin.
+    stv = _make_stv([[50.0]], [[0.5]], destination_val=[[950.0]])
+    realized = stv.get_scheduled_exact_realization(None, num_timesteps=1)
+    np.testing.assert_array_equal(realized, np.array([[50.0]]))
 
 
 def test_scheduled_exact_reset_restores_day_counter():
@@ -265,17 +288,22 @@ def test_scheduled_exact_replays_pre_simulation_history_into_compartments():
     model = _build_scheduled_exact_model(
         start_date=datetime.date(2024, 10, 1), reset_param_value=None
     )
-    # 1000 * 0.1 = 100/day for 5 days, depleting S each day: 100, 90, 81, 72.9->73, 65.6->66
-    # exact replay of rint(rate * remaining), capped at remaining.
-    s = 1000.0
+    # vax_pool="susceptible": each day's proportion applies to the origin+
+    # destination pool (S + V, i.e. everyone not yet infected), not to S alone
+    # -- vaccinating someone does not shrink the base later proportions are
+    # taken against. Over pre-simulation history nobody is infected yet, so the
+    # pool stays at the initial 1000 and every day moves the same rint(0.1 *
+    # 1000) = 100, capped at whatever is left in S.
+    pool = 1000.0
+    remaining = 1000.0
     moved_total = 0.0
     for _ in range(5):
-        moved = min(round(0.1 * s), s)
-        s -= moved
+        moved = min(round(0.1 * pool), remaining)
+        remaining -= moved
         moved_total += moved
+    assert moved_total == 500.0  # 5 days x 100, no depletion of the pool
     np.testing.assert_allclose(model.compartments["V"].current_val, [[moved_total]])
     np.testing.assert_allclose(model.compartments["S"].current_val, [[1000.0 - moved_total]])
-    assert moved_total > 0
 
 
 def test_scheduled_exact_reset_date_excludes_history_before_it():

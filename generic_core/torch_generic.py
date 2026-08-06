@@ -458,12 +458,15 @@ def generic_advance_timestep(
             continue
         if tc.rate_template == "scheduled_exact":
             schedule_name = tc.rate_config["schedule"]
-            # schedule value is a proportion of the origin population
-            # vaccinated that day, not an absolute count (matches the
-            # existing vaccine_schedule input format) -- convert before
-            # clamping to the available population.
+            # schedule value is a proportion of the origin+destination pool
+            # (vax_pool="susceptible": everyone not yet infected, whether or
+            # not already scheduled-transferred) vaccinated that day, not an
+            # absolute count (matches the existing vaccine_schedule input
+            # format and ScheduledTransferVariable in generic_model.py) --
+            # convert before clamping to the available origin population.
             origin = state_dict[tc.origin]
-            scheduled_count = state_dict[schedule_name] * origin
+            destination = state_dict[tc.destination]
+            scheduled_count = state_dict[schedule_name] * (origin + destination)
             transition_amounts[tc.name] = (
                 torch.minimum(scheduled_count, origin)
                 if is_first_timestep_of_day

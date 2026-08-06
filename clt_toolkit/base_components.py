@@ -1,6 +1,7 @@
 import numpy as np
 import sciris as sc
 import copy
+import warnings
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Optional
@@ -1896,6 +1897,78 @@ class SubpopModel(ABC):
         for name in transition_variables_to_save:
             self.transition_variables[name].save_history()
 
+    def _transition_variables_by_origin(self) -> dict:
+        """
+        Map each origin `Compartment` to the `TransitionVariable` instances
+        drawing from it. Built once and cached -- the model's structure does
+        not change during a simulation.
+        """
+
+        cached = getattr(self, "_tvars_by_origin_cache", None)
+        if cached is None:
+            cached = {}
+            for tvar in self.transition_variables.values():
+                cached.setdefault(id(tvar.origin), (tvar.origin, []))[1].append(tvar)
+            self._tvars_by_origin_cache = cached
+        return cached
+
+    def enforce_outflow_capacity(self) -> None:
+        """
+        Cap each compartment's total outflow at its current population.
+
+        All `TransitionVariable` realizations are applied to the compartments
+        together in `update_compartments`, each having been computed against
+        the same pre-update origin value. A single binomial/multinomial draw
+        cannot over-draw its origin, but several realizations that were *not*
+        computed jointly can sum past it, leaving the compartment negative --
+        and the next timestep then fails with a Binomial 'n < 0'. That happens
+        when competing outflows are not declared in one transition group, when
+        a `scheduled_exact` flow (clamped against the origin alone) races a
+        sampled one out of the same compartment, and for Poisson or
+        deterministic-unrounded transitions even with a single outflow.
+
+        Where the total exceeds the origin, every outflow from it is scaled by
+        `origin / total`, which preserves each branch's share and conserves
+        population exactly (the individuals not moved simply stay put) --
+        unlike clamping the compartment at zero afterwards, which would let
+        destination compartments gain people the origin never had. Integer
+        transition types are floored afterwards so realizations stay whole.
+        """
+
+        integer_valued = "deterministic" not in self.simulation_settings.transition_type
+
+        for origin, tvars in self._transition_variables_by_origin().values():
+            total = tvars[0].current_val
+            for tvar in tvars[1:]:
+                total = total + tvar.current_val
+            total = np.asarray(total, dtype=float)
+            available = np.asarray(origin.current_val, dtype=float)
+
+            over = total > available
+            if not np.any(over):
+                continue
+
+            scale = np.divide(
+                available, total, out=np.ones_like(total), where=(total > 0),
+            )
+            scale = np.where(over, scale, 1.0)
+            for tvar in tvars:
+                scaled = np.asarray(tvar.current_val, dtype=float) * scale
+                tvar.current_val = np.floor(scaled) if integer_valued else scaled
+
+            if not getattr(self, "_warned_outflow_capacity", False):
+                self._warned_outflow_capacity = True
+                warnings.warn(
+                    f"Subpopulation '{self.name}': total outflow from compartment "
+                    f"'{getattr(origin, 'name', '?')}' exceeded its population and was "
+                    "scaled down to fit. This means some of its outflows are not being "
+                    "drawn jointly -- check that competing transitions out of the same "
+                    "compartment are declared together in a transition group. Further "
+                    "occurrences in this subpopulation are not reported.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+
     def update_compartments(self) -> None:
         """
         Update current value of each `Compartment`, by
@@ -1903,6 +1976,8 @@ class SubpopModel(ABC):
             and subtracting/adding their current values
             from origin/destination compartments respectively.
         """
+
+        self.enforce_outflow_capacity()
 
         for tvar in self.transition_variables.values():
             tvar.update_origin_outflow()

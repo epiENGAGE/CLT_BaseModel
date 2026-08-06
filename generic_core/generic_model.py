@@ -86,10 +86,12 @@ class ScheduledTransferVariable(clt.TransitionVariable):
         self._timestep_in_day = 0
 
     def get_current_rate(self, state, params) -> np.ndarray:
-        # NOTE: this is a proportion of the origin compartment's population
-        # vaccinated that day (matching the existing vaccine_schedule input
-        # format, e.g. FluSubpopState.daily_vaccines), not an absolute count.
-        # It is converted to a count in get_scheduled_exact_realization.
+        # NOTE: this is a proportion of the origin+destination pool (the
+        # "susceptible" vax_pool -- everyone not yet infected, whether or not
+        # already scheduled-transferred) vaccinated that day (matching the
+        # existing vaccine_schedule input format, e.g. FluSubpopState.daily_vaccines),
+        # not an absolute count. It is converted to a count in
+        # get_scheduled_exact_realization.
         return state.schedules[self.schedule_name]  # type: ignore[attr-defined]
 
     def get_scheduled_exact_realization(self, RNG, num_timesteps) -> np.ndarray:
@@ -98,7 +100,11 @@ class ScheduledTransferVariable(clt.TransitionVariable):
         origin_val = np.asarray(self.origin.current_val)
         if not is_first_timestep:
             return np.zeros_like(origin_val)
-        scheduled_count = np.rint(np.asarray(self.current_rate) * origin_val)
+        # vax_pool="susceptible": proportion applies to origin+destination (the
+        # not-yet-infected pool), not origin alone -- vaccinating someone doesn't
+        # shrink the base future proportions are applied to, only infection does.
+        destination_val = np.asarray(self.destination.current_val)
+        scheduled_count = np.rint(np.asarray(self.current_rate) * (origin_val + destination_val))
         return np.minimum(scheduled_count, origin_val)
 
     def reset(self) -> None:
@@ -267,7 +273,10 @@ class ConfigDrivenSubpopModel(clt.SubpopModel):
             )
             moved_total = np.zeros_like(remaining)
             for proportion in relevant:
-                moved = np.minimum(np.rint(np.asarray(proportion, dtype=float) * remaining), remaining)
+                # Same vax_pool="susceptible" rule as get_scheduled_exact_realization:
+                # proportion applies to origin+destination (remaining + moved_total).
+                pool = remaining + moved_total
+                moved = np.minimum(np.rint(np.asarray(proportion, dtype=float) * pool), remaining)
                 remaining = remaining - moved
                 moved_total = moved_total + moved
 
@@ -284,6 +293,19 @@ class ConfigDrivenSubpopModel(clt.SubpopModel):
         transition_type = self.simulation_settings.transition_type
         tvars = sc.objdict()
 
+        # A transition is jointly distributed when its realization comes from a
+        # TransitionVariableGroup's joint draw rather than its own marginal one.
+        # Group membership is what actually determines that, so derive it from
+        # transition_groups (the pairwise `jointly_distributed_with` field is
+        # still honoured). Reading only that field meant a config declaring the
+        # groups but omitting it built the groups and then silently overwrote
+        # every joint realization with an independent marginal draw -- see
+        # SubpopModel.sample_transitions, which skips only is_jointly_distributed
+        # variables.
+        grouped_names = {
+            m for gc in self.model_config.transition_groups for m in gc.members
+        }
+
         for tc in self.model_config.transitions:
             origin = self.compartments[tc.origin]
             dest = self.compartments[tc.destination]
@@ -297,7 +319,7 @@ class ConfigDrivenSubpopModel(clt.SubpopModel):
                 continue
 
             template = self._rate_registry[tc.rate_template]
-            is_joint = tc.jointly_distributed_with is not None
+            is_joint = tc.jointly_distributed_with is not None or tc.name in grouped_names
             tvars[tc.name] = ConfigDrivenTransitionVariable(
                 origin=origin,
                 destination=dest,
