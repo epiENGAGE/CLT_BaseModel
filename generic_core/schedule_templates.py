@@ -93,7 +93,7 @@ def _normalize_date_column(df: pd.DataFrame) -> pd.DataFrame:
     first = df["date"].iloc[0]
     if isinstance(first, str):
         df = df.copy()
-        df["date"] = pd.to_datetime(df["date"]).dt.date
+        df["date"] = pd.to_datetime(df["date"], format="%Y-%m-%d").dt.date
     return df
 
 

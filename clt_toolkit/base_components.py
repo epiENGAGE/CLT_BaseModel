@@ -1470,6 +1470,8 @@ class SubpopModel(ABC):
 
         self.schedules = self.create_schedules()
         self.compartments = self.create_compartments()
+        for compartment_name, compartment in self.compartments.items():
+            compartment.name = compartment_name
         self.transition_variables = self.create_transition_variables()
         self.transition_variable_groups = self.create_transition_variable_groups()
         self.epi_metrics = self.create_epi_metrics()
