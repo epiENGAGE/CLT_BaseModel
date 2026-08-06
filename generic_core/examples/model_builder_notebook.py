@@ -4598,7 +4598,11 @@ def _fit_n_targets_state(mo):
 
 
 @app.cell
-def _fit_target_buttons(mo, get_target_slots, set_target_slots):
+def _fit_target_buttons(
+    mo, get_target_slots, set_target_slots,
+    get_bulk_file_data, set_bulk_file_data,
+    get_restored_target_data, set_restored_target_data,
+):
     def _add_target(_):
         _cur = get_target_slots()
         if len(_cur) >= 20:
@@ -4611,6 +4615,18 @@ def _fit_target_buttons(mo, get_target_slots, set_target_slots):
             _cur = get_target_slots()
             if len(_cur) > 1:
                 set_target_slots([s for s in _cur if s != _slot])
+                # Drop the removed slot's leftover bulk/restored data too —
+                # otherwise it's still sitting in these dicts under that slot
+                # id, and a later "+ Add target" reusing the same freed slot
+                # number silently inherits it instead of starting empty.
+                if _slot in get_bulk_file_data():
+                    _new_bulk = dict(get_bulk_file_data())
+                    del _new_bulk[_slot]
+                    set_bulk_file_data(_new_bulk)
+                if _slot in get_restored_target_data():
+                    _new_restored = dict(get_restored_target_data())
+                    del _new_restored[_slot]
+                    set_restored_target_data(_new_restored)
         return _remove
 
     add_target_btn = mo.ui.button(label="+ Add target", on_click=_add_target)
@@ -10608,7 +10624,7 @@ def _analysis_plot_cumulative_boxplot(
                         "replicate": _r_idx,
                         "cumulative_value": float(_v),
                     })
-            _ax.boxplot(_box_data, tick_labels=_scen_names, vert=True)
+            _ax.boxplot(_box_data, tick_labels=_scen_names, orientation="vertical")
             _ax.axhline(0, linestyle="--", color="gray", alpha=0.4)
             _ax.set_ylabel(f"Cumulative {_mname}")
             _ax.set_title(f"Cumulative {_mname} — {_sp} / {_ag}")

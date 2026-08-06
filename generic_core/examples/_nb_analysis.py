@@ -1684,7 +1684,7 @@ def _analysis_plot_cumulative_boxplot(
                         "replicate": _r_idx,
                         "cumulative_value": float(_v),
                     })
-            _ax.boxplot(_box_data, tick_labels=_scen_names, vert=True)
+            _ax.boxplot(_box_data, tick_labels=_scen_names, orientation="vertical")
             _ax.axhline(0, linestyle="--", color="gray", alpha=0.4)
             _ax.set_ylabel(f"Cumulative {_mname}")
             _ax.set_title(f"Cumulative {_mname} — {_sp} / {_ag}")
