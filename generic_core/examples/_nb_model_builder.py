@@ -2180,7 +2180,7 @@ def _sim_settings_ui(mo, loaded_config, get_restored_config):
         value="Deterministic",
         label="Simulation mode",
     )
-    n_reps = mo.ui.number(start=1, stop=100, step=1, value=10, label="Replicates")
+    n_reps = mo.ui.number(start=1, stop=1000, step=1, value=10, label="Replicates")
     rng_seed = mo.ui.number(
         start=0, stop=99999, step=1,
         value=int(_restored_kwargs.get("seed_base", 42)),

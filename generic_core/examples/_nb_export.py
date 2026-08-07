@@ -83,16 +83,28 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
     # "Uncertainty source" control):
     #   "transitions"            - every replicate uses the fitted BEST parameter
     #                              set and differs only in the transition RNG.
+    #   "parameters"             - draw NUM_PARAM_SETS sets at random (without
+    #                              replacement) from the fit's accepted_params and
+    #                              run each ONE time with DETERMINISTIC transitions.
+    #                              The spread is parameter uncertainty alone, with
+    #                              no transition RNG noise, so repeating a set
+    #                              would only duplicate its trajectory -- NUM_REPS
+    #                              is ignored and the ensemble size is the number
+    #                              of sampled sets.
     #   "parameters+transitions" - draw NUM_PARAM_SETS sets at random (without
     #                              replacement) from the fit's accepted_params and
     #                              spread NUM_REPS replicates evenly across them,
     #                              so the ensemble carries parameter uncertainty
-    #                              too. Requires a fitted_params.json with more
-    #                              than one accepted set; ignored when STOCHASTIC
-    #                              is False (deterministic always runs once, with
-    #                              the best set).
+    #                              too.
+    # Both sampling modes require a fitted_params.json with more than one accepted
+    # set, and both are ignored when STOCHASTIC is False (deterministic always runs
+    # once, with the best set).
     UNCERTAINTY_SOURCE = "transitions"
     NUM_PARAM_SETS = 1
+    # Whether the transition engine itself is stochastic. Derived, not a setting:
+    # the "parameters" mode is stochastic in the sense that it samples the
+    # posterior, but each run's transitions are deterministic.
+    RUN_STOCHASTIC = STOCHASTIC and UNCERTAINTY_SOURCE != "parameters"
 
     # <<<METAPOP_BLOCK>>>
 
@@ -148,7 +160,7 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
     TV_SPACING = 30
     FIT_NUM_DAYS = 0
     # Accepted/posterior parameter sets behind the best set, used only when
-    # UNCERTAINTY_SOURCE == "parameters+transitions".
+    # UNCERTAINTY_SOURCE samples parameters ("parameters" / "parameters+transitions").
     PARAM_SETS = []
 
 
@@ -323,7 +335,7 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
             _m, _ = make_metapop_from_folder(
                 METAPOP_FOLDER, _cfg, START_DATE, NUM_DAYS, _comps,
                 seed_offset=rep, seed_base=SEED_BASE, ts_per_day=TIMESTEPS_PER_DAY,
-                stochastic=STOCHASTIC, save_daily=True, tvs=TRANSITION_VARS,
+                stochastic=RUN_STOCHASTIC, save_daily=True, tvs=TRANSITION_VARS,
                 param_overrides=None,
                 param_overrides_per_subpop=subpop_overrides,
                 travel_config=METAPOP_TRAVEL_CONFIG or None,
@@ -358,7 +370,7 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
             _comp_init = _scale_compartment_init(_comp_init, _seed_scales, _comps, _A, _R)
         _state = build_state_from_config(_mc, _comp_init, epi_metric_init={})
         _params = build_params_from_config(_mc, num_age_groups=_A, num_risk_groups=_R)
-        _tt = clt.TransitionTypes.BINOM if STOCHASTIC else clt.TransitionTypes.BINOM_DETERMINISTIC_NO_ROUND
+        _tt = clt.TransitionTypes.BINOM if RUN_STOCHASTIC else clt.TransitionTypes.BINOM_DETERMINISTIC_NO_ROUND
         _settings = clt.SimulationSettings(
             timesteps_per_day=TIMESTEPS_PER_DAY, transition_type=_tt,
             start_real_date=START_DATE, save_daily_history=True,
@@ -380,35 +392,48 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
     # Mirrors the Analysis tab. "transitions" (and every deterministic run) uses
     # the fitted best set — already merged into config_dict["params"] and into
     # each scenario's overrides — so replicates differ only in the transition
-    # RNG. Otherwise draw NUM_PARAM_SETS sets at random without replacement and
-    # spread the replicates evenly across them (remainder distributed at random).
+    # RNG. Otherwise draw NUM_PARAM_SETS sets at random without replacement:
+    # "parameters" runs each drawn set exactly once (transitions are
+    # deterministic, so a repeated set would only duplicate its trajectory —
+    # NUM_REPS is ignored), "parameters+transitions" spreads NUM_REPS replicates
+    # evenly across the drawn sets (remainder distributed at random).
+    _param_only = UNCERTAINTY_SOURCE == "parameters"
     _use_psets = (
         STOCHASTIC
-        and UNCERTAINTY_SOURCE == "parameters+transitions"
+        and UNCERTAINTY_SOURCE in ("parameters", "parameters+transitions")
         and len(PARAM_SETS) > 1
     )
     if _use_psets:
         _rng_sched = np.random.default_rng(SEED_BASE)
-        _k = min(int(NUM_PARAM_SETS), NUM_REPS, len(PARAM_SETS))
+        _k = min(int(NUM_PARAM_SETS), len(PARAM_SETS), *(() if _param_only else (NUM_REPS,)))
         _sel = _rng_sched.choice(len(PARAM_SETS), size=_k, replace=False)
         RUN_PARAM_SETS = [PARAM_SETS[int(_i)] for _i in _sel]
-        _base_r, _extra_r = divmod(NUM_REPS, _k)
-        RUN_SCHEDULE = [_i for _i in range(_k) for _ in range(_base_r)]
-        if _extra_r:
-            RUN_SCHEDULE += [int(_i) for _i in _rng_sched.choice(_k, size=_extra_r, replace=False)]
+        if _param_only:
+            RUN_SCHEDULE = list(range(_k))
+        else:
+            _base_r, _extra_r = divmod(NUM_REPS, _k)
+            RUN_SCHEDULE = [_i for _i in range(_k) for _ in range(_base_r)]
+            if _extra_r:
+                RUN_SCHEDULE += [int(_i) for _i in _rng_sched.choice(_k, size=_extra_r, replace=False)]
         print(
             f"Parameter uncertainty: {_k} set(s) sampled from {len(PARAM_SETS)} accepted, "
-            f"{NUM_REPS} run(s) per scenario"
+            f"{len(RUN_SCHEDULE)} run(s) per scenario"
+            + (" (deterministic transitions)" if _param_only else "")
         )
     else:
-        if UNCERTAINTY_SOURCE == "parameters+transitions" and STOCHASTIC:
+        if UNCERTAINTY_SOURCE in ("parameters", "parameters+transitions") and STOCHASTIC:
+            _fallback = (
+                "a single deterministic run of the best parameter set"
+                if _param_only
+                else "transition-only uncertainty with the best parameter set"
+            )
             print(
-                "Warning: UNCERTAINTY_SOURCE is 'parameters+transitions' but "
+                f"Warning: UNCERTAINTY_SOURCE is '{UNCERTAINTY_SOURCE}' but "
                 f"{FITTED_PARAMS_FILE} has fewer than 2 accepted_params — falling back "
-                "to transition-only uncertainty with the best parameter set."
+                f"to {_fallback}."
             )
         RUN_PARAM_SETS = []
-        RUN_SCHEDULE = [None] * (NUM_REPS if STOCHASTIC else 1)
+        RUN_SCHEDULE = [None] * (NUM_REPS if RUN_STOCHASTIC else 1)
 
 
     def _apply_pset(overrides, pset_idx, designed):
@@ -543,7 +568,7 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
     _designed_lines = [
         "# Parameters each scenario deliberately sets: {scenario_name: [param, ...]}.",
         "#",
-        "# Only relevant when UNCERTAINTY_SOURCE == 'parameters+transitions'. Each run",
+        "# Only relevant when UNCERTAINTY_SOURCE samples parameters. Each run",
         "# takes its parameters from a sampled fitted set, EXCEPT the ones listed here",
         "# for that scenario, which keep the value given in SCENARIOS. Without this,",
         "# the sampled set would overwrite the very parameter the scenario varies and",
@@ -594,6 +619,21 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
     import textwrap as _textwrap
     _script = _textwrap.dedent(_script)
 
+    # Uncertainty source under the name the exported script uses. "Sampled
+    # parameters only" maps to "parameters": the script draws NUM_PARAM_SETS sets
+    # and runs each exactly once with deterministic transitions, so NUM_REPS is
+    # meaningless there and is exported as 1 (the Analysis tab hides the replicate
+    # input in that mode for the same reason).
+    _export_can_sample = analysis_stochastic.value and analysis_n_param_sets_avail > 1
+    _export_unc = {
+        "Sampled parameters only": "parameters",
+        "Sampled parameters + transitions": "parameters+transitions",
+    }.get(analysis_uncertainty_source.value, "transitions") if _export_can_sample else "transitions"
+    _export_reps = (
+        1 if (_export_unc == "parameters" or not analysis_stochastic.value)
+        else int(analysis_n_reps.value)
+    )
+
     _script = _script.replace("# <<<METAPOP_BLOCK>>>", _metapop_block).replace(
         "# <<<SCENARIOS_BLOCK>>>", _scenarios_block,
     ).replace(
@@ -607,7 +647,7 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
         f"NUM_DAYS = {int(analysis_sim_days.value)}\n",
     ).replace(
         "NUM_REPS = 1\n",
-        f"NUM_REPS = {int(analysis_n_reps.value) if analysis_stochastic.value else 1}\n",
+        f"NUM_REPS = {_export_reps}\n",
     ).replace(
         "STOCHASTIC = False\n",
         f"STOCHASTIC = {bool(analysis_stochastic.value)}\n",
@@ -619,13 +659,7 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
         f"SEED_BASE = {int(rng_seed.value)}\n",
     ).replace(
         'UNCERTAINTY_SOURCE = "transitions"\n',
-        'UNCERTAINTY_SOURCE = "{}"\n'.format(
-            "parameters+transitions"
-            if (analysis_stochastic.value
-                and analysis_uncertainty_source.value == "Sampled parameters + transitions"
-                and analysis_n_param_sets_avail > 1)
-            else "transitions"
-        ),
+        f'UNCERTAINTY_SOURCE = "{_export_unc}"\n',
     ).replace(
         "NUM_PARAM_SETS = 1\n",
         f"NUM_PARAM_SETS = {int(analysis_n_param_sets.value)}\n",
@@ -682,15 +716,19 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
             if _n_sp_overrides else ""
         )
         _unc_note_extra = ""
-        if (analysis_stochastic.value
-                and analysis_uncertainty_source.value == "Sampled parameters + transitions"
-                and analysis_n_param_sets_avail > 1):
+        if _export_unc != "transitions":
             _unc_note_extra = (
-                f" `UNCERTAINTY_SOURCE` is set to `parameters+transitions` with "
+                f" `UNCERTAINTY_SOURCE` is set to `{_export_unc}` with "
                 f"`NUM_PARAM_SETS = {int(analysis_n_param_sets.value)}` — the script samples "
                 f"from `accepted_params` in `fitted_params.json` exactly as the Analysis tab "
                 f"does, so **download fitted_params.json too**."
             )
+            if _export_unc == "parameters":
+                _unc_note_extra += (
+                    " Each sampled set runs once with deterministic transitions, so "
+                    "`NUM_REPS` is exported as 1 and ignored — the ensemble size is "
+                    "`NUM_PARAM_SETS`."
+                )
         _scen_note = mo.callout(
             mo.md(
                 f"`SCENARIOS` pre-populated from the Analysis tab "

@@ -15,7 +15,7 @@ def _forecast_ui(mo):
         value=False,
     )
     forecast_horizon = mo.ui.number(value=30, start=1, stop=365, step=1, label="Forecast horizon (days)")
-    forecast_n_reps = mo.ui.number(value=10, start=1, stop=200, step=1, label="Replicates")
+    forecast_n_reps = mo.ui.number(value=10, start=1, stop=1000, step=1, label="Replicates")
     forecast_stochastic = mo.ui.switch(label="Stochastic simulation", value=True)
     forecast_run_button = mo.ui.run_button(label="Run forecast")
     return (
