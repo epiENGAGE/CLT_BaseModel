@@ -59,13 +59,13 @@ def load_simulation(sim_csv: Path) -> pd.DataFrame:
 
 
 def load_observed_age(suffix: str) -> pd.DataFrame:
-    path = HERE / f"MA_flu_daily_hospitalizations_{suffix}.csv"
+    path = HERE / "data" / "hospitalizations_ts" / f"MA_flu_daily_hospitalizations_{suffix}.csv"
     df = pd.read_csv(path, parse_dates=["date"])
     return df.rename(columns={"value": "observed"})
 
 
 def load_observed_total() -> pd.DataFrame:
-    path = HERE / "MA_flu_daily_hospitalizations_total.csv"
+    path = HERE / "data" / "hospitalizations_ts" / "MA_flu_daily_hospitalizations_total.csv"
     df = pd.read_csv(path)
     df["date"] = pd.to_datetime(df["Date"], format="%m/%d/%y")
     return df[["date", "total"]].rename(columns={"total": "observed"})

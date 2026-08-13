@@ -114,6 +114,10 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
 
     # <<<DESIGNED_PARAMS_BLOCK>>>
 
+    # <<<DOSE_MULTIPLIER_BLOCK>>>
+
+    # <<<DOSE_MULTIPLIER_SUBPOP_BLOCK>>>
+
     # ---- Setup ----
     _HERE = Path(__file__).parent
     sys.path.insert(0, str(_HERE.parent.parent))
@@ -127,6 +131,7 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
     from generic_core.generic_metapop import ConfigDrivenMetapopModel
     from generic_core.model_factory import (
         build_compartment_init, make_metapop_from_folder, extract_history,
+        scale_dose_schedule_df,
     )
     from generic_core.fitting import (
         _scale_compartment_init, _inject_tv_transmission, _tv_knot_days,
@@ -271,7 +276,13 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
             return json.load(_f)
 
 
-    def _build_schedules(start_date, num_days, tv_increments=None):
+    def _build_schedules(start_date, num_days, tv_increments=None, dose_mult=None):
+        # dose_mult: per-age-group multiplier on the `scheduled_exact`
+        # transition's daily schedule (see scale_dose_schedule_df) -- e.g. 0 to
+        # zero out an age group for a no-dose / single-age-only scenario.
+        # Despite the "daily_vaccines" naming (fixed by the model config
+        # schema), this isn't vaccine-specific -- it scales whatever
+        # `scheduled_exact` represents (antiviral prophylaxis courses, etc.).
         _h = max(num_days + 14, 370)
         _dates = pd.date_range(start=start_date, periods=_h, freq="D").date
         _mob = json.dumps(np.ones((NUM_AGE_GROUPS, NUM_RISK_GROUPS)).tolist())
@@ -297,19 +308,27 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
             mobility_df=_real_or(
                 "mobility_df",
                 pd.DataFrame({"day_of_week": ["monday","tuesday","wednesday","thursday","friday","saturday","sunday"], "mobility_modifier": [_mob]*7})),
-            daily_vaccines_df=_real_or(
+            daily_vaccines_df=scale_dose_schedule_df(_real_or(
                 "daily_vaccines_df",
-                pd.DataFrame({"date": _dates, "daily_vaccines": [_vax] * _h})),
+                pd.DataFrame({"date": _dates, "daily_vaccines": [_vax] * _h})), dose_mult),
             **_kwargs,
         )
 
 
     def build_model(cfg, param_overrides, rep, subpop_overrides=None,
-                    seed_scales=None, tv_increments=None):
+                    seed_scales=None, tv_increments=None,
+                    dose_mult=None, dose_mult_per_subpop=None):
         # subpop_overrides: list of {param: value} indexed by subpop order (metapop only)
         # seed_scales / tv_increments default to the fitted best set's; a sampled
         # param set passes its own so each run reproduces that draw's initial
         # conditions and m(t) trajectory.
+        # dose_mult / dose_mult_per_subpop: per-age-group multiplier(s) on a
+        # `scheduled_exact` transition's daily schedule (see
+        # scale_dose_schedule_df), mirroring the Analysis tab's schedule-scaling
+        # control. dose_mult applies to every subpop identically (or is the only
+        # one used, single-population); dose_mult_per_subpop (metapop only) is a
+        # list indexed by subpop order whose non-None entries override dose_mult
+        # for that subpop.
         _seed_scales = SEED_SCALES if seed_scales is None else seed_scales
         _tv_incr = TV_INCREMENTS if tv_increments is None else tv_increments
         _cfg = copy.deepcopy(cfg)
@@ -341,10 +360,11 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
                 travel_config=METAPOP_TRAVEL_CONFIG or None,
                 num_age_groups=NUM_AGE_GROUPS, num_risk_groups=NUM_RISK_GROUPS,
                 transmission_multiplier_df=_build_tvm_df(START_DATE, NUM_DAYS, _tv_incr),
+                dose_mult=dose_mult, dose_mult_per_subpop=dose_mult_per_subpop,
             )
             return _m
 
-        _sched = _build_schedules(START_DATE, NUM_DAYS, _tv_incr)
+        _sched = _build_schedules(START_DATE, NUM_DAYS, _tv_incr, dose_mult)
         _mc = parse_model_config_from_dict(_cfg, schedules_input=_sched)
         _A, _R = NUM_AGE_GROUPS, NUM_RISK_GROUPS
         _comps = list(_cfg.get("compartments", {}).keys()) if isinstance(_cfg.get("compartments"), dict) else list(_cfg.get("compartments", ["S"]))
@@ -465,6 +485,8 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
             _designed = set(DESIGNED_PARAMS[scenario_name])
         else:
             _designed = set(overrides or {})
+        _dose_mult = DOSE_MULTIPLIER.get(scenario_name)
+        _dose_mult_per_subpop = DOSE_MULTIPLIER_PER_SUBPOP.get(scenario_name)
         _reps_data = []
         # Seed by position in the run schedule so every run gets a distinct RNG
         # stream once replicates are spread across parameter sets.
@@ -473,6 +495,7 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
             _m = build_model(
                 config_dict, _run_ov, _rep, subpop_overrides=_sp_overrides,
                 seed_scales=_run_scales, tv_increments=_run_incr,
+                dose_mult=_dose_mult, dose_mult_per_subpop=_dose_mult_per_subpop,
             )
             _m.simulate_until_day(NUM_DAYS)
             _sps = list(_m.subpop_models.values())
@@ -548,18 +571,45 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
         "# Format: {scenario_name: [override_dict_or_None, ...]} indexed by subpop order",
         "SUBPOP_PARAM_OVERRIDES = {",
     ]
+    _dose_mult_lines = [
+        "# Per-age-group multiplier on a `scheduled_exact` transition's daily",
+        "# schedule, per scenario (a schedule override, not a params entry).",
+        "# Despite the \"vaccine\" naming baked into the model config schema",
+        "# (daily_vaccines_df), scheduled_exact isn't vaccine-specific -- this",
+        "# scales whatever it represents (antiviral courses, etc.). Applies to",
+        "# every subpop identically in a metapop run, except where overridden by",
+        "# DOSE_MULTIPLIER_PER_SUBPOP below.",
+        "# Format: {scenario_name: [multiplier_per_age_group, ...]}",
+        "DOSE_MULTIPLIER = {",
+    ]
+    _dose_mult_subpop_lines = [
+        "# Per-subpopulation override of DOSE_MULTIPLIER above (metapop only).",
+        "# Format: {scenario_name: [multiplier_per_age_group_or_None, ...]}",
+        "# indexed by subpop order; a None entry falls back to DOSE_MULTIPLIER.",
+        "DOSE_MULTIPLIER_PER_SUBPOP = {",
+    ]
     for _scen_tuple in analysis_scenarios:
         _sn, _ov = _scen_tuple[0], _scen_tuple[1]
         _sp_list = _scen_tuple[2] if len(_scen_tuple) > 2 else None
+        _dm = _scen_tuple[4] if len(_scen_tuple) > 4 else None
+        _dm_sp = _scen_tuple[5] if len(_scen_tuple) > 5 else None
         if _ov and _sn != "baseline":
             _inner = ", ".join(f'"{_k}": {repr(_v)}' for _k, _v in _ov.items())
             _scen_lines.append(f"    {repr(_sn)}: {{{_inner}}},")
         if _sp_list and any(_r for _r in _sp_list):
             _subpop_lines.append(f"    {repr(_sn)}: {repr(_sp_list)},")
+        if _dm is not None:
+            _dose_mult_lines.append(f"    {repr(_sn)}: {repr(_dm)},")
+        if _dm_sp is not None:
+            _dose_mult_subpop_lines.append(f"    {repr(_sn)}: {repr(_dm_sp)},")
     _scen_lines.append("}")
     _subpop_lines.append("}")
+    _dose_mult_lines.append("}")
+    _dose_mult_subpop_lines.append("}")
     _scenarios_block = "\n".join(_scen_lines)
     _subpop_block = "\n".join(_subpop_lines)
+    _dose_mult_block = "\n".join(_dose_mult_lines)
+    _dose_mult_subpop_block = "\n".join(_dose_mult_subpop_lines)
 
     # Params each scenario deliberately set (the swept param in Sensitivity, or a
     # scenario cell edited away from the baseline). A sampled parameter set
@@ -640,6 +690,10 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
         "# <<<SUBPOP_OVERRIDES_BLOCK>>>", _subpop_block,
     ).replace(
         "# <<<DESIGNED_PARAMS_BLOCK>>>", _designed_block,
+    ).replace(
+        "# <<<DOSE_MULTIPLIER_BLOCK>>>", _dose_mult_block,
+    ).replace(
+        "# <<<DOSE_MULTIPLIER_SUBPOP_BLOCK>>>", _dose_mult_subpop_block,
     ).replace(
         # Run settings come from the Analysis tab, the same place SCENARIOS and
         # DESIGNED_PARAMS do, so the script reproduces the Analysis run as-is.

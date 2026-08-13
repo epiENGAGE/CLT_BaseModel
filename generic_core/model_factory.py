@@ -112,6 +112,31 @@ def build_notebook_schedules_input(
     )
 
 
+def scale_dose_schedule_df(df, mult):
+    """Scale a ``vaccine_schedule``-backed ``daily_vaccines_df``'s per-day
+    dose array by a per-age-group multiplier vector.
+
+    Despite the ``vaccine_schedule``/``daily_vaccines_df`` naming (fixed by
+    the model config schema), the ``scheduled_exact`` rate template this
+    schedule drives is not specific to vaccination -- it can back any
+    deterministic scheduled transfer (antiviral prophylaxis courses, etc.).
+    This scales whatever that schedule represents; 0 zeroes out an age
+    group, 1 leaves it untouched.
+
+    ``df`` has one row per day with a ``daily_vaccines`` column holding a
+    JSON-encoded A×R array (see ``build_notebook_schedules_input``). Returns
+    ``df`` unchanged if either argument is ``None``.
+    """
+    if df is None or mult is None:
+        return df
+    _mult_arr = np.asarray(mult, dtype=float)
+    _out = df.copy()
+    _out["daily_vaccines"] = _out["daily_vaccines"].apply(
+        lambda _s: json.dumps((np.asarray(json.loads(_s), dtype=float) * _mult_arr[:, None]).tolist())
+    )
+    return _out
+
+
 def config_schedule_df_attributes(config) -> set[str]:
     """Names of the ``*_df`` schedule attributes referenced by ``config``.
 
@@ -214,6 +239,7 @@ def make_single_pop_metapop(
     num_age_groups: int = 1, num_risk_groups: int = 1,
     mobility_value: float = 1.0, daily_vaccines_value=0.0,
     schedule_dfs: SimpleNamespace | None = None,
+    dose_mult=None,
 ):
     """Build a single-subpopulation ConfigDrivenMetapopModel from a config dict.
 
@@ -221,6 +247,11 @@ def make_single_pop_metapop(
     by ``build_notebook_schedules_input``'s ``*_df`` fields); when omitted,
     constant-valued schedules are generated from ``mobility_value`` /
     ``daily_vaccines_value``.
+
+    ``dose_mult`` (optional): a per-age-group multiplier vector applied to
+    ``schedule_dfs.daily_vaccines_df`` (see ``scale_dose_schedule_df``) before
+    the model is built -- e.g. to zero out or scale doses for a scenario
+    without needing to pre-scale the schedule bundle yourself.
     """
     _A, _R = num_age_groups, num_risk_groups
     _cfg = config
@@ -232,6 +263,7 @@ def make_single_pop_metapop(
         mobility_df=None, daily_vaccines_df=None,
     )
     warn_missing_schedule_dfs(_cfg, _sched_dfs, context="make_single_pop_metapop")
+    _dose_df = scale_dose_schedule_df(_sched_dfs.daily_vaccines_df, dose_mult)
     _sched = build_notebook_schedules_input(
         start_date=start_date, num_days=num_days,
         absolute_humidity=0.0, mobility_value=mobility_value,
@@ -240,7 +272,7 @@ def make_single_pop_metapop(
         absolute_humidity_df=_sched_dfs.absolute_humidity_df,
         school_work_calendar_df=_sched_dfs.school_work_calendar_df,
         mobility_df=_sched_dfs.mobility_df,
-        daily_vaccines_df=_sched_dfs.daily_vaccines_df,
+        daily_vaccines_df=_dose_df,
         transmission_multiplier_df=getattr(_sched_dfs, "transmission_multiplier_df", None),
     )
     _mc = parse_model_config_from_dict(_cfg, schedules_input=_sched)
@@ -273,6 +305,7 @@ def make_metapop_from_folder(
     num_age_groups: int = 1, num_risk_groups: int = 1,
     mobility_value: float = 1.0, daily_vaccines_value=0.0,
     transmission_multiplier_df=None,
+    dose_mult=None, dose_mult_per_subpop=None,
 ):
     """Build a multi-subpopulation ConfigDrivenMetapopModel from a metapop
     input folder (``metapop_config.json`` + per-subpop schedule/IC files).
@@ -282,7 +315,15 @@ def make_metapop_from_folder(
     single-population-fitted time-varying transmission trajectory uniformly
     across all subpops. ``config`` must already have the
     'transmission_multiplier' schedule/rate_config wired in (see
-    ``generic_core.fitting._inject_tv_transmission``) for this to take effect."""
+    ``generic_core.fitting._inject_tv_transmission``) for this to take effect.
+
+    ``dose_mult`` (optional): a per-age-group multiplier vector (see
+    ``scale_dose_schedule_df``) applied to every subpop's
+    ``vaccines_<subpop>.csv``-derived schedule identically.
+    ``dose_mult_per_subpop`` (optional): a list indexed by subpop order
+    (matching ``metapop_config.json``'s ``subpopulations``); a non-``None``
+    entry overrides ``dose_mult`` for that subpop specifically, so a scenario
+    can mix "same everywhere" with a few deliberately different subpops."""
     _A, _R = num_age_groups, num_risk_groups
     _folder = Path(folder_path)
     with open(_folder / "metapop_config.json") as _f:
@@ -312,6 +353,10 @@ def make_metapop_from_folder(
         if _vax_p.exists():
             _vax_df = pd.read_csv(_vax_p)
             _vax_df = _vax_df.loc[:, ~_vax_df.columns.str.match(r"^Unnamed")]
+        _sp_dose_mult = dose_mult
+        if dose_mult_per_subpop and _si < len(dose_mult_per_subpop) and dose_mult_per_subpop[_si] is not None:
+            _sp_dose_mult = dose_mult_per_subpop[_si]
+        _vax_df = scale_dose_schedule_df(_vax_df, _sp_dose_mult)
         warn_missing_schedule_dfs(
             config,
             SimpleNamespace(

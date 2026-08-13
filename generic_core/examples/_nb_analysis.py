@@ -345,30 +345,124 @@ def _analysis_sensitivity_sliders(
 
 
 @app.cell
-def _analysis_scenario_controls(mo, ANALYSIS_SCALAR_PARAMS, ANALYSIS_ARRAY_PARAMS):
+def _analysis_scenario_state(mo):
+    # Live edits to every Scenario sub-tab widget below (names, per-scenario
+    # overrides, subpop selections, dose multipliers, ...), keyed by a string
+    # identifying the control. Widgets below read this dict as their default
+    # value every time their defining cell reruns -- which happens on nearly
+    # every edit to the Model Builder param catalog (ANALYSIS_SCALAR_PARAMS /
+    # ANALYSIS_ARRAY_PARAMS) or the fitted-params toggle, since those cells
+    # depend on it -- so a live edit here survives changes made elsewhere in
+    # the notebook instead of being silently reset back to the catalog
+    # baseline. Also doubles as the save/restore format for the scenario
+    # config upload/download below.
+    get_scenario_state, set_scenario_state = mo.state({})
+    get_scenario_restore_error, set_scenario_restore_error = mo.state(None)
+    return (
+        get_scenario_state, set_scenario_state,
+        get_scenario_restore_error, set_scenario_restore_error,
+    )
+
+
+@app.cell
+def _analysis_scenario_config_upload_ui(mo, set_scenario_state, set_scenario_restore_error, json):
+    def _on_scenario_config_upload(_files):
+        _files = _files or ()
+        if not _files:
+            return
+        try:
+            _raw = json.loads(_files[0].contents.decode())
+            if not isinstance(_raw, dict):
+                raise ValueError("expected a JSON object")
+        except Exception as _exc:
+            set_scenario_restore_error(str(_exc))
+            return
+        # Restoring replaces the whole scenario design (names, overrides,
+        # subpop selections, dose multipliers) rather than merging it, so a
+        # restore always reflects exactly the uploaded file -- same as the
+        # Fitting tab's "Restore a saved configuration".
+        set_scenario_state(_raw)
+        set_scenario_restore_error(None)
+
+    analysis_scenario_config_upload = mo.ui.file(
+        label="Restore a saved scenario config (JSON)",
+        filetypes=[".json"],
+        multiple=False,
+        on_change=_on_scenario_config_upload,
+    )
+    return (analysis_scenario_config_upload,)
+
+
+@app.cell
+def _analysis_scenario_config_download_ui(mo, get_scenario_state, json):
+    analysis_scenario_config_download = mo.download(
+        data=json.dumps(get_scenario_state(), indent=2).encode(),
+        filename="scenario_config.json",
+        mimetype="application/json",
+        label="Download current scenario config",
+    )
+    return (analysis_scenario_config_download,)
+
+
+@app.cell
+def _analysis_scenario_controls(
+    mo, ANALYSIS_SCALAR_PARAMS, ANALYSIS_ARRAY_PARAMS, get_scenario_state, set_scenario_state,
+):
     _MAX_SC = 5
     _scalar_names = list(ANALYSIS_SCALAR_PARAMS.keys())
     _array_names = list(ANALYSIS_ARRAY_PARAMS.keys())
+    _st = get_scenario_state()
 
-    analysis_n_scenarios = mo.ui.number(start=1, stop=5, step=1, value=2, label="Number of scenarios")
+    def _cb(key):
+        def _inner(v):
+            set_scenario_state({**get_scenario_state(), key: v})
+        return _inner
+
+    analysis_n_scenarios = mo.ui.number(
+        start=1, stop=5, step=1,
+        value=_st.get("n_scenarios", 2),
+        label="Number of scenarios",
+        on_change=_cb("n_scenarios"),
+    )
     analysis_scenario_names = mo.ui.array([
-        mo.ui.text(value=f"Scenario {j + 1}", label=f"Name {j + 1}")
+        mo.ui.text(
+            value=_st.get(f"name::{j}", f"Scenario {j + 1}"),
+            label=f"Name {j + 1}",
+            on_change=_cb(f"name::{j}"),
+        )
         for j in range(_MAX_SC)
     ])
 
     def _make_scalar_input(pname):
         _base = float(ANALYSIS_SCALAR_PARAMS.get(pname, 1.0))
         _stop = max(10.0, _base * 20) if _base > 0 else 10.0
-        return mo.ui.number(start=0.0, stop=_stop, step=None, value=_base)
+        return [
+            mo.ui.number(
+                start=0.0, stop=_stop, step=None,
+                value=_st.get(f"scalar::{pname}::{j}", _base),
+                on_change=_cb(f"scalar::{pname}::{j}"),
+            )
+            for j in range(_MAX_SC)
+        ]
 
     analysis_scenario_scalar_inputs = mo.ui.array([
-        mo.ui.array([_make_scalar_input(pname) for _ in range(_MAX_SC)])
+        mo.ui.array(_make_scalar_input(pname))
         for pname in _scalar_names
     ]) if _scalar_names else mo.ui.array([])
 
+    def _make_array_input(pname):
+        return [
+            mo.ui.number(
+                start=0.0, stop=10.0, step=None,
+                value=_st.get(f"array::{pname}::{j}", 1.0),
+                on_change=_cb(f"array::{pname}::{j}"),
+            )
+            for j in range(_MAX_SC)
+        ]
+
     analysis_scenario_array_scales = mo.ui.array([
-        mo.ui.array([mo.ui.number(start=0.0, stop=10.0, step=None, value=1.0) for _ in range(_MAX_SC)])
-        for _ in _array_names
+        mo.ui.array(_make_array_input(pname))
+        for pname in _array_names
     ]) if _array_names else mo.ui.array([])
 
     return (
@@ -378,48 +472,218 @@ def _analysis_scenario_controls(mo, ANALYSIS_SCALAR_PARAMS, ANALYSIS_ARRAY_PARAM
 
 
 @app.cell
+def _analysis_array_age_scale_controls(
+    mo, ANALYSIS_ARRAY_PARAMS, num_age_groups, age_groups, param_grid_columns,
+    get_scenario_state, set_scenario_state,
+):
+    # Per-array-param opt-in: scale each age group by its OWN factor instead of
+    # one uniform factor for the whole array (e.g. VE sensitivity presets that
+    # scale `vax_susceptibility`/`IV_to_H_prop` differently per age group).
+    # Off by default so existing scenarios (uniform ×scale) are unaffected.
+    _MAX_SC = 5
+    _array_names = list(ANALYSIS_ARRAY_PARAMS.keys())
+    _age_labels = param_grid_columns(age_groups, num_age_groups)
+    _st = get_scenario_state()
+
+    def _cb(key):
+        def _inner(v):
+            set_scenario_state({**get_scenario_state(), key: v})
+        return _inner
+
+    analysis_array_age_scale_toggles = mo.ui.array([
+        mo.ui.switch(
+            label=f"Scale `{_pn}` by age group",
+            value=_st.get(f"age_scale_toggle::{_pn}", False),
+            on_change=_cb(f"age_scale_toggle::{_pn}"),
+        )
+        for _pn in _array_names
+    ]) if _array_names else mo.ui.array([])
+
+    analysis_array_age_scale_inputs = mo.ui.array([
+        mo.ui.array([
+            mo.ui.array([
+                mo.ui.number(
+                    start=0.0, stop=10.0, step=None,
+                    value=_st.get(f"age_scale::{_pn}::{_a}::{_j}", 1.0),
+                    label=_age_labels[_a],
+                    on_change=_cb(f"age_scale::{_pn}::{_a}::{_j}"),
+                )
+                for _j in range(_MAX_SC)
+            ])
+            for _a in range(num_age_groups)
+        ])
+        for _pn in _array_names
+    ]) if _array_names else mo.ui.array([])
+
+    return analysis_array_age_scale_toggles, analysis_array_age_scale_inputs
+
+
+@app.cell
+def _analysis_dose_mult_controls(
+    mo, num_age_groups, config_dict, is_metapop, analysis_sp_names,
+    age_groups, param_grid_columns, get_scenario_state, set_scenario_state,
+):
+    # Per-scenario, per-age-group multiplier on a `scheduled_exact` transition's
+    # daily schedule (`daily_vaccines_df`) -- e.g. 0 to zero out an age group (a
+    # no-dose / single-age-only scenario), or a scalar to scale toward a
+    # coverage target. This is a SCHEDULE override, not a config["params"]
+    # entry, so it doesn't fit the scalar/array param catalog above and needs
+    # its own control. Despite the "vaccine_schedule"/`daily_vaccines_df`
+    # naming (fixed by the model config schema), `scheduled_exact` isn't
+    # vaccine-specific -- it can back any deterministic scheduled transfer
+    # (antiviral prophylaxis courses, etc.), so the UI below is worded
+    # generically ("scheduled doses") rather than assuming vaccination.
+    _MAX_SC = 5
+    _dose_schedule_names = [
+        (_s or {}).get("name") for _s in config_dict.get("schedules", []) or []
+        if (_s or {}).get("schedule_template") == "vaccine_schedule"
+    ]
+    analysis_dose_mult_enabled = bool(_dose_schedule_names)
+    _age_labels = param_grid_columns(age_groups, num_age_groups)
+
+    # Surface which schedule(s)/file(s) this actually scales, since the config
+    # schema's "vaccine_schedule"/`daily_vaccines_df` naming doesn't tell the
+    # user what CSV backs it (or that it might not be vaccination at all).
+    if is_metapop:
+        _sp_opts = list(analysis_sp_names) if analysis_sp_names else []
+        if _sp_opts:
+            _file_desc = ", ".join(f"`vaccines_{_sp}.csv`" for _sp in _sp_opts) + " in the metapop folder"
+        else:
+            _file_desc = "`vaccines_<subpop>.csv` files in the metapop folder"
+    else:
+        _vax_csv = (config_dict.get("input_files", {}) or {}).get("vaccines_csv")
+        _file_desc = f"`{_vax_csv}`" if _vax_csv else "a constant value (no CSV configured)"
+    analysis_dose_schedule_desc = (
+        f"schedule(s) {', '.join(f'`{_n}`' for _n in _dose_schedule_names)} → {_file_desc}"
+        if _dose_schedule_names else ""
+    )
+
+    _st = get_scenario_state()
+
+    def _cb(key):
+        def _inner(v):
+            set_scenario_state({**get_scenario_state(), key: v})
+        return _inner
+
+    analysis_dose_mult_toggle = mo.ui.switch(
+        label="Scale scheduled doses per scenario (by age group)",
+        value=_st.get("dose_toggle", False),
+        on_change=_cb("dose_toggle"),
+    )
+    analysis_dose_mult_inputs = mo.ui.array([
+        mo.ui.array([
+            mo.ui.number(
+                start=0.0, stop=10.0, step=None,
+                value=_st.get(f"dose::{_j}::{_a}", 1.0),
+                label=_age_labels[_a],
+                on_change=_cb(f"dose::{_j}::{_a}"),
+            )
+            for _a in range(num_age_groups)
+        ])
+        for _j in range(_MAX_SC)
+    ])
+
+    # Metapop only: whether the scenario's dose scaling applies identically to
+    # every subpop (the grid above) or is set independently per subpop.
+    analysis_dose_mult_per_subpop_toggle = mo.ui.switch(
+        label="Scale independently per subpopulation (instead of the same scaling everywhere)",
+        value=_st.get("dose_per_subpop_toggle", False),
+        on_change=_cb("dose_per_subpop_toggle"),
+    ) if is_metapop else None
+    analysis_dose_mult_subpop_inputs = mo.ui.array([
+        mo.ui.array([
+            mo.ui.array([
+                mo.ui.number(
+                    start=0.0, stop=10.0, step=None,
+                    value=_st.get(f"dose_subpop::{_sp}::{_j}::{_a}", 1.0),
+                    label=_age_labels[_a],
+                    on_change=_cb(f"dose_subpop::{_sp}::{_j}::{_a}"),
+                )
+                for _a in range(num_age_groups)
+            ])
+            for _j in range(_MAX_SC)
+        ])
+        for _sp in _sp_opts
+    ]) if is_metapop and _sp_opts else mo.ui.array([])
+
+    return (
+        analysis_dose_mult_enabled, analysis_dose_mult_toggle, analysis_dose_mult_inputs,
+        analysis_dose_mult_per_subpop_toggle, analysis_dose_mult_subpop_inputs,
+        analysis_dose_schedule_desc,
+    )
+
+
+@app.cell
 def _analysis_param_subpop_controls(
     mo, is_metapop, analysis_sp_names,
     ANALYSIS_SCALAR_PARAMS, ANALYSIS_ARRAY_PARAMS, ANALYSIS_SCALAR_RANGES,
     analysis_scalar_param_sel, analysis_array_param_sel, analysis_param_type,
+    get_scenario_state, set_scenario_state,
 ):
     _MAX_SC = 5
     _MAX_SENS = 6
     _scalar_names = list(ANALYSIS_SCALAR_PARAMS.keys())
     _array_names = list(ANALYSIS_ARRAY_PARAMS.keys())
     _sp_opts = list(analysis_sp_names) if analysis_sp_names else []
+    _st = get_scenario_state()
+
+    def _cb(key):
+        def _inner(v):
+            set_scenario_state({**get_scenario_state(), key: v})
+        return _inner
 
     # Scenario sub-tab: per-param subpop multiselects
     analysis_scalar_subpop_sels = mo.ui.array([
-        mo.ui.multiselect(options=_sp_opts, value=[], label=f"Subpops for {pname}")
+        mo.ui.multiselect(
+            options=_sp_opts,
+            value=_st.get(f"scalar_subpop_sel::{pname}", []),
+            label=f"Subpops for {pname}",
+            on_change=_cb(f"scalar_subpop_sel::{pname}"),
+        )
         for pname in _scalar_names
     ]) if is_metapop and _scalar_names and _sp_opts else mo.ui.array([])
 
     analysis_array_subpop_sels = mo.ui.array([
-        mo.ui.multiselect(options=_sp_opts, value=[], label=f"Subpops for {pname}")
+        mo.ui.multiselect(
+            options=_sp_opts,
+            value=_st.get(f"array_subpop_sel::{pname}", []),
+            label=f"Subpops for {pname}",
+            on_change=_cb(f"array_subpop_sel::{pname}"),
+        )
         for pname in _array_names
     ]) if is_metapop and _array_names and _sp_opts else mo.ui.array([])
 
     # Scenario sub-tab: per-param × per-subpop × per-scenario number inputs [param][subpop][scenario]
-    def _make_sp_scalar_input(pname):
+    def _make_sp_scalar_col(pname, sp):
         _base = float(ANALYSIS_SCALAR_PARAMS.get(pname, 1.0))
         _lo, _hi, _step = ANALYSIS_SCALAR_RANGES.get(pname, (0.0, 10.0, 0.001))
-        return mo.ui.number(start=_lo, stop=_hi, step=None, value=_base)
+        return mo.ui.array([
+            mo.ui.number(
+                start=_lo, stop=_hi, step=None,
+                value=_st.get(f"scalar_subpop::{pname}::{sp}::{j}", _base),
+                on_change=_cb(f"scalar_subpop::{pname}::{sp}::{j}"),
+            )
+            for j in range(_MAX_SC)
+        ])
 
     analysis_scalar_subpop_inputs = mo.ui.array([
-        mo.ui.array([
-            mo.ui.array([_make_sp_scalar_input(pname) for _ in range(_MAX_SC)])
-            for _ in _sp_opts
-        ])
+        mo.ui.array([_make_sp_scalar_col(pname, sp) for sp in _sp_opts])
         for pname in _scalar_names
     ]) if is_metapop and _scalar_names and _sp_opts else mo.ui.array([])
 
-    analysis_array_subpop_scales = mo.ui.array([
-        mo.ui.array([
-            mo.ui.array([mo.ui.number(start=0.0, stop=10.0, step=None, value=1.0) for _ in range(_MAX_SC)])
-            for _ in _sp_opts
+    def _make_sp_array_col(pname, sp):
+        return mo.ui.array([
+            mo.ui.number(
+                start=0.0, stop=10.0, step=None,
+                value=_st.get(f"array_subpop::{pname}::{sp}::{j}", 1.0),
+                on_change=_cb(f"array_subpop::{pname}::{sp}::{j}"),
+            )
+            for j in range(_MAX_SC)
         ])
-        for _ in _array_names
+
+    analysis_array_subpop_scales = mo.ui.array([
+        mo.ui.array([_make_sp_array_col(pname, sp) for sp in _sp_opts])
+        for pname in _array_names
     ]) if is_metapop and _array_names and _sp_opts else mo.ui.array([])
 
     # Sensitivity sub-tab: one subpop multiselect for the active parameter
@@ -552,6 +816,13 @@ def _analysis_display(
     analysis_scalar_subpop_inputs, analysis_array_subpop_scales,
     analysis_use_fitted, analysis_fitted_source, analysis_fitted_params_path, analysis_fitted_note,
     analysis_fitted_params,
+    analysis_dose_mult_enabled, analysis_dose_mult_toggle, analysis_dose_mult_inputs,
+    analysis_dose_mult_per_subpop_toggle, analysis_dose_mult_subpop_inputs,
+    analysis_dose_schedule_desc,
+    analysis_array_age_scale_toggles, analysis_array_age_scale_inputs,
+    age_groups, num_age_groups, param_grid_columns,
+    analysis_scenario_config_upload, analysis_scenario_config_download,
+    get_scenario_restore_error,
     step_header, section_card, CLT_ACCENT,
 ):
     mo.stop(main_tab.value != "Analysis", None)
@@ -692,8 +963,25 @@ def _analysis_display(
                         _sp_row_items = [mo.md(f"  ↳ *{_sp}*")] + _sp_inputs + [mo.md("")]
                         _scalar_rows.append(mo.hstack(_sp_row_items, justify="start"))
 
+    _array_age_labels = param_grid_columns(age_groups, num_age_groups)
     _array_rows = []
     for _k, _pn in enumerate(_array_names):
+        _age_toggle = analysis_array_age_scale_toggles[_k] if _k < len(analysis_array_age_scale_toggles) else None
+        if _age_toggle is not None:
+            _array_rows.append(mo.hstack([_age_toggle], justify="start"))
+        _by_age = bool(_age_toggle is not None and _age_toggle.value)
+        if _by_age:
+            # One scale factor per age group per scenario, e.g. VE_SCENARIOS-style
+            # presets that scale `vax_susceptibility`/`IV_to_H_prop` differently by
+            # age. Per-subpop overrides aren't offered on top of this (metapop ×
+            # per-age scaling would need a 4-D grid) — use the uniform ×scale above
+            # for per-subpop scenarios instead.
+            for _a in range(num_age_groups):
+                _age_row_items = [mo.md(f"`{_pn}` [{_array_age_labels[_a]}] ×scale")] + [
+                    analysis_array_age_scale_inputs[_k][_a][j] for j in range(_n_sc)
+                ]
+                _array_rows.append(mo.hstack(_age_row_items, justify="start"))
+            continue
         _arr_row_items = [mo.md(f"`{_pn}` ×scale")] + [analysis_scenario_array_scales[_k][j] for j in range(_n_sc)]
         if _show_sp_col and _k < len(analysis_array_subpop_sels):
             _arr_row_items.append(analysis_array_subpop_sels[_k])
@@ -715,6 +1003,57 @@ def _analysis_display(
         _scen_body += [mo.md("*Array parameters (scale factor applied to each entry):*")] + _array_rows
     if not _scalar_rows and not _array_rows:
         _scen_body.append(mo.callout(mo.md("No tunable parameters found in the current config."), kind="info"))
+
+    if analysis_dose_mult_enabled:
+        _scen_body.append(mo.md(
+            "*Scheduled doses (from a `scheduled_exact` transition's schedule — "
+            "vaccine doses, antiviral courses, etc.; schedule scaling, not a "
+            "model param — **1 leaves the original schedule untouched**; 0 "
+            "zeroes out an age group, e.g. for a no-dose or single-age-only "
+            "scenario):*"
+        ))
+        if analysis_dose_schedule_desc:
+            _scen_body.append(mo.md(f"&nbsp;&nbsp;↳ scaling {analysis_dose_schedule_desc}"))
+        _scen_body.append(analysis_dose_mult_toggle)
+        if analysis_dose_mult_toggle.value:
+            _dose_age_labels = param_grid_columns(age_groups, num_age_groups)
+            _per_sp_active = bool(
+                is_metapop and analysis_dose_mult_per_subpop_toggle is not None
+                and analysis_dose_mult_per_subpop_toggle.value
+            )
+            if is_metapop and analysis_dose_mult_per_subpop_toggle is not None:
+                _scen_body.append(analysis_dose_mult_per_subpop_toggle)
+            if _per_sp_active and analysis_sp_names:
+                for _si, _sp in enumerate(analysis_sp_names):
+                    if _si >= len(analysis_dose_mult_subpop_inputs):
+                        break
+                    _scen_body.append(mo.md(f"↳ **{_sp}**:"))
+                    _sp_header = mo.hstack(
+                        [mo.md("**Age group**")] + [analysis_scenario_names[j] for j in range(_n_sc)],
+                        justify="start",
+                    )
+                    _scen_body.append(_sp_header)
+                    for _a in range(num_age_groups):
+                        _label = _dose_age_labels[_a]
+                        _scen_body.append(mo.hstack(
+                            [mo.md(f"  `{_label}`")] + [
+                                analysis_dose_mult_subpop_inputs[_si][j][_a] for j in range(_n_sc)
+                            ],
+                            justify="start",
+                        ))
+            else:
+                _dose_header = mo.hstack(
+                    [mo.md("**Age group**")] + [analysis_scenario_names[j] for j in range(_n_sc)],
+                    justify="start",
+                )
+                _dose_rows = [_dose_header]
+                for _a in range(num_age_groups):
+                    _label = _dose_age_labels[_a]
+                    _dose_rows.append(mo.hstack(
+                        [mo.md(f"`{_label}`")] + [analysis_dose_mult_inputs[j][_a] for j in range(_n_sc)],
+                        justify="start",
+                    ))
+                _scen_body += _dose_rows
     _scen_ui = mo.vstack(_scen_body)
 
     # --- Uncertainty-source controls (Run settings) ---
@@ -817,6 +1156,14 @@ def _analysis_display(
                         "Define a sensitivity sweep or a set of scenarios.",
                         accent=_ACC),
             mo.vstack([
+                mo.hstack(
+                    [analysis_scenario_config_upload, analysis_scenario_config_download],
+                    justify="start",
+                ),
+                mo.callout(
+                    mo.md(f"**Could not restore scenario config:** {get_scenario_restore_error()}"),
+                    kind="warn",
+                ) if get_scenario_restore_error() else mo.md(""),
                 analysis_sub_tab,
                 _tab_body.get(analysis_sub_tab.value, mo.md("")),
             ]),
@@ -861,18 +1208,34 @@ def _analysis_define_scenarios(
     analysis_sens_subpop_sel, analysis_sens_subpop_sliders,
     analysis_scalar_subpop_sels, analysis_array_subpop_sels,
     analysis_scalar_subpop_inputs, analysis_array_subpop_scales,
+    analysis_dose_mult_enabled, analysis_dose_mult_toggle, analysis_dose_mult_inputs, num_age_groups,
+    analysis_dose_mult_per_subpop_toggle, analysis_dose_mult_subpop_inputs,
+    analysis_array_age_scale_toggles, analysis_array_age_scale_inputs,
 ):
     _scalar_names = list(ANALYSIS_SCALAR_PARAMS.keys())
     _array_names = list(ANALYSIS_ARRAY_PARAMS.keys())
     _use_subpop = is_metapop and bool(analysis_sp_names)
-    # Each entry is (name, global_overrides, per_subpop_overrides, designed).
-    # `designed` names the params this scenario deliberately sets — the swept
-    # param in Sensitivity, or a cell edited away from the catalog baseline in
-    # Scenario. _run_analysis lets a sampled fitted param set overwrite every
-    # *other* param, so parameter uncertainty is injected without silently
-    # undoing the design. (Both grids are pre-filled from the catalog baseline,
-    # so inequality with it is the edit signal.)
+    # Each entry is (name, global_overrides, per_subpop_overrides, designed,
+    # dose_multiplier, dose_multiplier_per_subpop). `designed` names the params
+    # this scenario deliberately sets — the swept param in Sensitivity, or a
+    # cell edited away from the catalog baseline in Scenario. _run_analysis
+    # lets a sampled fitted param set overwrite every *other* param, so
+    # parameter uncertainty is injected without silently undoing the design.
+    # (Both grids are pre-filled from the catalog baseline, so inequality with
+    # it is the edit signal.)
+    # `dose_multiplier` is a per-age-group scale on a `scheduled_exact`
+    # transition's daily schedule (None = unscaled) — a schedule override, not
+    # a params entry, so it's carried separately from `overrides`/`designed`.
+    # `dose_multiplier_per_subpop` (metapop only) is a list of per-age-group
+    # vectors indexed by subpop, overriding `dose_multiplier` for subpops set
+    # independently. Both only ever set in the Scenario sub-tab (Sensitivity
+    # sweeps a param, not the dose schedule).
     analysis_scenarios = []
+    _dose_mult_active = analysis_dose_mult_enabled and analysis_dose_mult_toggle.value
+    _dose_mult_per_sp_active = bool(
+        _dose_mult_active and is_metapop and analysis_dose_mult_per_subpop_toggle is not None
+        and analysis_dose_mult_per_subpop_toggle.value
+    )
 
     def _make_per_subpop_list(sp_names, sp_to_override_dict):
         if not sp_to_override_dict:
@@ -888,7 +1251,7 @@ def _analysis_define_scenarios(
             # an EMPTY designed set — nothing is shielded, so fitted/sampled
             # parameter sets apply in full (see _apply_pset in _run_analysis).
             analysis_scenarios.append((
-                "baseline", {**ANALYSIS_SCALAR_PARAMS, **ANALYSIS_ARRAY_PARAMS}, None, set(),
+                "baseline", {**ANALYSIS_SCALAR_PARAMS, **ANALYSIS_ARRAY_PARAMS}, None, set(), None, None,
             ))
         elif _is_array:
             _pname = analysis_array_param_sel.value
@@ -908,7 +1271,7 @@ def _analysis_define_scenarios(
                                 _sp_scale = float(_sp_vals[_sp_idx][_i])
                                 _sp_ov[_sp] = {_pname: (_base_arr * _sp_scale).tolist()}
                     _per_subpop = _make_per_subpop_list(analysis_sp_names, _sp_ov)
-                analysis_scenarios.append((f"{_pname} ×{_v:.3g}", _global_ov, _per_subpop, {_pname}))
+                analysis_scenarios.append((f"{_pname} ×{_v:.3g}", _global_ov, _per_subpop, {_pname}, None, None))
         else:
             _pname = analysis_scalar_param_sel.value
             for _i, _v in enumerate(list(dict.fromkeys(analysis_sens_sliders.value))):
@@ -925,7 +1288,7 @@ def _analysis_define_scenarios(
                             if _sp_idx < len(_sp_vals) and _i < len(_sp_vals[_sp_idx]):
                                 _sp_ov[_sp] = {_pname: float(_sp_vals[_sp_idx][_i])}
                     _per_subpop = _make_per_subpop_list(analysis_sp_names, _sp_ov)
-                analysis_scenarios.append((f"{_pname}={_v:.4g}", _global_ov, _per_subpop, {_pname}))
+                analysis_scenarios.append((f"{_pname}={_v:.4g}", _global_ov, _per_subpop, {_pname}, None, None))
     else:
         _n = int(analysis_n_scenarios.value)
         for j in range(_n):
@@ -938,11 +1301,24 @@ def _analysis_define_scenarios(
                 if _val != float(ANALYSIS_SCALAR_PARAMS[_pn]):
                     _designed.add(_pn)
             for _k, _pn in enumerate(_array_names):
-                _scale = float(analysis_scenario_array_scales.value[_k][j])
                 _base = np.asarray(ANALYSIS_ARRAY_PARAMS[_pn])
-                _overrides[_pn] = (_base * _scale).tolist()
-                if _scale != 1.0:
-                    _designed.add(_pn)
+                _by_age = (
+                    _k < len(analysis_array_age_scale_toggles)
+                    and analysis_array_age_scale_toggles.value[_k]
+                )
+                if _by_age:
+                    _age_scales = np.array([
+                        float(analysis_array_age_scale_inputs.value[_k][_a][j])
+                        for _a in range(num_age_groups)
+                    ])
+                    _overrides[_pn] = (_base * _age_scales[:, None]).tolist()
+                    if np.any(_age_scales != 1.0):
+                        _designed.add(_pn)
+                else:
+                    _scale = float(analysis_scenario_array_scales.value[_k][j])
+                    _overrides[_pn] = (_base * _scale).tolist()
+                    if _scale != 1.0:
+                        _designed.add(_pn)
             _per_subpop = None
             if _use_subpop:
                 _sp_ov_by_name = {}
@@ -966,7 +1342,26 @@ def _analysis_define_scenarios(
                                     _base = np.asarray(ANALYSIS_ARRAY_PARAMS[_pn])
                                     _sp_ov_by_name.setdefault(_sp, {})[_pn] = (_base * _sp_scale).tolist()
                 _per_subpop = _make_per_subpop_list(analysis_sp_names, _sp_ov_by_name)
-            analysis_scenarios.append((_name, _overrides, _per_subpop, _designed))
+            _dose_mult = None
+            _dose_mult_per_subpop = None
+            if _dose_mult_active:
+                _mult_vec = [float(analysis_dose_mult_inputs.value[j][_a]) for _a in range(num_age_groups)]
+                if any(_v != 1.0 for _v in _mult_vec):
+                    _dose_mult = _mult_vec
+                if _dose_mult_per_sp_active and analysis_sp_names:
+                    _sp_vecs = []
+                    for _si in range(len(analysis_sp_names)):
+                        if _si >= len(analysis_dose_mult_subpop_inputs):
+                            _sp_vecs.append(None)
+                            continue
+                        _sp_vec = [
+                            float(analysis_dose_mult_subpop_inputs.value[_si][j][_a])
+                            for _a in range(num_age_groups)
+                        ]
+                        _sp_vecs.append(_sp_vec if any(_v != 1.0 for _v in _sp_vec) else None)
+                    if any(_v is not None for _v in _sp_vecs):
+                        _dose_mult_per_subpop = _sp_vecs
+            analysis_scenarios.append((_name, _overrides, _per_subpop, _designed, _dose_mult, _dose_mult_per_subpop))
 
     return (analysis_scenarios,)
 
@@ -1251,6 +1646,8 @@ def _run_analysis(
                 _scen_name, _overrides = _scen_tuple[0], _scen_tuple[1]
                 _per_subpop = _scen_tuple[2] if len(_scen_tuple) > 2 else None
                 _designed = _scen_tuple[3] if len(_scen_tuple) > 3 else set()
+                _dose_mult = _scen_tuple[4] if len(_scen_tuple) > 4 else None
+                _dose_mult_per_subpop = _scen_tuple[5] if len(_scen_tuple) > 5 else None
                 _reps_hists = []
                 # Seed by position in the run schedule, not by the rep index
                 # within a param set, so every run gets a distinct RNG stream
@@ -1266,6 +1663,7 @@ def _run_analysis(
                             param_overrides=_run_ov or None,
                             travel_config=metapop_travel_config,
                             schedule_dfs=_run_sched,
+                            dose_mult=_dose_mult,
                         )
                     else:
                         _m, _ = make_metapop_from_folder(
@@ -1278,6 +1676,8 @@ def _run_analysis(
                             transmission_multiplier_df=getattr(
                                 _run_sched, "transmission_multiplier_df", None
                             ),
+                            dose_mult=_dose_mult,
+                            dose_mult_per_subpop=_dose_mult_per_subpop,
                         )
                     _m.simulate_until_day(_num_days)
                     _reps_hists.append(_extract_detailed(_m, list(compartments), tvs=_tvs))
@@ -1813,6 +2213,7 @@ def _analysis_plot_cumulative_boxplot(
         _n_combos, _n_met,
         figsize=(max(5 * _n_met, 6), min(5 * _n_combos, 80)),
         squeeze=False,
+        constrained_layout=True,
     )
     _csv_rows = []  # per-replicate values behind each box
 
@@ -1841,7 +2242,6 @@ def _analysis_plot_cumulative_boxplot(
             _ax.set_title(f"Cumulative {_mname} — {_sp} / {_ag}")
             _ax.tick_params(axis="x", rotation=20)
 
-    plt.tight_layout()
     _dl = mo.download(
         data=pd.DataFrame(_csv_rows).to_csv(index=False).encode(),
         filename="metric_cumulative_by_replicate.csv",
@@ -1886,7 +2286,10 @@ def _analysis_plot_age_bars(
         return np.array(_per_age + [float(_total.sum())])
 
     _n_plots = len(_sel_subpops) * len(_sel_metrics)
-    _fig, _axes = plt.subplots(_n_plots, 1, figsize=(10, min(5 * _n_plots, 80)), squeeze=False)
+    _fig, _axes = plt.subplots(
+        _n_plots, 1, figsize=(10, min(5 * _n_plots, 80)), squeeze=False,
+        constrained_layout=True,
+    )
     _ax_idx = 0
     _csv_rows = []  # bar heights (mean across replicates)
 
@@ -1929,7 +2332,6 @@ def _analysis_plot_age_bars(
             _ax.legend()
             _ax_idx += 1
 
-    plt.tight_layout()
     _dl = mo.download(
         data=pd.DataFrame(_csv_rows).to_csv(index=False).encode(),
         filename="metric_age_stratified.csv",

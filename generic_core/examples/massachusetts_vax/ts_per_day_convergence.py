@@ -49,9 +49,9 @@ def _load_config() -> dict:
 
 
 def _load_schedule_csvs():
-    ah = pd.read_csv(os.path.join(HERE, "ma_absolute_humidity.csv"))
-    cal = pd.read_csv(os.path.join(HERE, "MA_school_work_calendar.csv"))
-    vax = pd.read_csv(os.path.join(HERE, "MA_flu_daily_vaccinations_proportions_array.csv"))
+    ah = pd.read_csv(os.path.join(HERE, "data", "schedules", "ma_absolute_humidity.csv"))
+    cal = pd.read_csv(os.path.join(HERE, "data", "schedules", "MA_school_work_calendar.csv"))
+    vax = pd.read_csv(os.path.join(HERE, "data", "vaccination", "MA_flu_daily_vaccinations_proportions_array.csv"))
     return ah, cal, vax
 
 

@@ -90,7 +90,7 @@ def _(Path, json, np, pd):
         delay    = params["vax_transfer_delay_days"]
 
         # Population
-        df_pop     = pd.read_csv(data_folder / "massachusetts_population.csv")
+        df_pop     = pd.read_csv(data_folder / "data" / "massachusetts_population.csv")
         population = df_pop["population"].to_numpy(dtype=float)
 
         # Contact matrices from JSON config
@@ -105,17 +105,17 @@ def _(Path, json, np, pd):
         dates = pd.date_range(start=params["start_date"], periods=num_days, freq="D")
 
         # Humidity timeseries
-        df_hum = pd.read_csv(data_folder / "ma_absolute_humidity.csv")
+        df_hum = pd.read_csv(data_folder / "data" / "schedules" / "ma_absolute_humidity.csv")
         df_hum["date"] = pd.to_datetime(df_hum["date"])
         df_hum = df_hum.set_index("date")
 
         # School/work calendar
-        df_cal = pd.read_csv(data_folder / "MA_school_work_calendar.csv")
+        df_cal = pd.read_csv(data_folder / "data" / "schedules" / "MA_school_work_calendar.csv")
         df_cal["date"] = pd.to_datetime(df_cal["date"])
         df_cal = df_cal.set_index("date")
 
         # Vaccination schedule (proportions per age group)
-        df_vax = pd.read_csv(data_folder / "MA_flu_daily_vaccinations_proportions_array.csv")
+        df_vax = pd.read_csv(data_folder / "data" / "vaccination" / "MA_flu_daily_vaccinations_proportions_array.csv")
         df_vax["date"] = pd.to_datetime(df_vax["date"])
         df_vax["daily_vaccines"] = (
             df_vax["daily_vaccines"].apply(json.loads).apply(lambda x: np.array(x).flatten())
@@ -123,7 +123,7 @@ def _(Path, json, np, pd):
         df_vax = df_vax.set_index("date")
 
         # Observed hospitalizations (new daily admissions)
-        df_obs = pd.read_csv(data_folder / "MA_flu_daily_hospitalizations_total.csv")
+        df_obs = pd.read_csv(data_folder / "data" / "hospitalizations_ts" / "MA_flu_daily_hospitalizations_total.csv")
         df_obs["date"] = pd.to_datetime(df_obs["Date"])
         df_obs = df_obs.set_index("date")[["total"]]
 

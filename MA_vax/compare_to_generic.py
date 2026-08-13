@@ -50,9 +50,9 @@ def _load_generic_config() -> dict:
 def _load_schedule_csvs():
     """Raw (string-date) DataFrames for the schedules the generic model needs,
     read from the same source CSVs model.py's load_inputs uses."""
-    ah = pd.read_csv(os.path.join(GENERIC_DATA_FOLDER, "ma_absolute_humidity.csv"))
-    cal = pd.read_csv(os.path.join(GENERIC_DATA_FOLDER, "MA_school_work_calendar.csv"))
-    vax = pd.read_csv(os.path.join(GENERIC_DATA_FOLDER, "MA_flu_daily_vaccinations_proportions_array.csv"))
+    ah = pd.read_csv(os.path.join(GENERIC_DATA_FOLDER, "data", "schedules", "ma_absolute_humidity.csv"))
+    cal = pd.read_csv(os.path.join(GENERIC_DATA_FOLDER, "data", "schedules", "MA_school_work_calendar.csv"))
+    vax = pd.read_csv(os.path.join(GENERIC_DATA_FOLDER, "data", "vaccination", "MA_flu_daily_vaccinations_proportions_array.csv"))
     return ah, cal, vax
 
 

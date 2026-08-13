@@ -471,8 +471,8 @@ def _(mo):
     (re-run here, not one of the loaded `S_A_*` tables) to the raw per-age
     daily hospitalization series in
     `MA_flu_daily_hospitalizations.csv` (from `model.DATA_FOLDER`, i.e.
-    `generic_core/examples/massachusetts_vax/`), over the dates the two
-    series have in common. This is a fit-quality check, separate from the
+    `generic_core/examples/massachusetts_vax/data/hospitalizations_ts/`),
+    over the dates the two series have in common. This is a fit-quality check, separate from the
     counterfactual tables above, but it deliberately reuses the exact same
     `fit_folder`/`method`/**point estimate** as those tables (from
     `tables["meta"]`, shown above) rather than letting this section pick its
@@ -511,7 +511,7 @@ def _(cf, fit_point, mo, model, tables):
 @app.cell
 def _(model, os, pd):
     raw_age_H = pd.read_csv(
-        os.path.join(model.DATA_FOLDER, "MA_flu_daily_hospitalizations.csv")
+        os.path.join(model.DATA_FOLDER, "data", "hospitalizations_ts", "MA_flu_daily_hospitalizations.csv")
     )
     raw_age_H["date"] = pd.to_datetime(raw_age_H["Date"])
     raw_age_H = raw_age_H.set_index("date").drop(columns=["Date"])

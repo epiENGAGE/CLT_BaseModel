@@ -150,7 +150,7 @@ def load_observed(inputs: dict):
     start = dates[0]
     num_days = len(dates)
 
-    df = pd.read_csv(os.path.join(model.DATA_FOLDER, "MA_flu_daily_hospitalizations_total.csv"))
+    df = pd.read_csv(os.path.join(model.DATA_FOLDER, "data", "hospitalizations_ts", "MA_flu_daily_hospitalizations_total.csv"))
     df["date"] = pd.to_datetime(df["Date"])
     idx = (df["date"] - start).dt.days.to_numpy()
     weight = df["weight"].to_numpy(dtype=float) if "weight" in df.columns else np.ones(len(df))
@@ -179,7 +179,7 @@ def load_observed_by_age(inputs: dict):
     _, obs_idx, weights = load_observed(inputs)
     obs_dates = inputs["dates"][obs_idx]
 
-    df = pd.read_csv(os.path.join(model.DATA_FOLDER, "MA_flu_daily_hospitalizations.csv"))
+    df = pd.read_csv(os.path.join(model.DATA_FOLDER, "data", "hospitalizations_ts", "MA_flu_daily_hospitalizations.csv"))
     df["date"] = pd.to_datetime(df["Date"])
     df = df.set_index("date")
 

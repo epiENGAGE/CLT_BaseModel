@@ -17,7 +17,7 @@ from pathlib import Path
 import pandas as pd
 
 HERE = Path(__file__).parent
-SOURCE_CSV = HERE / "MA_flu_daily_hospitalizations.csv"
+SOURCE_CSV = HERE / "data" / "hospitalizations_ts" / "MA_flu_daily_hospitalizations.csv"
 
 # (source column name, output file suffix) — suffix is filesystem-safe.
 AGE_COLUMNS = [
@@ -36,7 +36,7 @@ def main() -> None:
     dates = pd.to_datetime(df["Date"], format="%m/%d/%y").dt.strftime("%Y-%m-%d")
 
     for column, suffix in AGE_COLUMNS:
-        out_path = HERE / f"MA_flu_daily_hospitalizations_{suffix}.csv"
+        out_path = HERE / "data" / "hospitalizations_ts" / f"MA_flu_daily_hospitalizations_{suffix}.csv"
         pd.DataFrame({"date": dates, "value": df[column]}).to_csv(out_path, index=False)
         print(f"wrote {out_path}")
 
