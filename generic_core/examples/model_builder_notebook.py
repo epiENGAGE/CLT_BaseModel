@@ -20,6 +20,7 @@ Section files (all in generic_core/examples/):
   _nb_forecast.py             — Forecast tab
   _nb_export.py               — Export tab
   _nb_analysis.py             — Analysis tab
+  _nb_import.py               — shared multi-file config importer
   _nb_docs.py                 — Documentation tab
 
 If you edited cells in the marimo browser UI, sync changes back to the
@@ -320,6 +321,80 @@ def _helpers(Path, SimpleNamespace, json, np, pd):
             _parts.append(f"{_k}:{_v}" if _v else _k)
         return ", ".join(_parts)
 
+    def detect_config_type(filename: str) -> str:
+        """Best-effort classification of an uploaded JSON config by filename,
+        for the shared multi-file importer (see _nb_import.py). Returns one
+        of "model_config", "fit_config", "fitted_params", "scenario_config",
+        or "unknown" -- shown as the pre-selected type in a per-file dropdown
+        the user confirms/overrides before applying, so a wrong guess here is
+        just an extra click, not a silent misfile."""
+        _n = (filename or "").lower()
+        if "scenario" in _n:
+            return "scenario_config"
+        if "fit_config" in _n:
+            return "fit_config"
+        if "fitted" in _n or "fit_result" in _n or "params" in _n:
+            return "fitted_params"
+        if "config" in _n:
+            return "model_config"
+        return "unknown"
+
+    def parse_fit_config_targets(raw: dict) -> tuple:
+        """Turn a saved fit_config.json's ``targets`` list into the
+        (slots, data) shape the Fitting tab's per-slot restore state expects
+        (see _fit_config_upload_ui / _nb_import.py's shared importer, which
+        share this so the two stay in sync). Raises if ``raw`` has no
+        "targets" key."""
+        _targets = raw["targets"]
+        _new_slots, _new_data = [], {}
+        for _i, _t in enumerate(_targets):
+            if _i >= 20:
+                break
+            _new_slots.append(_i)
+            _new_data[_i] = {
+                "label": _t.get("label", f"Restored {_i + 1}"),
+                "vars": _t.get("variables"),
+                "mode": _t.get("mode"),
+                "weight": _t.get("weight"),
+                "subpop_idx": _t.get("subpop_idx"),
+                "age_idx": _t.get("age_idx"),
+                "risk_idx": _t.get("risk_idx"),
+                "observed": _t.get("observed"),
+                "point_weights": _t.get("point_weights"),
+            }
+        return _new_slots, _new_data
+
+    def scenario_state_group(key: str) -> str:
+        """Which of the Analysis Scenario sub-tab's four split mo.state
+        dicts (see _nb_analysis.py's _analysis_scenario_state and its four
+        *_controls cells) a given scenario-config key belongs to. Used to
+        partition an uploaded/imported flat scenario_config.json across
+        them (see partition_scenario_state, and _nb_import.py's shared
+        importer)."""
+        if key == "n_scenarios" or key.startswith(("name::", "scalar::", "array::")):
+            return "controls"
+        if key.startswith(("age_scale_toggle::", "age_scale::")):
+            return "agescale"
+        if key in ("dose_toggle", "dose_per_subpop_toggle") or key.startswith(
+            ("dose::", "dose_subpop::")
+        ):
+            return "dose"
+        if key.startswith((
+            "scalar_subpop_sel::", "scalar_subpop::",
+            "array_subpop_sel::", "array_subpop::",
+        )):
+            return "subpop"
+        return "controls"  # unrecognized key: harmless default bucket
+
+    def partition_scenario_state(flat: dict) -> dict:
+        """Split a flat scenario-config dict (the shape scenario_config.json
+        is saved/restored in) into the four group dicts consumed by
+        _nb_analysis.py's per-cell scenario state."""
+        _out = {"controls": {}, "agescale": {}, "dose": {}, "subpop": {}}
+        for _k, _v in (flat or {}).items():
+            _out[scenario_state_group(_k)][_k] = _v
+        return _out
+
     def is_array_param(cfg: dict, name: str) -> bool:
         """Return True if the named param in cfg has a list (A×R array) value."""
         return isinstance(cfg.get("params", {}).get(name), list)
@@ -478,6 +553,10 @@ def _helpers(Path, SimpleNamespace, json, np, pd):
         resolve_input_path,
         validate_metapop_folder,
         infectious_mapping_to_str,
+        detect_config_type,
+        parse_fit_config_targets,
+        scenario_state_group,
+        partition_scenario_state,
         is_array_param,
         array_to_grid_rows,
         param_grid_columns,
@@ -734,10 +813,22 @@ def _output_dir(output_dir_input, Path):
 
 
 @app.cell
-def _tab_header_display(main_tab, output_dir_input, mo):
+def _tab_header_display(
+    main_tab, output_dir_input, mo,
+    shared_import_upload, shared_import_type_sels,
+    shared_import_apply_btn, shared_import_apply_note,
+):
     mo.vstack([
         main_tab,
         mo.hstack([output_dir_input], justify="start"),
+        mo.accordion({
+            "Import config files": mo.vstack([
+                shared_import_upload,
+                mo.vstack(list(shared_import_type_sels)) if len(shared_import_type_sels) else mo.md(""),
+                shared_import_apply_btn if len(shared_import_type_sels) else mo.md(""),
+                shared_import_apply_note,
+            ]),
+        }),
     ])
     return
 
@@ -1416,10 +1507,14 @@ def _clear_config_button_ui(mo, set_config_path):
 
 
 @app.cell
-def _load_config_parse(config_file_upload, config_path_input, load_config_json, json):
+def _load_config_parse(
+    config_file_upload, config_path_input, load_config_json, json,
+    get_shared_imports,
+):
     _loaded_config = {}
     _cfg_err = None
     _source = None
+    _shared = get_shared_imports().get("model_config")
 
     if config_file_upload.value:
         _file = config_file_upload.value[0]
@@ -1431,32 +1526,39 @@ def _load_config_parse(config_file_upload, config_path_input, load_config_json, 
     elif config_path_input.value.strip():
         _loaded_config, _cfg_err = load_config_json(config_path_input.value)
         _source = "path"
+    elif _shared:
+        # Fed by the shared multi-file importer (_nb_import.py) when a file
+        # there was classified/confirmed as "Model config" -- checked last so
+        # a config browsed or path-loaded directly in this tab always wins.
+        try:
+            _loaded_config = json.loads(_shared["contents"].decode("utf-8"))
+        except Exception as _exc:
+            _cfg_err = f"JSON parse error: {_exc}"
+        _source = f"Imported: **{_shared['name']}**"
 
     loaded_config = _loaded_config
-    return (loaded_config,)
+    cfg_source = _source
+    cfg_load_error = _cfg_err
+    return (loaded_config, cfg_source, cfg_load_error)
 
 
 @app.cell
 def _load_config_display(
     config_file_upload, config_path_input, clear_config_button,
-    loaded_config, load_config_json, mo, main_tab,
+    loaded_config, cfg_source, cfg_load_error, mo, main_tab,
     step_header, section_card, CLT_ACCENT,
 ):
     mo.stop(main_tab.value != "Model Builder", None)
     _ACC = CLT_ACCENT["builder"]
 
-    _cfg_err = None
-    _source = None
-    if config_file_upload.value:
-        _source = f"Browsed: **{config_file_upload.value[0].name}**"
-        try:
-            import json as _json
-            _json.loads(config_file_upload.value[0].contents.decode("utf-8"))
-        except Exception as _exc:
-            _cfg_err = f"JSON parse error: {_exc}"
-    elif config_path_input.value.strip():
-        _, _cfg_err = load_config_json(config_path_input.value)
-        _source = "path"
+    # Reuses _load_config_parse's own source/error (rather than recomputing
+    # them here from the widgets) so this card can never disagree with what
+    # loaded_config actually is -- it used to recompute independently and,
+    # not knowing about the shared multi-file importer (_nb_import.py),
+    # could show "No config loaded" even when an imported config had already
+    # populated every field below.
+    _cfg_err = cfg_load_error
+    _source = cfg_source
 
     _browse_row = mo.hstack([config_file_upload] + (
         [mo.md(f"Selected: `{config_file_upload.value[0].name}`")]
@@ -5014,6 +5116,7 @@ def _fit_config_upload_ui(
     set_target_slots,
     set_restored_target_data,
     set_restored_config, set_restore_error,
+    parse_fit_config_targets,
 ):
     # Restores a fit_config.json previously downloaded from this tab (see
     # _fitting_export_display): replaces whatever targets are currently
@@ -5031,36 +5134,16 @@ def _fit_config_upload_ui(
             return
         try:
             _raw = json.loads(_files[0].contents.decode())
-            _targets = _raw["targets"]
+            # Restoring a saved configuration replaces whatever targets are
+            # currently configured (manual, bulk-uploaded, or from an earlier
+            # restore) rather than adding to them — unlike bulk CSV upload,
+            # which is additive by design (see _fit_bulk_upload_ui). So,
+            # unlike that cell, this starts from an empty slot list instead
+            # of the current one.
+            _new_slots, _new_data = parse_fit_config_targets(_raw)
         except Exception as _exc:
             set_restore_error(str(_exc))
             return
-
-        # Restoring a saved configuration replaces whatever targets are
-        # currently configured (manual, bulk-uploaded, or from an earlier
-        # restore) rather than adding to them — unlike bulk CSV upload,
-        # which is additive by design (see _fit_bulk_upload_ui). So, unlike
-        # that cell, this one starts from an empty slot list instead of the
-        # current one.
-        _new_slots = []
-        _new_data = {}
-
-        for _i, _t in enumerate(_targets):
-            if _i >= 20:
-                break
-            _entry = {
-                "label": _t.get("label", f"Restored {_i + 1}"),
-                "vars": _t.get("variables"),
-                "mode": _t.get("mode"),
-                "weight": _t.get("weight"),
-                "subpop_idx": _t.get("subpop_idx"),
-                "age_idx": _t.get("age_idx"),
-                "risk_idx": _t.get("risk_idx"),
-                "observed": _t.get("observed"),
-                "point_weights": _t.get("point_weights"),
-            }
-            _new_slots.append(_i)
-            _new_data[_i] = _entry
 
         set_target_slots(_new_slots)
         set_restored_target_data(_new_data)
@@ -9378,26 +9461,48 @@ def _analysis_sensitivity_sliders(
 
 @app.cell
 def _analysis_scenario_state(mo):
-    # Live edits to every Scenario sub-tab widget below (names, per-scenario
-    # overrides, subpop selections, dose multipliers, ...), keyed by a string
-    # identifying the control. Widgets below read this dict as their default
-    # value every time their defining cell reruns -- which happens on nearly
-    # every edit to the Model Builder param catalog (ANALYSIS_SCALAR_PARAMS /
-    # ANALYSIS_ARRAY_PARAMS) or the fitted-params toggle, since those cells
-    # depend on it -- so a live edit here survives changes made elsewhere in
-    # the notebook instead of being silently reset back to the catalog
-    # baseline. Also doubles as the save/restore format for the scenario
-    # config upload/download below.
-    get_scenario_state, set_scenario_state = mo.state({})
+    # Live edits to the Scenario sub-tab's widgets, keyed by a string
+    # identifying the control. Widgets below read the relevant dict as their
+    # default value every time their defining cell reruns -- which happens
+    # on nearly every edit to the Model Builder param catalog
+    # (ANALYSIS_SCALAR_PARAMS / ANALYSIS_ARRAY_PARAMS) or the fitted-params
+    # toggle, since those cells depend on it -- so a live edit here survives
+    # changes made elsewhere in the notebook instead of being silently reset
+    # back to the catalog baseline.
+    #
+    # Split into one dict per widget-building cell (rather than one shared
+    # dict for the whole sub-tab) because mo.state's setter does NOT rerun
+    # the cell that called it by default -- only *other* cells that read the
+    # getter do. With a single shared dict, editing e.g. a dose-multiplier
+    # box still reran the (unrelated) scalar/array/age-scale/subpop cells,
+    # rebuilding every widget in each of them on every keystroke. Splitting
+    # confines a cell's own edits to state only it (and the config
+    # download/upload, which merges/partitions across all four) reads.
+    #
+    # Also the save/restore format for the scenario config upload/download
+    # below (merged into one flat dict on download, partitioned back out on
+    # upload -- see partition_scenario_state).
+    get_scenario_controls_state, set_scenario_controls_state = mo.state({})
+    get_scenario_agescale_state, set_scenario_agescale_state = mo.state({})
+    get_scenario_dose_state, set_scenario_dose_state = mo.state({})
+    get_scenario_subpop_state, set_scenario_subpop_state = mo.state({})
     get_scenario_restore_error, set_scenario_restore_error = mo.state(None)
     return (
-        get_scenario_state, set_scenario_state,
+        get_scenario_controls_state, set_scenario_controls_state,
+        get_scenario_agescale_state, set_scenario_agescale_state,
+        get_scenario_dose_state, set_scenario_dose_state,
+        get_scenario_subpop_state, set_scenario_subpop_state,
         get_scenario_restore_error, set_scenario_restore_error,
     )
 
 
 @app.cell
-def _analysis_scenario_config_upload_ui(mo, set_scenario_state, set_scenario_restore_error, json):
+def _analysis_scenario_config_upload_ui(
+    mo, json, partition_scenario_state,
+    set_scenario_controls_state, set_scenario_agescale_state,
+    set_scenario_dose_state, set_scenario_subpop_state,
+    set_scenario_restore_error,
+):
     def _on_scenario_config_upload(_files):
         _files = _files or ()
         if not _files:
@@ -9412,8 +9517,14 @@ def _analysis_scenario_config_upload_ui(mo, set_scenario_state, set_scenario_res
         # Restoring replaces the whole scenario design (names, overrides,
         # subpop selections, dose multipliers) rather than merging it, so a
         # restore always reflects exactly the uploaded file -- same as the
-        # Fitting tab's "Restore a saved configuration".
-        set_scenario_state(_raw)
+        # Fitting tab's "Restore a saved configuration". The flat uploaded
+        # dict is split back across the four per-cell states it came from
+        # (see partition_scenario_state).
+        _groups = partition_scenario_state(_raw)
+        set_scenario_controls_state(_groups["controls"])
+        set_scenario_agescale_state(_groups["agescale"])
+        set_scenario_dose_state(_groups["dose"])
+        set_scenario_subpop_state(_groups["subpop"])
         set_scenario_restore_error(None)
 
     analysis_scenario_config_upload = mo.ui.file(
@@ -9426,9 +9537,19 @@ def _analysis_scenario_config_upload_ui(mo, set_scenario_state, set_scenario_res
 
 
 @app.cell
-def _analysis_scenario_config_download_ui(mo, get_scenario_state, json):
+def _analysis_scenario_config_download_ui(
+    mo, json,
+    get_scenario_controls_state, get_scenario_agescale_state,
+    get_scenario_dose_state, get_scenario_subpop_state,
+):
+    _merged = {
+        **get_scenario_controls_state(),
+        **get_scenario_agescale_state(),
+        **get_scenario_dose_state(),
+        **get_scenario_subpop_state(),
+    }
     analysis_scenario_config_download = mo.download(
-        data=json.dumps(get_scenario_state(), indent=2).encode(),
+        data=json.dumps(_merged, indent=2).encode(),
         filename="scenario_config.json",
         mimetype="application/json",
         label="Download current scenario config",
@@ -9438,16 +9559,24 @@ def _analysis_scenario_config_download_ui(mo, get_scenario_state, json):
 
 @app.cell
 def _analysis_scenario_controls(
-    mo, ANALYSIS_SCALAR_PARAMS, ANALYSIS_ARRAY_PARAMS, get_scenario_state, set_scenario_state,
+    mo, ANALYSIS_SCALAR_PARAMS, ANALYSIS_ARRAY_PARAMS,
+    get_scenario_controls_state, set_scenario_controls_state,
 ):
     _MAX_SC = 5
     _scalar_names = list(ANALYSIS_SCALAR_PARAMS.keys())
     _array_names = list(ANALYSIS_ARRAY_PARAMS.keys())
-    _st = get_scenario_state()
+    _st = get_scenario_controls_state()
 
     def _cb(key):
+        # Functional update (not `set(...)` from a `get()` read here) so two
+        # edits fired in quick succession -- close enough together that the
+        # second's on_change starts before the first's write has landed --
+        # can't race: mo.state applies a callable update atomically against
+        # its actual current value, not a value snapshotted earlier by this
+        # closure. The read+write form silently dropped whichever edit's
+        # write lost the race.
         def _inner(v):
-            set_scenario_state({**get_scenario_state(), key: v})
+            set_scenario_controls_state(lambda d: {**d, key: v})
         return _inner
 
     analysis_n_scenarios = mo.ui.number(
@@ -9506,7 +9635,7 @@ def _analysis_scenario_controls(
 @app.cell
 def _analysis_array_age_scale_controls(
     mo, ANALYSIS_ARRAY_PARAMS, num_age_groups, age_groups, param_grid_columns,
-    get_scenario_state, set_scenario_state,
+    get_scenario_agescale_state, set_scenario_agescale_state,
 ):
     # Per-array-param opt-in: scale each age group by its OWN factor instead of
     # one uniform factor for the whole array (e.g. VE sensitivity presets that
@@ -9515,11 +9644,12 @@ def _analysis_array_age_scale_controls(
     _MAX_SC = 5
     _array_names = list(ANALYSIS_ARRAY_PARAMS.keys())
     _age_labels = param_grid_columns(age_groups, num_age_groups)
-    _st = get_scenario_state()
+    _st = get_scenario_agescale_state()
 
     def _cb(key):
+        # Functional update -- see _analysis_scenario_controls's _cb.
         def _inner(v):
-            set_scenario_state({**get_scenario_state(), key: v})
+            set_scenario_agescale_state(lambda d: {**d, key: v})
         return _inner
 
     analysis_array_age_scale_toggles = mo.ui.array([
@@ -9553,7 +9683,8 @@ def _analysis_array_age_scale_controls(
 @app.cell
 def _analysis_dose_mult_controls(
     mo, num_age_groups, config_dict, is_metapop, analysis_sp_names,
-    age_groups, param_grid_columns, get_scenario_state, set_scenario_state,
+    age_groups, param_grid_columns,
+    get_scenario_dose_state, set_scenario_dose_state,
 ):
     # Per-scenario, per-age-group multiplier on a `scheduled_exact` transition's
     # daily schedule (`daily_vaccines_df`) -- e.g. 0 to zero out an age group (a
@@ -9590,11 +9721,12 @@ def _analysis_dose_mult_controls(
         if _dose_schedule_names else ""
     )
 
-    _st = get_scenario_state()
+    _st = get_scenario_dose_state()
 
     def _cb(key):
+        # Functional update -- see _analysis_scenario_controls's _cb.
         def _inner(v):
-            set_scenario_state({**get_scenario_state(), key: v})
+            set_scenario_dose_state(lambda d: {**d, key: v})
         return _inner
 
     analysis_dose_mult_toggle = mo.ui.switch(
@@ -9650,18 +9782,19 @@ def _analysis_param_subpop_controls(
     mo, is_metapop, analysis_sp_names,
     ANALYSIS_SCALAR_PARAMS, ANALYSIS_ARRAY_PARAMS, ANALYSIS_SCALAR_RANGES,
     analysis_scalar_param_sel, analysis_array_param_sel, analysis_param_type,
-    get_scenario_state, set_scenario_state,
+    get_scenario_subpop_state, set_scenario_subpop_state,
 ):
     _MAX_SC = 5
     _MAX_SENS = 6
     _scalar_names = list(ANALYSIS_SCALAR_PARAMS.keys())
     _array_names = list(ANALYSIS_ARRAY_PARAMS.keys())
     _sp_opts = list(analysis_sp_names) if analysis_sp_names else []
-    _st = get_scenario_state()
+    _st = get_scenario_subpop_state()
 
     def _cb(key):
+        # Functional update -- see _analysis_scenario_controls's _cb.
         def _inner(v):
-            set_scenario_state({**get_scenario_state(), key: v})
+            set_scenario_subpop_state(lambda d: {**d, key: v})
         return _inner
 
     # Scenario sub-tab: per-param subpop multiselects
@@ -11376,6 +11509,155 @@ def _analysis_plot_age_bars(
 # ============================================================
 # Documentation tab
 # ============================================================
+
+@app.cell
+def _shared_import_state(mo):
+    # {"model_config": {"name": str, "contents": bytes}, "fit_config": {...},
+    # "fitted_params": {...}, "scenario_config": {...}} -- one entry per
+    # config type, holding the bytes of the last file applied under that
+    # type. Read as a fallback source by _load_config_parse (Model Builder)
+    # when neither a direct browse nor a path is set; the other three types
+    # are applied straight into their own tab's existing restore state at
+    # click time in _shared_import_apply below, since those already need
+    # one-shot "apply, don't keep re-applying on every unrelated rerun"
+    # semantics (same as each tab's own upload widget).
+    get_shared_imports, set_shared_imports = mo.state({})
+    return get_shared_imports, set_shared_imports
+
+
+@app.cell
+def _shared_import_ui(mo):
+    shared_import_upload = mo.ui.file(
+        multiple=True,
+        filetypes=[".json"],
+        label=(
+            "Import config files (drop any combination of a model config, "
+            "fit config, fitted params / fit result, and scenario config)"
+        ),
+    )
+    return (shared_import_upload,)
+
+
+@app.cell
+def _shared_import_type_dropdowns(mo, shared_import_upload, detect_config_type):
+    # One dropdown per uploaded file, pre-set to a filename-based guess (see
+    # detect_config_type) but always user-confirmable before Apply -- the
+    # guess is just a time-saver, never applied blind. Rebuilt fresh whenever
+    # the file selection changes, same as the Fitting tab's per-slot target
+    # widgets; there's nothing here worth persisting past a single import.
+    _files = shared_import_upload.value or ()
+    _type_opts = {
+        "Model config": "model_config",
+        "Fit config": "fit_config",
+        "Fitted params / fit result": "fitted_params",
+        "Scenario config": "scenario_config",
+        "Skip (ignore this file)": "skip",
+    }
+    _label_by_value = {v: k for k, v in _type_opts.items()}
+    shared_import_type_sels = mo.ui.array([
+        mo.ui.dropdown(
+            options=_type_opts,
+            value=_label_by_value.get(detect_config_type(_f.name), "Skip (ignore this file)"),
+            label=_f.name,
+        )
+        for _f in _files
+    ])
+    return (shared_import_type_sels,)
+
+
+@app.cell
+def _shared_import_apply_button(mo):
+    shared_import_apply_btn = mo.ui.run_button(label="Apply imported configs")
+    return (shared_import_apply_btn,)
+
+
+@app.cell
+def _shared_import_apply(
+    mo, json,
+    shared_import_apply_btn, shared_import_upload, shared_import_type_sels,
+    get_shared_imports, set_shared_imports,
+    parse_fit_config_targets, partition_scenario_state,
+    set_target_slots, set_restored_target_data, set_restore_error, set_restored_config,
+    set_fit_result_state, fit_result_from_dict,
+    set_scenario_controls_state, set_scenario_agescale_state,
+    set_scenario_dose_state, set_scenario_subpop_state, set_scenario_restore_error,
+    set_config_path,
+):
+    shared_import_apply_note = mo.md("")
+    if shared_import_apply_btn.value:
+        _files = shared_import_upload.value or ()
+        _bytes_by_type = dict(get_shared_imports())
+        _applied = []
+        _errors = []
+
+        for _f, _sel in zip(_files, shared_import_type_sels):
+            _kind = _sel.value
+            if _kind == "skip":
+                continue
+            try:
+                _raw = json.loads(_f.contents.decode("utf-8"))
+            except Exception as _exc:
+                _errors.append(f"**{_f.name}**: JSON parse error: {_exc}")
+                continue
+
+            if _kind == "model_config":
+                # Applied lazily by _load_config_parse (it re-reads this
+                # dict every time it reruns), not here -- no one-shot state
+                # to mutate for this type. But that cell only falls back to
+                # the shared import when BOTH the browsed-file widget and the
+                # path text box are empty, and the path box defaults to the
+                # bundled example config (non-empty) -- so without clearing
+                # it here, the import would silently never take effect.
+                _bytes_by_type["model_config"] = {"name": _f.name, "contents": _f.contents}
+                set_config_path("")
+            elif _kind == "fit_config":
+                try:
+                    _new_slots, _new_data = parse_fit_config_targets(_raw)
+                except Exception as _exc:
+                    _errors.append(f"**{_f.name}**: {_exc}")
+                    continue
+                set_target_slots(_new_slots)
+                set_restored_target_data(_new_data)
+                set_restore_error(None)
+                set_restored_config(_raw)
+            elif _kind == "fitted_params":
+                try:
+                    # Same leniency as the Analysis tab's own "Upload JSON
+                    # file" fitted-params mode: accept either a full
+                    # fit_result_to_dict export or a bare {param: value} dict.
+                    _for_fit = _raw if "best_params" in _raw else {"best_params": _raw}
+                    _loaded = fit_result_from_dict(_for_fit)
+                except Exception as _exc:
+                    _errors.append(f"**{_f.name}**: {_exc}")
+                    continue
+                set_fit_result_state({"result": _loaded, "signature": None, "source": "uploaded"})
+            elif _kind == "scenario_config":
+                if not isinstance(_raw, dict):
+                    _errors.append(f"**{_f.name}**: expected a JSON object")
+                    continue
+                _groups = partition_scenario_state(_raw)
+                set_scenario_controls_state(_groups["controls"])
+                set_scenario_agescale_state(_groups["agescale"])
+                set_scenario_dose_state(_groups["dose"])
+                set_scenario_subpop_state(_groups["subpop"])
+                set_scenario_restore_error(None)
+
+            _applied.append(f"**{_f.name}** → {_kind}")
+
+        set_shared_imports(_bytes_by_type)
+
+        _parts = []
+        if _applied:
+            _parts.append("Imported " + ", ".join(_applied) + ".")
+        if _errors:
+            _parts.append("Failed: " + "; ".join(_errors))
+        if not _applied and not _errors:
+            _parts.append("Nothing to import -- set a type per file above (or upload files first).")
+        shared_import_apply_note = mo.callout(
+            mo.md(" ".join(_parts)),
+            kind="warn" if _errors else ("success" if _applied else "info"),
+        )
+    return (shared_import_apply_note,)
 
 @app.cell
 def _docs_display(mo, main_tab):

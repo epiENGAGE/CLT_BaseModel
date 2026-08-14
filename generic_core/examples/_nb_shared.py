@@ -249,6 +249,80 @@ def _helpers(Path, SimpleNamespace, json, np, pd):
             _parts.append(f"{_k}:{_v}" if _v else _k)
         return ", ".join(_parts)
 
+    def detect_config_type(filename: str) -> str:
+        """Best-effort classification of an uploaded JSON config by filename,
+        for the shared multi-file importer (see _nb_import.py). Returns one
+        of "model_config", "fit_config", "fitted_params", "scenario_config",
+        or "unknown" -- shown as the pre-selected type in a per-file dropdown
+        the user confirms/overrides before applying, so a wrong guess here is
+        just an extra click, not a silent misfile."""
+        _n = (filename or "").lower()
+        if "scenario" in _n:
+            return "scenario_config"
+        if "fit_config" in _n:
+            return "fit_config"
+        if "fitted" in _n or "fit_result" in _n or "params" in _n:
+            return "fitted_params"
+        if "config" in _n:
+            return "model_config"
+        return "unknown"
+
+    def parse_fit_config_targets(raw: dict) -> tuple:
+        """Turn a saved fit_config.json's ``targets`` list into the
+        (slots, data) shape the Fitting tab's per-slot restore state expects
+        (see _fit_config_upload_ui / _nb_import.py's shared importer, which
+        share this so the two stay in sync). Raises if ``raw`` has no
+        "targets" key."""
+        _targets = raw["targets"]
+        _new_slots, _new_data = [], {}
+        for _i, _t in enumerate(_targets):
+            if _i >= 20:
+                break
+            _new_slots.append(_i)
+            _new_data[_i] = {
+                "label": _t.get("label", f"Restored {_i + 1}"),
+                "vars": _t.get("variables"),
+                "mode": _t.get("mode"),
+                "weight": _t.get("weight"),
+                "subpop_idx": _t.get("subpop_idx"),
+                "age_idx": _t.get("age_idx"),
+                "risk_idx": _t.get("risk_idx"),
+                "observed": _t.get("observed"),
+                "point_weights": _t.get("point_weights"),
+            }
+        return _new_slots, _new_data
+
+    def scenario_state_group(key: str) -> str:
+        """Which of the Analysis Scenario sub-tab's four split mo.state
+        dicts (see _nb_analysis.py's _analysis_scenario_state and its four
+        *_controls cells) a given scenario-config key belongs to. Used to
+        partition an uploaded/imported flat scenario_config.json across
+        them (see partition_scenario_state, and _nb_import.py's shared
+        importer)."""
+        if key == "n_scenarios" or key.startswith(("name::", "scalar::", "array::")):
+            return "controls"
+        if key.startswith(("age_scale_toggle::", "age_scale::")):
+            return "agescale"
+        if key in ("dose_toggle", "dose_per_subpop_toggle") or key.startswith(
+            ("dose::", "dose_subpop::")
+        ):
+            return "dose"
+        if key.startswith((
+            "scalar_subpop_sel::", "scalar_subpop::",
+            "array_subpop_sel::", "array_subpop::",
+        )):
+            return "subpop"
+        return "controls"  # unrecognized key: harmless default bucket
+
+    def partition_scenario_state(flat: dict) -> dict:
+        """Split a flat scenario-config dict (the shape scenario_config.json
+        is saved/restored in) into the four group dicts consumed by
+        _nb_analysis.py's per-cell scenario state."""
+        _out = {"controls": {}, "agescale": {}, "dose": {}, "subpop": {}}
+        for _k, _v in (flat or {}).items():
+            _out[scenario_state_group(_k)][_k] = _v
+        return _out
+
     def is_array_param(cfg: dict, name: str) -> bool:
         """Return True if the named param in cfg has a list (A×R array) value."""
         return isinstance(cfg.get("params", {}).get(name), list)
@@ -407,6 +481,10 @@ def _helpers(Path, SimpleNamespace, json, np, pd):
         resolve_input_path,
         validate_metapop_folder,
         infectious_mapping_to_str,
+        detect_config_type,
+        parse_fit_config_targets,
+        scenario_state_group,
+        partition_scenario_state,
         is_array_param,
         array_to_grid_rows,
         param_grid_columns,

@@ -19,6 +19,11 @@ Assembly order must respect data-flow dependencies:
   _nb_population  (defines num_age_groups / is_metapop / metapop_folder_input,
                   consumed by _nb_model_builder and downstream tabs)
   _nb_analysis  (depends on _nb_shared_factory + _nb_analysis_metric_defs)
+  _nb_import    (the shared multi-file config importer rendered in
+                _nb_entry's header; depends on state/helpers defined in
+                _nb_shared, _nb_fitting, and _nb_analysis, so it's placed
+                after all three even though marimo's own dependency graph --
+                not this file's order -- is what actually resolves it)
   _nb_docs      (depends on _nb_shared for `mo`)
 """
 
@@ -50,6 +55,7 @@ Section files (all in generic_core/examples/):
   _nb_forecast.py             — Forecast tab
   _nb_export.py               — Export tab
   _nb_analysis.py             — Analysis tab
+  _nb_import.py               — shared multi-file config importer
   _nb_docs.py                 — Documentation tab
 
 If you edited cells in the marimo browser UI, sync changes back to the
@@ -122,6 +128,7 @@ SECTIONS = [
     "_nb_forecast.py",
     "_nb_export.py",
     "_nb_analysis.py",
+    "_nb_import.py",
     "_nb_docs.py",
 ]
 

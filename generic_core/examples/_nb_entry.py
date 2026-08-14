@@ -49,10 +49,22 @@ def _output_dir(output_dir_input, Path):
 
 
 @app.cell
-def _tab_header_display(main_tab, output_dir_input, mo):
+def _tab_header_display(
+    main_tab, output_dir_input, mo,
+    shared_import_upload, shared_import_type_sels,
+    shared_import_apply_btn, shared_import_apply_note,
+):
     mo.vstack([
         main_tab,
         mo.hstack([output_dir_input], justify="start"),
+        mo.accordion({
+            "Import config files": mo.vstack([
+                shared_import_upload,
+                mo.vstack(list(shared_import_type_sels)) if len(shared_import_type_sels) else mo.md(""),
+                shared_import_apply_btn if len(shared_import_type_sels) else mo.md(""),
+                shared_import_apply_note,
+            ]),
+        }),
     ])
     return
 

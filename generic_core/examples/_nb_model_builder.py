@@ -92,10 +92,14 @@ def _clear_config_button_ui(mo, set_config_path):
 
 
 @app.cell
-def _load_config_parse(config_file_upload, config_path_input, load_config_json, json):
+def _load_config_parse(
+    config_file_upload, config_path_input, load_config_json, json,
+    get_shared_imports,
+):
     _loaded_config = {}
     _cfg_err = None
     _source = None
+    _shared = get_shared_imports().get("model_config")
 
     if config_file_upload.value:
         _file = config_file_upload.value[0]
@@ -107,32 +111,39 @@ def _load_config_parse(config_file_upload, config_path_input, load_config_json, 
     elif config_path_input.value.strip():
         _loaded_config, _cfg_err = load_config_json(config_path_input.value)
         _source = "path"
+    elif _shared:
+        # Fed by the shared multi-file importer (_nb_import.py) when a file
+        # there was classified/confirmed as "Model config" -- checked last so
+        # a config browsed or path-loaded directly in this tab always wins.
+        try:
+            _loaded_config = json.loads(_shared["contents"].decode("utf-8"))
+        except Exception as _exc:
+            _cfg_err = f"JSON parse error: {_exc}"
+        _source = f"Imported: **{_shared['name']}**"
 
     loaded_config = _loaded_config
-    return (loaded_config,)
+    cfg_source = _source
+    cfg_load_error = _cfg_err
+    return (loaded_config, cfg_source, cfg_load_error)
 
 
 @app.cell
 def _load_config_display(
     config_file_upload, config_path_input, clear_config_button,
-    loaded_config, load_config_json, mo, main_tab,
+    loaded_config, cfg_source, cfg_load_error, mo, main_tab,
     step_header, section_card, CLT_ACCENT,
 ):
     mo.stop(main_tab.value != "Model Builder", None)
     _ACC = CLT_ACCENT["builder"]
 
-    _cfg_err = None
-    _source = None
-    if config_file_upload.value:
-        _source = f"Browsed: **{config_file_upload.value[0].name}**"
-        try:
-            import json as _json
-            _json.loads(config_file_upload.value[0].contents.decode("utf-8"))
-        except Exception as _exc:
-            _cfg_err = f"JSON parse error: {_exc}"
-    elif config_path_input.value.strip():
-        _, _cfg_err = load_config_json(config_path_input.value)
-        _source = "path"
+    # Reuses _load_config_parse's own source/error (rather than recomputing
+    # them here from the widgets) so this card can never disagree with what
+    # loaded_config actually is -- it used to recompute independently and,
+    # not knowing about the shared multi-file importer (_nb_import.py),
+    # could show "No config loaded" even when an imported config had already
+    # populated every field below.
+    _cfg_err = cfg_load_error
+    _source = cfg_source
 
     _browse_row = mo.hstack([config_file_upload] + (
         [mo.md(f"Selected: `{config_file_upload.value[0].name}`")]

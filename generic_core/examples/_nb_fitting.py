@@ -431,6 +431,7 @@ def _fit_config_upload_ui(
     set_target_slots,
     set_restored_target_data,
     set_restored_config, set_restore_error,
+    parse_fit_config_targets,
 ):
     # Restores a fit_config.json previously downloaded from this tab (see
     # _fitting_export_display): replaces whatever targets are currently
@@ -448,36 +449,16 @@ def _fit_config_upload_ui(
             return
         try:
             _raw = json.loads(_files[0].contents.decode())
-            _targets = _raw["targets"]
+            # Restoring a saved configuration replaces whatever targets are
+            # currently configured (manual, bulk-uploaded, or from an earlier
+            # restore) rather than adding to them — unlike bulk CSV upload,
+            # which is additive by design (see _fit_bulk_upload_ui). So,
+            # unlike that cell, this starts from an empty slot list instead
+            # of the current one.
+            _new_slots, _new_data = parse_fit_config_targets(_raw)
         except Exception as _exc:
             set_restore_error(str(_exc))
             return
-
-        # Restoring a saved configuration replaces whatever targets are
-        # currently configured (manual, bulk-uploaded, or from an earlier
-        # restore) rather than adding to them — unlike bulk CSV upload,
-        # which is additive by design (see _fit_bulk_upload_ui). So, unlike
-        # that cell, this one starts from an empty slot list instead of the
-        # current one.
-        _new_slots = []
-        _new_data = {}
-
-        for _i, _t in enumerate(_targets):
-            if _i >= 20:
-                break
-            _entry = {
-                "label": _t.get("label", f"Restored {_i + 1}"),
-                "vars": _t.get("variables"),
-                "mode": _t.get("mode"),
-                "weight": _t.get("weight"),
-                "subpop_idx": _t.get("subpop_idx"),
-                "age_idx": _t.get("age_idx"),
-                "risk_idx": _t.get("risk_idx"),
-                "observed": _t.get("observed"),
-                "point_weights": _t.get("point_weights"),
-            }
-            _new_slots.append(_i)
-            _new_data[_i] = _entry
 
         set_target_slots(_new_slots)
         set_restored_target_data(_new_data)

@@ -346,26 +346,48 @@ def _analysis_sensitivity_sliders(
 
 @app.cell
 def _analysis_scenario_state(mo):
-    # Live edits to every Scenario sub-tab widget below (names, per-scenario
-    # overrides, subpop selections, dose multipliers, ...), keyed by a string
-    # identifying the control. Widgets below read this dict as their default
-    # value every time their defining cell reruns -- which happens on nearly
-    # every edit to the Model Builder param catalog (ANALYSIS_SCALAR_PARAMS /
-    # ANALYSIS_ARRAY_PARAMS) or the fitted-params toggle, since those cells
-    # depend on it -- so a live edit here survives changes made elsewhere in
-    # the notebook instead of being silently reset back to the catalog
-    # baseline. Also doubles as the save/restore format for the scenario
-    # config upload/download below.
-    get_scenario_state, set_scenario_state = mo.state({})
+    # Live edits to the Scenario sub-tab's widgets, keyed by a string
+    # identifying the control. Widgets below read the relevant dict as their
+    # default value every time their defining cell reruns -- which happens
+    # on nearly every edit to the Model Builder param catalog
+    # (ANALYSIS_SCALAR_PARAMS / ANALYSIS_ARRAY_PARAMS) or the fitted-params
+    # toggle, since those cells depend on it -- so a live edit here survives
+    # changes made elsewhere in the notebook instead of being silently reset
+    # back to the catalog baseline.
+    #
+    # Split into one dict per widget-building cell (rather than one shared
+    # dict for the whole sub-tab) because mo.state's setter does NOT rerun
+    # the cell that called it by default -- only *other* cells that read the
+    # getter do. With a single shared dict, editing e.g. a dose-multiplier
+    # box still reran the (unrelated) scalar/array/age-scale/subpop cells,
+    # rebuilding every widget in each of them on every keystroke. Splitting
+    # confines a cell's own edits to state only it (and the config
+    # download/upload, which merges/partitions across all four) reads.
+    #
+    # Also the save/restore format for the scenario config upload/download
+    # below (merged into one flat dict on download, partitioned back out on
+    # upload -- see partition_scenario_state).
+    get_scenario_controls_state, set_scenario_controls_state = mo.state({})
+    get_scenario_agescale_state, set_scenario_agescale_state = mo.state({})
+    get_scenario_dose_state, set_scenario_dose_state = mo.state({})
+    get_scenario_subpop_state, set_scenario_subpop_state = mo.state({})
     get_scenario_restore_error, set_scenario_restore_error = mo.state(None)
     return (
-        get_scenario_state, set_scenario_state,
+        get_scenario_controls_state, set_scenario_controls_state,
+        get_scenario_agescale_state, set_scenario_agescale_state,
+        get_scenario_dose_state, set_scenario_dose_state,
+        get_scenario_subpop_state, set_scenario_subpop_state,
         get_scenario_restore_error, set_scenario_restore_error,
     )
 
 
 @app.cell
-def _analysis_scenario_config_upload_ui(mo, set_scenario_state, set_scenario_restore_error, json):
+def _analysis_scenario_config_upload_ui(
+    mo, json, partition_scenario_state,
+    set_scenario_controls_state, set_scenario_agescale_state,
+    set_scenario_dose_state, set_scenario_subpop_state,
+    set_scenario_restore_error,
+):
     def _on_scenario_config_upload(_files):
         _files = _files or ()
         if not _files:
@@ -380,8 +402,14 @@ def _analysis_scenario_config_upload_ui(mo, set_scenario_state, set_scenario_res
         # Restoring replaces the whole scenario design (names, overrides,
         # subpop selections, dose multipliers) rather than merging it, so a
         # restore always reflects exactly the uploaded file -- same as the
-        # Fitting tab's "Restore a saved configuration".
-        set_scenario_state(_raw)
+        # Fitting tab's "Restore a saved configuration". The flat uploaded
+        # dict is split back across the four per-cell states it came from
+        # (see partition_scenario_state).
+        _groups = partition_scenario_state(_raw)
+        set_scenario_controls_state(_groups["controls"])
+        set_scenario_agescale_state(_groups["agescale"])
+        set_scenario_dose_state(_groups["dose"])
+        set_scenario_subpop_state(_groups["subpop"])
         set_scenario_restore_error(None)
 
     analysis_scenario_config_upload = mo.ui.file(
@@ -394,9 +422,19 @@ def _analysis_scenario_config_upload_ui(mo, set_scenario_state, set_scenario_res
 
 
 @app.cell
-def _analysis_scenario_config_download_ui(mo, get_scenario_state, json):
+def _analysis_scenario_config_download_ui(
+    mo, json,
+    get_scenario_controls_state, get_scenario_agescale_state,
+    get_scenario_dose_state, get_scenario_subpop_state,
+):
+    _merged = {
+        **get_scenario_controls_state(),
+        **get_scenario_agescale_state(),
+        **get_scenario_dose_state(),
+        **get_scenario_subpop_state(),
+    }
     analysis_scenario_config_download = mo.download(
-        data=json.dumps(get_scenario_state(), indent=2).encode(),
+        data=json.dumps(_merged, indent=2).encode(),
         filename="scenario_config.json",
         mimetype="application/json",
         label="Download current scenario config",
@@ -406,16 +444,24 @@ def _analysis_scenario_config_download_ui(mo, get_scenario_state, json):
 
 @app.cell
 def _analysis_scenario_controls(
-    mo, ANALYSIS_SCALAR_PARAMS, ANALYSIS_ARRAY_PARAMS, get_scenario_state, set_scenario_state,
+    mo, ANALYSIS_SCALAR_PARAMS, ANALYSIS_ARRAY_PARAMS,
+    get_scenario_controls_state, set_scenario_controls_state,
 ):
     _MAX_SC = 5
     _scalar_names = list(ANALYSIS_SCALAR_PARAMS.keys())
     _array_names = list(ANALYSIS_ARRAY_PARAMS.keys())
-    _st = get_scenario_state()
+    _st = get_scenario_controls_state()
 
     def _cb(key):
+        # Functional update (not `set(...)` from a `get()` read here) so two
+        # edits fired in quick succession -- close enough together that the
+        # second's on_change starts before the first's write has landed --
+        # can't race: mo.state applies a callable update atomically against
+        # its actual current value, not a value snapshotted earlier by this
+        # closure. The read+write form silently dropped whichever edit's
+        # write lost the race.
         def _inner(v):
-            set_scenario_state({**get_scenario_state(), key: v})
+            set_scenario_controls_state(lambda d: {**d, key: v})
         return _inner
 
     analysis_n_scenarios = mo.ui.number(
@@ -474,7 +520,7 @@ def _analysis_scenario_controls(
 @app.cell
 def _analysis_array_age_scale_controls(
     mo, ANALYSIS_ARRAY_PARAMS, num_age_groups, age_groups, param_grid_columns,
-    get_scenario_state, set_scenario_state,
+    get_scenario_agescale_state, set_scenario_agescale_state,
 ):
     # Per-array-param opt-in: scale each age group by its OWN factor instead of
     # one uniform factor for the whole array (e.g. VE sensitivity presets that
@@ -483,11 +529,12 @@ def _analysis_array_age_scale_controls(
     _MAX_SC = 5
     _array_names = list(ANALYSIS_ARRAY_PARAMS.keys())
     _age_labels = param_grid_columns(age_groups, num_age_groups)
-    _st = get_scenario_state()
+    _st = get_scenario_agescale_state()
 
     def _cb(key):
+        # Functional update -- see _analysis_scenario_controls's _cb.
         def _inner(v):
-            set_scenario_state({**get_scenario_state(), key: v})
+            set_scenario_agescale_state(lambda d: {**d, key: v})
         return _inner
 
     analysis_array_age_scale_toggles = mo.ui.array([
@@ -521,7 +568,8 @@ def _analysis_array_age_scale_controls(
 @app.cell
 def _analysis_dose_mult_controls(
     mo, num_age_groups, config_dict, is_metapop, analysis_sp_names,
-    age_groups, param_grid_columns, get_scenario_state, set_scenario_state,
+    age_groups, param_grid_columns,
+    get_scenario_dose_state, set_scenario_dose_state,
 ):
     # Per-scenario, per-age-group multiplier on a `scheduled_exact` transition's
     # daily schedule (`daily_vaccines_df`) -- e.g. 0 to zero out an age group (a
@@ -558,11 +606,12 @@ def _analysis_dose_mult_controls(
         if _dose_schedule_names else ""
     )
 
-    _st = get_scenario_state()
+    _st = get_scenario_dose_state()
 
     def _cb(key):
+        # Functional update -- see _analysis_scenario_controls's _cb.
         def _inner(v):
-            set_scenario_state({**get_scenario_state(), key: v})
+            set_scenario_dose_state(lambda d: {**d, key: v})
         return _inner
 
     analysis_dose_mult_toggle = mo.ui.switch(
@@ -618,18 +667,19 @@ def _analysis_param_subpop_controls(
     mo, is_metapop, analysis_sp_names,
     ANALYSIS_SCALAR_PARAMS, ANALYSIS_ARRAY_PARAMS, ANALYSIS_SCALAR_RANGES,
     analysis_scalar_param_sel, analysis_array_param_sel, analysis_param_type,
-    get_scenario_state, set_scenario_state,
+    get_scenario_subpop_state, set_scenario_subpop_state,
 ):
     _MAX_SC = 5
     _MAX_SENS = 6
     _scalar_names = list(ANALYSIS_SCALAR_PARAMS.keys())
     _array_names = list(ANALYSIS_ARRAY_PARAMS.keys())
     _sp_opts = list(analysis_sp_names) if analysis_sp_names else []
-    _st = get_scenario_state()
+    _st = get_scenario_subpop_state()
 
     def _cb(key):
+        # Functional update -- see _analysis_scenario_controls's _cb.
         def _inner(v):
-            set_scenario_state({**get_scenario_state(), key: v})
+            set_scenario_subpop_state(lambda d: {**d, key: v})
         return _inner
 
     # Scenario sub-tab: per-param subpop multiselects
