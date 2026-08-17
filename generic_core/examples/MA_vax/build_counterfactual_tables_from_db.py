@@ -27,7 +27,7 @@ MA_vax.counterfactual, same as counterfactual_generic.py does -- they don't
 care which pipeline produced the arrays.
 
 Usage:
-    cd generic_core/examples/run_simulations_MA_vax
+    cd generic_core/examples/MA_vax
     python run_simulations_MA_vax.py
     python build_counterfactual_tables_from_db.py
 

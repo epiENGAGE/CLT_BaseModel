@@ -1,4 +1,4 @@
-# run_simulations_MA_vax
+# MA_vax
 
 Three pipelines built on the same exported MA_vax model (`model_config.json`
 \+ `fitted_params.json`), plus their shared inputs. Pipelines 1 and 3 chain
@@ -81,7 +81,7 @@ together; pipeline 2 is fully independent of both.
 ## Running pipeline 1 (standalone scenario runner)
 
 ```bash
-python generic_core/examples/run_simulations_MA_vax/run_simulations_MA_vax.py
+python generic_core/examples/MA_vax/run_simulations_MA_vax.py
 ```
 
 Writes `simulation_output/results.db`. Edit the constants at the top of the
@@ -93,11 +93,11 @@ script (`STOCHASTIC`, `UNCERTAINTY_SOURCE`, `NUM_DAYS`, ...) or the
 ```bash
 # 1. Compute the tables (deterministic; drop --deterministic and add
 #    --n-reps for stochastic runs with confidence intervals)
-python generic_core/examples/run_simulations_MA_vax/run_counterfactual_tables_generic.py \
-    --deterministic --out generic_core/examples/run_simulations_MA_vax/counterfactual_tables_det
+python generic_core/examples/MA_vax/run_counterfactual_tables_generic.py \
+    --deterministic --out generic_core/examples/MA_vax/counterfactual_tables_det
 
 # 2. View the results
-marimo edit generic_core/examples/run_simulations_MA_vax/counterfactual_notebook_generic.py
+marimo edit generic_core/examples/MA_vax/counterfactual_notebook_generic.py
 ```
 
 In the notebook, point the "Results folder" box at the folder from step 1
@@ -107,15 +107,15 @@ In the notebook, point the "Results folder" box at the folder from step 1
 
 ```bash
 # 1. Run pipeline 1 first -- pipeline 3 reads its results.db
-python generic_core/examples/run_simulations_MA_vax/run_simulations_MA_vax.py
+python generic_core/examples/MA_vax/run_simulations_MA_vax.py
 
 # 2. Turn results.db into the same S.A.* CSVs pipeline 2 writes
-python generic_core/examples/run_simulations_MA_vax/build_counterfactual_tables_from_db.py \
-    --db generic_core/examples/run_simulations_MA_vax/simulation_output/results.db \
-    --out generic_core/examples/run_simulations_MA_vax/counterfactual_tables_from_db
+python generic_core/examples/MA_vax/build_counterfactual_tables_from_db.py \
+    --db generic_core/examples/MA_vax/simulation_output/results.db \
+    --out generic_core/examples/MA_vax/counterfactual_tables_from_db
 
 # 3. View the results (same notebook as pipeline 2)
-marimo edit generic_core/examples/run_simulations_MA_vax/counterfactual_notebook_generic.py
+marimo edit generic_core/examples/MA_vax/counterfactual_notebook_generic.py
 ```
 
 Point the notebook's "Results folder" box at
