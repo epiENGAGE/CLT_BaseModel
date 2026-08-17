@@ -11215,7 +11215,7 @@ def _run_analysis(
     metapop_folder_input, metapop_travel_config,
     transition_vars_input,
     build_compartment_init, start_date_input, rng_seed,
-    make_single_pop_metapop, make_metapop_from_folder,
+    num_age_groups, num_risk_groups, mobility_input, daily_vaccines_input,
     set_analysis_results, loaded_schedule_dfs,
     analysis_use_fitted, analysis_fitted_params,
     analysis_fitted_tv_increments, analysis_fitted_tv_spacing, analysis_fitted_num_days,
@@ -11227,19 +11227,6 @@ def _run_analysis(
         not analysis_scenarios,
         mo.callout(mo.md("**No scenarios defined.** Configure sensitivity or scenario settings above."), kind="warn"),
     )
-
-    def _split_dose_mult(mult):
-        # Scenario dose multipliers are a {df_attribute: per-age-group vector}
-        # dict (see _analysis_define_scenarios), one entry per vaccine_schedule
-        # the user actually scaled. make_single_pop_metapop /
-        # make_metapop_from_folder take the default schedule's vector as
-        # `dose_mult` and the rest as an `extra_dose_mult` dict, so split on
-        # that boundary here. Returns (dose_mult, extra_dose_mult).
-        if not mult:
-            return None, None
-        _base = mult.get("daily_vaccines_df")
-        _extra = {_k: _v for _k, _v in mult.items() if _k != "daily_vaccines_df"}
-        return _base, (_extra or None)
 
     _num_days = int(analysis_sim_days.value)
     _n_reps = int(analysis_n_reps.value) if analysis_stochastic.value else 1
@@ -11310,27 +11297,6 @@ def _run_analysis(
     # was fitted and inflates the epidemic by an order of magnitude.
     _schedule_dfs_best = loaded_schedule_dfs
     _ci_unscaled = None
-    # NOTE: marimo mangles cell-private (underscore) names, but only rewrites a
-    # reference inside a nested function if the name is already bound at the
-    # cell's top level *earlier in the source*. So every cell-private name a
-    # closure below reads must be pre-bound here, before the `def` — otherwise
-    # the reference stays unmangled and raises NameError at call time.
-    _pop_arr = None
-
-    def _scaled_ci(_pset):
-        # Apply a param set's seed_scale_<comp> entries to the unscaled initial
-        # conditions. Single-population only — the metapop path builds its own
-        # initial conditions per subpop inside make_metapop_from_folder.
-        _seed_scales = {
-            _sk[len("seed_scale_"):]: float(_sv)
-            for _sk, _sv in _pset.items()
-            if _sk.startswith("seed_scale_") and _sk[len("seed_scale_"):] in compartments
-        }
-        if not _seed_scales:
-            return _ci_unscaled
-        from generic_core.fitting import _scale_compartment_init
-        _A, _R = _pop_arr.shape
-        return _scale_compartment_init(_ci_unscaled, _seed_scales, compartments, _A, _R)
 
     if not is_metapop:
         # Initial conditions from the Step 6 tables via config_dict.
@@ -11348,7 +11314,15 @@ def _run_analysis(
         # the fitting-time scaling in generic_core.fitting._scale_compartment_init;
         # they are not config["params"] entries, so param_overrides can't apply them).
         if analysis_use_fitted.value and analysis_fitted_params:
-            _ci_best = _scaled_ci(analysis_fitted_params)
+            from generic_core.fitting import _scale_compartment_init
+            _seed_scales = {
+                _sk[len("seed_scale_"):]: float(_sv)
+                for _sk, _sv in analysis_fitted_params.items()
+                if _sk.startswith("seed_scale_") and _sk[len("seed_scale_"):] in compartments
+            }
+            if _seed_scales:
+                _A0, _R0 = _pop_arr.shape
+                _ci_best = _scale_compartment_init(_ci_unscaled, _seed_scales, compartments, _A0, _R0)
 
     # Reconstruct the fitted time-varying transmission multiplier m(t) from its
     # log-increments and wire it into every force_of_infection transition via a
@@ -11357,40 +11331,11 @@ def _run_analysis(
     # fitted value for any simulated days beyond the fit period. In the metapop
     # case, the same single-population-fitted m(t) trajectory is broadcast
     # uniformly to every subpopulation (see make_metapop_from_folder's
-    # transmission_multiplier_df param).
+    # transmission_multiplier_df param). Per-param-set m(t)/initial-condition
+    # variants (when parameter uncertainty is on) are computed inside
+    # generic_core.analysis_runner, once per worker process.
     _has_mt = False
-    # Imported before the def below (not inside the `if` that uses them) so the
-    # closure's references to these cell-private names get mangled — see the
-    # marimo note above.
-    from generic_core.fitting import (
-        _inject_tv_transmission, _tv_knot_days,
-        build_transmission_multiplier_array as _build_transmission_multiplier_array,
-    )
-    import pandas as _pd
-
-    def _schedule_dfs_for(_increments):
-        # Build the schedule bundle carrying this param set's m(t). Adds m(t)
-        # *alongside* the uploaded schedules rather than replacing them — m(t)
-        # is an extra multiplier on the force of infection, not a substitute
-        # for humidity/calendar/mobility/vaccination.
-        _fit_days = int(analysis_fitted_num_days)
-        _knots = _tv_knot_days(_fit_days, int(analysis_fitted_tv_spacing))
-        _m_fit = _build_transmission_multiplier_array(list(_increments), _knots, _fit_days)
-        if _num_days <= _fit_days:
-            _m_full = _m_fit[:_num_days]
-        else:
-            _m_full = np.concatenate([_m_fit, np.full(_num_days - _fit_days, _m_fit[-1])])
-        _dates = _pd.date_range(start=_start, periods=_num_days, freq="D").date
-        return SimpleNamespace(
-            **{
-                _f: getattr(loaded_schedule_dfs, _f, None)
-                for _f in ("absolute_humidity_df", "school_work_calendar_df",
-                           "mobility_df", "daily_vaccines_df")
-            },
-            transmission_multiplier_df=_pd.DataFrame(
-                {"date": _dates, "transmission_multiplier": _m_full}
-            ),
-        )
+    from generic_core.fitting import _inject_tv_transmission, _tv_knot_days, _build_transmission_multiplier_df
 
     if analysis_use_fitted.value and analysis_fitted_tv_increments:
         _tv_cfg, _n_foi = _inject_tv_transmission(_sim_config)
@@ -11401,150 +11346,48 @@ def _run_analysis(
             # best set, so if the best set carries m(t) so do the others.
             _sim_config = _tv_cfg
             _has_mt = True
-            _schedule_dfs_best = _schedule_dfs_for(analysis_fitted_tv_increments)
-
-    def _pset_increments(_pset):
-        return [
-            _v for _, _v in sorted(
-                (
-                    (int(_pk[len("m_dlog_"):]), float(_pv))
-                    for _pk, _pv in _pset.items()
-                    if _pk.startswith("m_dlog_") and _pk[len("m_dlog_"):].isdigit()
-                ),
-                key=lambda _t: _t[0],
+            _fit_days = int(analysis_fitted_num_days)
+            _knots = _tv_knot_days(_fit_days, int(analysis_fitted_tv_spacing))
+            _m_df = _build_transmission_multiplier_df(
+                list(analysis_fitted_tv_increments), _knots, _start, _num_days,
             )
-        ]
-
-    # Per-param-set initial conditions and m(t) schedules, built lazily and
-    # reused across scenarios (both depend only on the param set, not on the
-    # scenario overrides). _pset_idx None means "the fitted best set" — the
-    # values already computed above, i.e. the pre-existing code path.
-    _ci_cache = {}
-    _sched_cache = {}
-
-    def _get_ci(_pset_idx):
-        if _pset_idx is None or is_metapop:
-            return _ci_best
-        if _pset_idx not in _ci_cache:
-            _ci_cache[_pset_idx] = _scaled_ci(_psets[_pset_idx])
-        return _ci_cache[_pset_idx]
-
-    def _get_schedule_dfs(_pset_idx):
-        if _pset_idx is None or not _has_mt:
-            return _schedule_dfs_best
-        if _pset_idx not in _sched_cache:
-            _incrs = _pset_increments(_psets[_pset_idx])
-            _sched_cache[_pset_idx] = (
-                _schedule_dfs_for(_incrs) if _incrs else _schedule_dfs_best
+            _schedule_dfs_best = SimpleNamespace(
+                **{
+                    _f: getattr(loaded_schedule_dfs, _f, None)
+                    for _f in ("absolute_humidity_df", "school_work_calendar_df",
+                               "mobility_df", "daily_vaccines_df")
+                },
+                transmission_multiplier_df=_m_df,
             )
-        return _sched_cache[_pset_idx]
 
-    def _apply_pset(_overrides, _pset_idx, _designed, _ratios=None):
-        # Layer a sampled param set under the scenario's overrides: the set
-        # supplies every fitted param the design did not deliberately set, so
-        # the ensemble carries parameter uncertainty without undoing the
-        # sensitivity sweep or the edited scenario cells. seed_scale_*/m_dlog_*
-        # /phi are handled elsewhere (_get_ci / _get_schedule_dfs / not a model
-        # param), so they never reach param_overrides.
-        # A designed param with a known ratio (override / catalog baseline)
-        # instead has that ratio applied to the sampled draw's own value, so
-        # the scenario's scaling factor carries through posterior uncertainty
-        # rather than pinning one absolute value across every draw.
-        if _pset_idx is None:
-            return _overrides
-        _ov = dict(_overrides or {})
-        _ratios = _ratios or {}
-        for _pk, _pv in _psets[_pset_idx].items():
-            if _pk == "phi" or _pk.startswith("m_dlog_") or _pk.startswith("seed_scale_"):
-                continue
-            if _pk in _designed:
-                _ratio = _ratios.get(_pk)
-                if _ratio is None:
-                    continue
-                if isinstance(_ratio, list):
-                    _ov[_pk] = (np.asarray(_ratio, dtype=float) * np.asarray(_pv, dtype=float)).tolist()
-                else:
-                    _ov[_pk] = float(_ratio) * float(_pv)
-                continue
-            _ov[_pk] = list(_pv) if isinstance(_pv, (list, tuple)) else float(_pv)
-        return _ov
-
-    def _extract_detailed(metapop, comps, tvs=None):
-        _out = {}
-        for _sp_name, _sp in metapop.subpop_models.items():
-            _sp_out = {}
-            for _c in comps:
-                _sp_out[_c] = np.array(_sp.compartments[_c].history_vals_list)
-            _tv_list = tvs if tvs else list(_sp.transition_variables.keys())
-            for _tv in _tv_list:
-                _hist = _sp.transition_variables.get(_tv)
-                if _hist is not None and _hist.history_vals_list:
-                    _raw = np.array(_hist.history_vals_list)
-                    # TVs are stored per timestep; aggregate to daily sums
-                    _T = _raw.shape[0]
-                    if _ts > 1 and _T > 0 and _T % _ts == 0:
-                        _raw = _raw.reshape(_T // _ts, _ts, *_raw.shape[1:]).sum(axis=1)
-                    _sp_out[_tv] = _raw
-            _out[_sp_name] = _sp_out
-        return _out
-
-    _all = {}
     _spin = (
         f"Running {len(analysis_scenarios)} scenario(s) × {len(_run_schedule)} run(s)"
         + (f" across {len(_psets)} parameter set(s)..." if _use_psets else "...")
     )
     with mo.status.spinner(_spin):
+        def _on_progress(_info):
+            mo.output.replace(mo.callout(
+                mo.md(f"Running {_info['done']}/{_info['total']}: "
+                      f"{_info['scenario']} (rep {_info['rep']})…"),
+                kind="info",
+            ))
+
         try:
-            for _scen_tuple in analysis_scenarios:
-                _scen_name, _overrides = _scen_tuple[0], _scen_tuple[1]
-                _per_subpop = _scen_tuple[2] if len(_scen_tuple) > 2 else None
-                _designed = _scen_tuple[3] if len(_scen_tuple) > 3 else set()
-                _dose_mult = _scen_tuple[4] if len(_scen_tuple) > 4 else None
-                _dose_mult_per_subpop = _scen_tuple[5] if len(_scen_tuple) > 5 else None
-                _ratios = _scen_tuple[6] if len(_scen_tuple) > 6 else {}
-                _reps_hists = []
-                # Seed by position in the run schedule, not by the rep index
-                # within a param set, so every run gets a distinct RNG stream
-                # once replicates are spread across sets.
-                for _run_i, (_pset_idx, _rep) in enumerate(_run_schedule):
-                    _run_ov = _apply_pset(_overrides, _pset_idx, _designed, _ratios)
-                    _run_sched = _get_schedule_dfs(_pset_idx)
-                    _base_dose_mult, _extra_dose_mult = _split_dose_mult(_dose_mult)
-                    if not is_metapop:
-                        _m, _, _ = make_single_pop_metapop(
-                            _sim_config, _start, _num_days, _get_ci(_pset_idx),
-                            seed_offset=_run_i, seed_base=_seed_b, ts_per_day=_ts,
-                            stochastic=_stoch_run, tvs=_tvs, save_daily=True,
-                            param_overrides=_run_ov or None,
-                            travel_config=metapop_travel_config,
-                            schedule_dfs=_run_sched,
-                            dose_mult=_base_dose_mult,
-                            extra_dose_mult=_extra_dose_mult,
-                        )
-                    else:
-                        _base_dm_per_sp = _extra_dm_per_sp = None
-                        if _dose_mult_per_subpop:
-                            _split = [_split_dose_mult(_dm) for _dm in _dose_mult_per_subpop]
-                            _base_dm_per_sp = [_b for _b, _ in _split]
-                            _extra_dm_per_sp = [_e for _, _e in _split]
-                        _m, _ = make_metapop_from_folder(
-                            metapop_folder_input.value, _sim_config, _start, _num_days, list(compartments),
-                            seed_offset=_run_i, seed_base=_seed_b, ts_per_day=_ts,
-                            stochastic=_stoch_run, tvs=_tvs, save_daily=True,
-                            param_overrides=_run_ov or None,
-                            param_overrides_per_subpop=_per_subpop,
-                            travel_config=metapop_travel_config,
-                            transmission_multiplier_df=getattr(
-                                _run_sched, "transmission_multiplier_df", None
-                            ),
-                            dose_mult=_base_dose_mult,
-                            dose_mult_per_subpop=_base_dm_per_sp,
-                            extra_dose_mult=_extra_dose_mult,
-                            extra_dose_mult_per_subpop=_extra_dm_per_sp,
-                        )
-                    _m.simulate_until_day(_num_days)
-                    _reps_hists.append(_extract_detailed(_m, list(compartments), tvs=_tvs))
-                _all[_scen_name] = _reps_hists
+            from generic_core.analysis_runner import run_analysis_scenarios
+            _all = run_analysis_scenarios(
+                analysis_scenarios, _run_schedule,
+                config_dict=_sim_config, compartments=list(compartments), is_metapop=is_metapop,
+                metapop_folder=metapop_folder_input.value, metapop_travel_config=metapop_travel_config,
+                ci_unscaled=_ci_unscaled, ci_best=_ci_best, has_mt=_has_mt, schedule_dfs_best=_schedule_dfs_best,
+                loaded_schedule_dfs=loaded_schedule_dfs, psets=_psets,
+                num_days=_num_days, ts_per_day=_ts, seed_base=_seed_b, start_date=_start,
+                tvs=_tvs, stoch_run=_stoch_run,
+                num_age_groups=num_age_groups, num_risk_groups=num_risk_groups,
+                mobility_value=float(mobility_input.value), daily_vaccines_value=float(daily_vaccines_input.value),
+                analysis_fitted_num_days=analysis_fitted_num_days,
+                analysis_fitted_tv_spacing=analysis_fitted_tv_spacing,
+                progress_callback=_on_progress,
+            )
         except Exception as _exc:
             mo.stop(True, mo.callout(mo.md(f"**Analysis error:** {_exc}"), kind="danger"))
 
