@@ -227,13 +227,18 @@ DOSE_MULTIPLIER = {
     # Naive cross-product coverage multiplier (target 0.70 / baseline coverage from one
     # deterministic run) -- see the SCENARIOS comment above and counterfactual_generic.py.
     '70% coverage (all ages)': [1.5618042287606673, 0.7812223996432112, 1.0077209653521768, 1.2943827994844874, 1.8061652849458125, 1.2047962088514907, 0.9840824933555715],
-    '70% coverage (0 only)': [1.5618042287606673, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-    '70% coverage (1-4 only)': [0.0, 0.7812223996432112, 0.0, 0.0, 0.0, 0.0, 0.0],
-    '70% coverage (5-12 only)': [0.0, 0.0, 1.0077209653521768, 0.0, 0.0, 0.0, 0.0],
-    '70% coverage (13-17 only)': [0.0, 0.0, 0.0, 1.2943827994844874, 0.0, 0.0, 0.0],
-    '70% coverage (18-49 only)': [0.0, 0.0, 0.0, 0.0, 1.8061652849458125, 0.0, 0.0],
-    '70% coverage (50-64 only)': [0.0, 0.0, 0.0, 0.0, 0.0, 1.2047962088514907, 0.0],
-    '70% coverage (65+ only)': [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.9840824933555715],
+    # Unlike the 'Vaccinate X only' scenarios above, the untargeted age groups keep
+    # their baseline schedule (multiplier 1.0, not 0.0): Table S.A.3 compares these
+    # against 'baseline', so it measures the ADDITIONAL benefit of raising one age
+    # group to 70%, not the net effect of also de-vaccinating everyone else. Matches
+    # counterfactual_generic.py's coverage_70pct_scenario (np.ones base).
+    '70% coverage (0 only)': [1.5618042287606673, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+    '70% coverage (1-4 only)': [1.0, 0.7812223996432112, 1.0, 1.0, 1.0, 1.0, 1.0],
+    '70% coverage (5-12 only)': [1.0, 1.0, 1.0077209653521768, 1.0, 1.0, 1.0, 1.0],
+    '70% coverage (13-17 only)': [1.0, 1.0, 1.0, 1.2943827994844874, 1.0, 1.0, 1.0],
+    '70% coverage (18-49 only)': [1.0, 1.0, 1.0, 1.0, 1.8061652849458125, 1.0, 1.0],
+    '70% coverage (50-64 only)': [1.0, 1.0, 1.0, 1.0, 1.0, 1.2047962088514907, 1.0],
+    '70% coverage (65+ only)': [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.9840824933555715],
     # Same dose multiplier as '70% coverage (all ages)' -- coverage (S_to_SV)
     # is driven by the dose schedule, not by vax_susceptibility/IV_to_H_prop,
     # so the Low/High VE scenarios reach the same coverage target.
@@ -663,26 +668,21 @@ for scenario_name, overrides in SCENARIOS.items():
 _db = OUTPUT_DIR / "results.db"
 _con = sqlite3.connect(_db)
 _cur = _con.cursor()
+# Drop and recreate both tables every run rather than INSERTing into
+# whatever's already there -- this script has no notion of "replace this
+# scenario's rows", so reusing an existing results.db (e.g. after editing
+# SCENARIOS and rerunning) would otherwise silently accumulate duplicate
+# rows under the same (scenario, rep) key on top of the old ones, corrupting
+# every downstream sum. `results.db` is meant to hold exactly one run's
+# output, not an append-only log across runs.
+_cur.execute("DROP TABLE IF EXISTS results")
+_cur.execute("DROP TABLE IF EXISTS results_full")
 # `compartment` keeps its name (so existing queries still work) but now holds
 # transition-variable names too; `kind` distinguishes them. `param_set` is the
 # index into the sampled parameter sets (NULL when parameter uncertainty is
-# off), so replicates can be grouped by draw. A results.db from an older
-# export lacks these columns, so fail loudly rather than silently dropping the
-# new rows or corrupting the old table.
-_existing = _cur.execute(
-    "SELECT name FROM sqlite_master WHERE type='table' AND name='results'"
-).fetchone()
-if _existing:
-    _cols = {_r[1] for _r in _cur.execute("PRAGMA table_info(results)")}
-    _missing = {"kind", "param_set"} - _cols
-    if _missing:
-        _con.close()
-        raise SystemExit(
-            f"{_db} was written by an older version of this script (missing "
-            f"column(s): {sorted(_missing)}). Delete or rename it and re-run."
-        )
+# off), so replicates can be grouped by draw.
 _cur.execute(
-    "CREATE TABLE IF NOT EXISTS results "
+    "CREATE TABLE results "
     "(scenario TEXT, rep INTEGER, param_set INTEGER, compartment TEXT, kind TEXT, "
     "day INTEGER, value REAL)"
 )
@@ -695,7 +695,7 @@ _cur.execute(
 # one subpop name and risk_group=0 throughout -- still queryable the same
 # way, just with nothing to GROUP BY away.
 _cur.execute(
-    "CREATE TABLE IF NOT EXISTS results_full "
+    "CREATE TABLE results_full "
     "(scenario TEXT, rep INTEGER, param_set INTEGER, compartment TEXT, kind TEXT, "
     "subpop TEXT, age_group INTEGER, risk_group INTEGER, day INTEGER, value REAL)"
 )
