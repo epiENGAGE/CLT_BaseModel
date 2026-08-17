@@ -114,6 +114,8 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
 
     # <<<DESIGNED_PARAMS_BLOCK>>>
 
+    # <<<DESIGNED_PARAM_RATIOS_BLOCK>>>
+
     # <<<DOSE_MULTIPLIER_BLOCK>>>
 
     # <<<DOSE_MULTIPLIER_SUBPOP_BLOCK>>>
@@ -131,7 +133,7 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
     from generic_core.generic_metapop import ConfigDrivenMetapopModel
     from generic_core.model_factory import (
         build_compartment_init, make_metapop_from_folder, extract_history,
-        scale_dose_schedule_df,
+        extract_history_full, scale_dose_schedule_df,
     )
     from generic_core.fitting import (
         _scale_compartment_init, _inject_tv_transmission, _tv_knot_days,
@@ -456,18 +458,31 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
         RUN_SCHEDULE = [None] * (NUM_REPS if RUN_STOCHASTIC else 1)
 
 
-    def _apply_pset(overrides, pset_idx, designed):
+    def _apply_pset(overrides, pset_idx, designed, ratios=None):
         # Layer a sampled param set under the scenario's overrides: the set
         # supplies every fitted param the scenario design did not deliberately
         # set (DESIGNED_PARAMS), so the ensemble carries parameter uncertainty
         # without undoing the sweep or the edited scenario values. Returns the
         # (param_overrides, seed_scales, tv_increments) triple for this run.
+        # A designed param with a known ratio in DESIGNED_PARAM_RATIOS (the
+        # scenario's override / catalog baseline at export time) instead has
+        # that ratio applied to the sampled draw's own value, so the
+        # scenario's scaling factor carries through posterior uncertainty
+        # rather than pinning one absolute value across every draw.
         if pset_idx is None:
             return overrides, None, None
         _model, _scales, _incr = _split_pset(RUN_PARAM_SETS[pset_idx])
         _ov = dict(overrides or {})
+        _ratios = ratios or {}
         for _k2, _v2 in _model.items():
             if _k2 in designed:
+                _ratio = _ratios.get(_k2)
+                if _ratio is None:
+                    continue
+                if isinstance(_ratio, list):
+                    _ov[_k2] = (np.asarray(_ratio, dtype=float) * np.asarray(_v2, dtype=float)).tolist()
+                else:
+                    _ov[_k2] = float(_ratio) * float(_v2)
                 continue
             _ov[_k2] = _v2
         return _ov, _scales, _incr
@@ -487,11 +502,12 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
             _designed = set(overrides or {})
         _dose_mult = DOSE_MULTIPLIER.get(scenario_name)
         _dose_mult_per_subpop = DOSE_MULTIPLIER_PER_SUBPOP.get(scenario_name)
+        _ratios = DESIGNED_PARAM_RATIOS.get(scenario_name, {})
         _reps_data = []
         # Seed by position in the run schedule so every run gets a distinct RNG
         # stream once replicates are spread across parameter sets.
         for _rep, _pset_idx in enumerate(RUN_SCHEDULE):
-            _run_ov, _run_scales, _run_incr = _apply_pset(overrides, _pset_idx, _designed)
+            _run_ov, _run_scales, _run_incr = _apply_pset(overrides, _pset_idx, _designed, _ratios)
             _m = build_model(
                 config_dict, _run_ov, _rep, subpop_overrides=_sp_overrides,
                 seed_scales=_run_scales, tv_increments=_run_incr,
@@ -506,8 +522,15 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
             # raw would give a series TIMESTEPS_PER_DAY x too long and each
             # value TIMESTEPS_PER_DAY x too small.
             _h = extract_history(_m, _comp_names, tvs=TRANSITION_VARS)
+            # Fully-resolved companion to _h -- same compartments/transitions,
+            # but per-subpop (day, age_group, risk_group) arrays instead of
+            # (day,) scalars summed over subpop/age/risk. Needed by anything
+            # that cares which subpop/age/risk group a flow happened in (e.g.
+            # per-age-group vaccination-impact tables); extract_history's own
+            # summed totals stay the fast path for the population aggregate.
+            _h_full = extract_history_full(_m, _comp_names, tvs=TRANSITION_VARS)
             _kinds = {_k: ("transition" if _k in TRANSITION_VARS else "compartment") for _k in _h}
-            _reps_data.append((_h, _kinds, _pset_idx))
+            _reps_data.append((_h, _h_full, _kinds, _pset_idx))
         all_results[scenario_name] = _reps_data
 
     _db = OUTPUT_DIR / "results.db"
@@ -536,14 +559,36 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
         "(scenario TEXT, rep INTEGER, param_set INTEGER, compartment TEXT, kind TEXT, "
         "day INTEGER, value REAL)"
     )
+    # Same shape as `results`, plus `subpop`/`age_group`/`risk_group` columns
+    # (age_group/risk_group are 0-based indices into NUM_AGE_GROUPS/
+    # NUM_RISK_GROUPS) -- kept as a separate table rather than adding
+    # nullable columns to `results`, so `results` alone still answers
+    # population-aggregate queries without a GROUP BY. Single-population,
+    # single-risk-group models (the common case) just get one subpop name
+    # and risk_group=0 throughout -- still queryable the same way, just with
+    # nothing to GROUP BY away.
+    _cur.execute(
+        "CREATE TABLE IF NOT EXISTS results_full "
+        "(scenario TEXT, rep INTEGER, param_set INTEGER, compartment TEXT, kind TEXT, "
+        "subpop TEXT, age_group INTEGER, risk_group INTEGER, day INTEGER, value REAL)"
+    )
     for _scen, _reps_data in all_results.items():
-        for _ri, (_h, _kinds, _psi) in enumerate(_reps_data):
+        for _ri, (_h, _h_full, _kinds, _psi) in enumerate(_reps_data):
             for _c, _arr in _h.items():
                 _cur.executemany(
                     "INSERT INTO results VALUES (?,?,?,?,?,?,?)",
                     [(_scen, _ri, _psi, _c, _kinds[_c], _d + 1, float(_v))
                      for _d, _v in enumerate(_arr)],
                 )
+            for _c, _sp_map in _h_full.items():
+                for _spname, _arr_full in _sp_map.items():
+                    _cur.executemany(
+                        "INSERT INTO results_full VALUES (?,?,?,?,?,?,?,?,?,?)",
+                        [(_scen, _ri, _psi, _c, _kinds[_c], _spname, _a, _r, _d + 1, float(_v))
+                         for _d, _day_slice in enumerate(_arr_full)
+                         for _a, _age_slice in enumerate(_day_slice)
+                         for _r, _v in enumerate(_age_slice)],
+                    )
     _con.commit()
     _con.close()
     print(f"Results saved to {_db}")
@@ -564,8 +609,14 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
         "# Any param you set here must also be listed in DESIGNED_PARAMS below to",
         "# survive parameter sampling -- see the note there.",
         "SCENARIOS = {",
-        '    "baseline": {},',
     ]
+    # The empty "baseline" (run config_dict as-is, no overrides) is injected
+    # here UNLESS the user already named one of their own scenarios
+    # "baseline" -- in that case their overrides are written out like any
+    # other scenario below instead of being silently shadowed by this one.
+    _user_has_baseline = any(_t[0] == "baseline" for _t in analysis_scenarios)
+    if not _user_has_baseline:
+        _scen_lines.append('    "baseline": {},')
     _subpop_lines = [
         "# Per-subpopulation parameter overrides per scenario (metapop only)",
         "# Format: {scenario_name: [override_dict_or_None, ...]} indexed by subpop order",
@@ -593,7 +644,7 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
         _sp_list = _scen_tuple[2] if len(_scen_tuple) > 2 else None
         _dm = _scen_tuple[4] if len(_scen_tuple) > 4 else None
         _dm_sp = _scen_tuple[5] if len(_scen_tuple) > 5 else None
-        if _ov and _sn != "baseline":
+        if _ov:
             _inner = ", ".join(f'"{_k}": {repr(_v)}' for _k, _v in _ov.items())
             _scen_lines.append(f"    {repr(_sn)}: {{{_inner}}},")
         if _sp_list and any(_r for _r in _sp_list):
@@ -639,12 +690,45 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
     ]
     for _scen_tuple in analysis_scenarios:
         _sn_d, _ov_d = _scen_tuple[0], _scen_tuple[1]
-        if not (_ov_d and _sn_d != "baseline"):
+        if not _ov_d:
             continue
         _dn = _scen_tuple[3] if len(_scen_tuple) > 3 else set()
         _designed_lines.append(f"    {repr(_sn_d)}: {repr(sorted(_dn))},")
     _designed_lines.append("}")
     _designed_block = "\n".join(_designed_lines)
+
+    # Ratio (override / catalog baseline, computed when the scenario was
+    # built) for each designed param, where known. Only relevant when
+    # UNCERTAINTY_SOURCE samples parameters: instead of pinning the designed
+    # param to the literal SCENARIOS value on every draw, _apply_pset
+    # multiplies the sampled draw's own value for that param by this ratio,
+    # so a scenario meant as "baseline x k" (or "baseline with this age
+    # profile scaled by k") stays "sampled draw x k" under posterior
+    # uncertainty instead of collapsing every draw to one fixed number. A
+    # designed param absent here (or here with no ratio available -- e.g. a
+    # zero catalog baseline) falls back to the old pin-to-literal-value
+    # behavior.
+    _ratios_lines = [
+        "# Ratio (override / catalog baseline) for designed params, where known:",
+        "# {scenario_name: {param: ratio_or_nested_list}}.",
+        "#",
+        "# Only relevant when UNCERTAINTY_SOURCE samples parameters. A designed",
+        "# param listed here has the sampled draw's own value scaled by this ratio",
+        "# instead of being pinned to the literal value in SCENARIOS -- so the",
+        "# scenario's intended scaling survives parameter uncertainty. A designed",
+        "# param NOT listed here (or added by hand) falls back to being pinned to",
+        "# the literal SCENARIOS value on every draw.",
+        "DESIGNED_PARAM_RATIOS = {",
+    ]
+    for _scen_tuple in analysis_scenarios:
+        _sn_r, _ov_r = _scen_tuple[0], _scen_tuple[1]
+        if not _ov_r:
+            continue
+        _rn = _scen_tuple[6] if len(_scen_tuple) > 6 else {}
+        if _rn:
+            _ratios_lines.append(f"    {repr(_sn_r)}: {repr(_rn)},")
+    _ratios_lines.append("}")
+    _ratios_block = "\n".join(_ratios_lines)
 
     # Metapopulation context. The exported script reads the metapop input folder
     # (metapop_config.json, per-subpop schedule CSVs / initial conditions, travel
@@ -690,6 +774,8 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
         "# <<<SUBPOP_OVERRIDES_BLOCK>>>", _subpop_block,
     ).replace(
         "# <<<DESIGNED_PARAMS_BLOCK>>>", _designed_block,
+    ).replace(
+        "# <<<DESIGNED_PARAM_RATIOS_BLOCK>>>", _ratios_block,
     ).replace(
         "# <<<DOSE_MULTIPLIER_BLOCK>>>", _dose_mult_block,
     ).replace(

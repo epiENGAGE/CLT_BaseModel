@@ -457,3 +457,32 @@ def extract_history(metapop, comps, tvs=None):
                 return _raw.sum(axis=(1, 2))
             _out[_tv] = sum(_daily_tv_sum(_sp) for _sp in _candidates)
     return _out
+
+
+def extract_history_full(metapop, comps, tvs=None):
+    """Most granular analog of `extract_history`: no summing over subpop,
+    age group, or risk group at all -- just daily-aggregated transition-
+    variable history (see `extract_history`'s comment on why sub-timesteps
+    need collapsing first) alongside compartment history, each kept as a
+    raw (day, age_group, risk_group) array per subpop. Returns
+    `{comp_or_tv_name: {subpop_name: (day, age_group, risk_group) array}}`.
+    Callers that want population totals or an age-only breakdown should sum
+    the returned arrays themselves (over subpops and/or the risk-group axis)
+    rather than calling `extract_history`/`extract_history_by_age` instead --
+    this is the one function that doesn't throw any axis away."""
+    _sps = metapop.subpop_models
+    _out = {}
+    for _c in comps:
+        _out[_c] = {_name: np.array(_sp.compartments[_c].history_vals_list) for _name, _sp in _sps.items()}
+    for _tv in (tvs or []):
+        _out[_tv] = {}
+        for _name, _sp in _sps.items():
+            if _tv not in _sp.transition_variables:
+                continue
+            _raw = np.array(_sp.transition_variables[_tv].history_vals_list)
+            _ts = int(getattr(_sp.simulation_settings, "timesteps_per_day", 1) or 1)
+            _T = _raw.shape[0]
+            if _ts > 1 and _T > 0 and _T % _ts == 0:
+                _raw = _raw.reshape(_T // _ts, _ts, *_raw.shape[1:]).sum(axis=1)
+            _out[_tv][_name] = _raw
+    return _out

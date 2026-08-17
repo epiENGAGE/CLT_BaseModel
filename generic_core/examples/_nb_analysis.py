@@ -1280,6 +1280,25 @@ def _analysis_define_scenarios(
     # vectors indexed by subpop, overriding `dose_multiplier` for subpops set
     # independently. Both only ever set in the Scenario sub-tab (Sensitivity
     # sweeps a param, not the dose schedule).
+    def _designed_ratio(_pname, _override_val):
+        # Ratio of a designed override to the catalog baseline, elementwise.
+        # Lets a sampled posterior draw be scaled by the same factor the
+        # scenario applied, instead of the draw's value for that param being
+        # discarded in favor of the pinned override (see _apply_pset below
+        # and in _nb_export.py). None if the baseline has a zero entry
+        # (ratio undefined there), which falls back to pinning the absolute
+        # override -- the pre-ratio behavior.
+        _base = ANALYSIS_SCALAR_PARAMS.get(_pname, ANALYSIS_ARRAY_PARAMS.get(_pname))
+        if _base is None:
+            return None
+        if isinstance(_base, list):
+            _b = np.asarray(_base, dtype=float)
+            if np.any(_b == 0):
+                return None
+            return (np.asarray(_override_val, dtype=float) / _b).tolist()
+        _b = float(_base)
+        return (float(_override_val) / _b) if _b != 0 else None
+
     analysis_scenarios = []
     _dose_mult_active = analysis_dose_mult_enabled and analysis_dose_mult_toggle.value
     _dose_mult_per_sp_active = bool(
@@ -1301,7 +1320,7 @@ def _analysis_define_scenarios(
             # an EMPTY designed set — nothing is shielded, so fitted/sampled
             # parameter sets apply in full (see _apply_pset in _run_analysis).
             analysis_scenarios.append((
-                "baseline", {**ANALYSIS_SCALAR_PARAMS, **ANALYSIS_ARRAY_PARAMS}, None, set(), None, None,
+                "baseline", {**ANALYSIS_SCALAR_PARAMS, **ANALYSIS_ARRAY_PARAMS}, None, set(), None, None, {},
             ))
         elif _is_array:
             _pname = analysis_array_param_sel.value
@@ -1321,7 +1340,7 @@ def _analysis_define_scenarios(
                                 _sp_scale = float(_sp_vals[_sp_idx][_i])
                                 _sp_ov[_sp] = {_pname: (_base_arr * _sp_scale).tolist()}
                     _per_subpop = _make_per_subpop_list(analysis_sp_names, _sp_ov)
-                analysis_scenarios.append((f"{_pname} ×{_v:.3g}", _global_ov, _per_subpop, {_pname}, None, None))
+                analysis_scenarios.append((f"{_pname} ×{_v:.3g}", _global_ov, _per_subpop, {_pname}, None, None, {_pname: float(_v)}))
         else:
             _pname = analysis_scalar_param_sel.value
             for _i, _v in enumerate(list(dict.fromkeys(analysis_sens_sliders.value))):
@@ -1338,18 +1357,24 @@ def _analysis_define_scenarios(
                             if _sp_idx < len(_sp_vals) and _i < len(_sp_vals[_sp_idx]):
                                 _sp_ov[_sp] = {_pname: float(_sp_vals[_sp_idx][_i])}
                     _per_subpop = _make_per_subpop_list(analysis_sp_names, _sp_ov)
-                analysis_scenarios.append((f"{_pname}={_v:.4g}", _global_ov, _per_subpop, {_pname}, None, None))
+                _ratio = _designed_ratio(_pname, _v)
+                _ratios = {_pname: _ratio} if _ratio is not None else {}
+                analysis_scenarios.append((f"{_pname}={_v:.4g}", _global_ov, _per_subpop, {_pname}, None, None, _ratios))
     else:
         _n = int(analysis_n_scenarios.value)
         for j in range(_n):
             _name = analysis_scenario_names.value[j].strip() or f"Scenario {j + 1}"
             _overrides = {}
             _designed = set()
+            _ratios = {}
             for _i, _pn in enumerate(_scalar_names):
                 _val = float(analysis_scenario_scalar_inputs.value[_i][j])
                 _overrides[_pn] = _val
-                if _val != float(ANALYSIS_SCALAR_PARAMS[_pn]):
+                _base_val = float(ANALYSIS_SCALAR_PARAMS[_pn])
+                if _val != _base_val:
                     _designed.add(_pn)
+                    if _base_val != 0:
+                        _ratios[_pn] = _val / _base_val
             for _k, _pn in enumerate(_array_names):
                 _base = np.asarray(ANALYSIS_ARRAY_PARAMS[_pn])
                 _by_age = (
@@ -1364,11 +1389,15 @@ def _analysis_define_scenarios(
                     _overrides[_pn] = (_base * _age_scales[:, None]).tolist()
                     if np.any(_age_scales != 1.0):
                         _designed.add(_pn)
+                        _ratios[_pn] = np.broadcast_to(
+                            _age_scales[:, None], _base.shape
+                        ).tolist()
                 else:
                     _scale = float(analysis_scenario_array_scales.value[_k][j])
                     _overrides[_pn] = (_base * _scale).tolist()
                     if _scale != 1.0:
                         _designed.add(_pn)
+                        _ratios[_pn] = _scale
             _per_subpop = None
             if _use_subpop:
                 _sp_ov_by_name = {}
@@ -1411,7 +1440,7 @@ def _analysis_define_scenarios(
                         _sp_vecs.append(_sp_vec if any(_v != 1.0 for _v in _sp_vec) else None)
                     if any(_v is not None for _v in _sp_vecs):
                         _dose_mult_per_subpop = _sp_vecs
-            analysis_scenarios.append((_name, _overrides, _per_subpop, _designed, _dose_mult, _dose_mult_per_subpop))
+            analysis_scenarios.append((_name, _overrides, _per_subpop, _designed, _dose_mult, _dose_mult_per_subpop, _ratios))
 
     return (analysis_scenarios,)
 
@@ -1648,20 +1677,32 @@ def _run_analysis(
             )
         return _sched_cache[_pset_idx]
 
-    def _apply_pset(_overrides, _pset_idx, _designed):
+    def _apply_pset(_overrides, _pset_idx, _designed, _ratios=None):
         # Layer a sampled param set under the scenario's overrides: the set
         # supplies every fitted param the design did not deliberately set, so
         # the ensemble carries parameter uncertainty without undoing the
         # sensitivity sweep or the edited scenario cells. seed_scale_*/m_dlog_*
         # /phi are handled elsewhere (_get_ci / _get_schedule_dfs / not a model
         # param), so they never reach param_overrides.
+        # A designed param with a known ratio (override / catalog baseline)
+        # instead has that ratio applied to the sampled draw's own value, so
+        # the scenario's scaling factor carries through posterior uncertainty
+        # rather than pinning one absolute value across every draw.
         if _pset_idx is None:
             return _overrides
         _ov = dict(_overrides or {})
+        _ratios = _ratios or {}
         for _pk, _pv in _psets[_pset_idx].items():
             if _pk == "phi" or _pk.startswith("m_dlog_") or _pk.startswith("seed_scale_"):
                 continue
             if _pk in _designed:
+                _ratio = _ratios.get(_pk)
+                if _ratio is None:
+                    continue
+                if isinstance(_ratio, list):
+                    _ov[_pk] = (np.asarray(_ratio, dtype=float) * np.asarray(_pv, dtype=float)).tolist()
+                else:
+                    _ov[_pk] = float(_ratio) * float(_pv)
                 continue
             _ov[_pk] = list(_pv) if isinstance(_pv, (list, tuple)) else float(_pv)
         return _ov
@@ -1698,12 +1739,13 @@ def _run_analysis(
                 _designed = _scen_tuple[3] if len(_scen_tuple) > 3 else set()
                 _dose_mult = _scen_tuple[4] if len(_scen_tuple) > 4 else None
                 _dose_mult_per_subpop = _scen_tuple[5] if len(_scen_tuple) > 5 else None
+                _ratios = _scen_tuple[6] if len(_scen_tuple) > 6 else {}
                 _reps_hists = []
                 # Seed by position in the run schedule, not by the rep index
                 # within a param set, so every run gets a distinct RNG stream
                 # once replicates are spread across sets.
                 for _run_i, (_pset_idx, _rep) in enumerate(_run_schedule):
-                    _run_ov = _apply_pset(_overrides, _pset_idx, _designed)
+                    _run_ov = _apply_pset(_overrides, _pset_idx, _designed, _ratios)
                     _run_sched = _get_schedule_dfs(_pset_idx)
                     if not is_metapop:
                         _m, _, _ = make_single_pop_metapop(
