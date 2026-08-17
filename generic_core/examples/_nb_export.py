@@ -46,13 +46,16 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
 
     import sys
     import io
+    import os
     import json
     import copy
+    import itertools
     import numpy as np
     import pandas as pd
     import sqlite3
     from pathlib import Path
     from types import SimpleNamespace
+    from concurrent.futures import ProcessPoolExecutor, as_completed
 
     # ---- Configurable ----
     MODEL_CONFIG_FILE = "model_config.json"
@@ -78,6 +81,11 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
     # Base RNG seed; each run uses default_rng(SEED_BASE + run_index), matching
     # the notebook's Analysis tab.
     SEED_BASE = 0
+    # Scenario x replicate runs are independent, so they run in a process pool
+    # (real OS processes -- CPU-bound numpy/Python simulation work would not
+    # benefit from threads because of the GIL). None = os.cpu_count(); set to 1
+    # to run serially (e.g. for easier debugging/tracebacks).
+    NUM_WORKERS = None
 
     # Where the spread between replicates comes from (mirrors the Analysis tab's
     # "Uncertainty source" control):
@@ -490,13 +498,23 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
             RUN_SCHEDULE = [_i for _i in range(_k) for _ in range(_base_r)]
             if _extra_r:
                 RUN_SCHEDULE += [int(_i) for _i in _rng_sched.choice(_k, size=_extra_r, replace=False)]
-        print(
-            f"Parameter uncertainty: {_k} set(s) sampled from {len(PARAM_SETS)} accepted, "
-            f"{len(RUN_SCHEDULE)} run(s) per scenario"
-            + (" (deterministic transitions)" if _param_only else "")
-        )
+        if __name__ == "__main__":
+            # This module-level block runs again on import in every worker
+            # process (spawn re-imports the script as __main__; fork re-runs
+            # it too under some pool implementations) since RUN_PARAM_SETS/
+            # RUN_SCHEDULE must exist there for _apply_pset. Only print once,
+            # in the parent.
+            print(
+                f"Parameter uncertainty: {_k} set(s) sampled from {len(PARAM_SETS)} accepted, "
+                f"{len(RUN_SCHEDULE)} run(s) per scenario"
+                + (" (deterministic transitions)" if _param_only else "")
+            )
     else:
-        if UNCERTAINTY_SOURCE in ("parameters", "parameters+transitions") and STOCHASTIC:
+        if (
+            __name__ == "__main__"
+            and UNCERTAINTY_SOURCE in ("parameters", "parameters+transitions")
+            and STOCHASTIC
+        ):
             _fallback = (
                 "a single deterministic run of the best parameter set"
                 if _param_only
@@ -541,110 +559,202 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
         return _ov, _scales, _incr
 
 
-    all_results = {}
-    for scenario_name, overrides in SCENARIOS.items():
-        print(f"Running scenario: {scenario_name}")
-        _sp_overrides = SUBPOP_PARAM_OVERRIDES.get(scenario_name)
-        # A scenario absent from DESIGNED_PARAMS was added by hand, so nothing
-        # says which of its params are deliberate — protect all of them rather
-        # than silently letting a sampled set overwrite the values the user
-        # just wrote. An explicit (possibly empty) list always wins.
-        if scenario_name in DESIGNED_PARAMS:
-            _designed = set(DESIGNED_PARAMS[scenario_name])
-        else:
-            _designed = set(overrides or {})
-        _dose_mult = DOSE_MULTIPLIER.get(scenario_name)
-        _dose_mult_per_subpop = DOSE_MULTIPLIER_PER_SUBPOP.get(scenario_name)
-        _ratios = DESIGNED_PARAM_RATIOS.get(scenario_name, {})
-        _reps_data = []
-        # Seed by position in the run schedule so every run gets a distinct RNG
-        # stream once replicates are spread across parameter sets.
-        for _rep, _pset_idx in enumerate(RUN_SCHEDULE):
-            _run_ov, _run_scales, _run_incr = _apply_pset(overrides, _pset_idx, _designed, _ratios)
-            _m = build_model(
-                config_dict, _run_ov, _rep, subpop_overrides=_sp_overrides,
-                seed_scales=_run_scales, tv_increments=_run_incr,
-                dose_mult=_dose_mult, dose_mult_per_subpop=_dose_mult_per_subpop,
-            )
-            _m.simulate_until_day(NUM_DAYS)
-            _sps = list(_m.subpop_models.values())
-            _comp_names = list(_sps[0].compartments.keys())
-            # extract_history sums over age/risk and subpops, and — critically —
-            # aggregates transition variables from per-sub-timestep to per-day.
-            # Transition history is saved once per sub-timestep, so summing it
-            # raw would give a series TIMESTEPS_PER_DAY x too long and each
-            # value TIMESTEPS_PER_DAY x too small.
-            _h = extract_history(_m, _comp_names, tvs=TRANSITION_VARS)
-            # Fully-resolved companion to _h -- same compartments/transitions,
-            # but per-subpop (day, age_group, risk_group) arrays instead of
-            # (day,) scalars summed over subpop/age/risk. Needed by anything
-            # that cares which subpop/age/risk group a flow happened in (e.g.
-            # per-age-group vaccination-impact tables); extract_history's own
-            # summed totals stay the fast path for the population aggregate.
-            _h_full = extract_history_full(_m, _comp_names, tvs=TRANSITION_VARS)
-            _kinds = {_k: ("transition" if _k in TRANSITION_VARS else "compartment") for _k in _h}
-            _reps_data.append((_h, _h_full, _kinds, _pset_idx))
-        all_results[scenario_name] = _reps_data
+    def _run_one(scenario_name, overrides, designed, dose_mult, dose_mult_per_subpop,
+                 ratios, sp_overrides, rep, pset_idx):
+        # One (scenario, replicate) unit of work -- everything a pool worker
+        # needs is passed in as plain, picklable arguments; module globals
+        # used inside (config_dict, NUM_DAYS, TRANSITION_VARS, RUN_PARAM_SETS
+        # via _apply_pset, ...) are rebuilt identically in every worker
+        # process when it re-imports this script, so they don't need to be
+        # passed explicitly.
+        _run_ov, _run_scales, _run_incr = _apply_pset(overrides, pset_idx, designed, ratios)
+        _m = build_model(
+            config_dict, _run_ov, rep, subpop_overrides=sp_overrides,
+            seed_scales=_run_scales, tv_increments=_run_incr,
+            dose_mult=dose_mult, dose_mult_per_subpop=dose_mult_per_subpop,
+        )
+        _m.simulate_until_day(NUM_DAYS)
+        _sps = list(_m.subpop_models.values())
+        _comp_names = list(_sps[0].compartments.keys())
+        # extract_history sums over age/risk and subpops, and — critically —
+        # aggregates transition variables from per-sub-timestep to per-day.
+        # Transition history is saved once per sub-timestep, so summing it
+        # raw would give a series TIMESTEPS_PER_DAY x too long and each
+        # value TIMESTEPS_PER_DAY x too small.
+        _h = extract_history(_m, _comp_names, tvs=TRANSITION_VARS)
+        # Fully-resolved companion to _h -- same compartments/transitions,
+        # but per-subpop (day, age_group, risk_group) arrays instead of
+        # (day,) scalars summed over subpop/age/risk. Needed by anything
+        # that cares which subpop/age/risk group a flow happened in (e.g.
+        # per-age-group vaccination-impact tables); extract_history's own
+        # summed totals stay the fast path for the population aggregate.
+        _h_full = extract_history_full(_m, _comp_names, tvs=TRANSITION_VARS)
+        _kinds = {_k: ("transition" if _k in TRANSITION_VARS else "compartment") for _k in _h}
+        return scenario_name, rep, pset_idx, _h, _h_full, _kinds
 
-    _db = OUTPUT_DIR / "results.db"
-    _con = sqlite3.connect(_db)
-    _cur = _con.cursor()
-    # `compartment` keeps its name (so existing queries still work) but now holds
-    # transition-variable names too; `kind` distinguishes them. `param_set` is the
-    # index into the sampled parameter sets (NULL when parameter uncertainty is
-    # off), so replicates can be grouped by draw. A results.db from an older
-    # export lacks these columns, so fail loudly rather than silently dropping the
-    # new rows or corrupting the old table.
-    _existing = _cur.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='results'"
-    ).fetchone()
-    if _existing:
-        _cols = {_r[1] for _r in _cur.execute("PRAGMA table_info(results)")}
-        _missing = {"kind", "param_set"} - _cols
-        if _missing:
-            _con.close()
-            raise SystemExit(
-                f"{_db} was written by an older version of this script (missing "
-                f"column(s): {sorted(_missing)}). Delete or rename it and re-run."
-            )
-    _cur.execute(
-        "CREATE TABLE IF NOT EXISTS results "
-        "(scenario TEXT, rep INTEGER, param_set INTEGER, compartment TEXT, kind TEXT, "
-        "day INTEGER, value REAL)"
-    )
-    # Same shape as `results`, plus `subpop`/`age_group`/`risk_group` columns
-    # (age_group/risk_group are 0-based indices into NUM_AGE_GROUPS/
-    # NUM_RISK_GROUPS) -- kept as a separate table rather than adding
-    # nullable columns to `results`, so `results` alone still answers
-    # population-aggregate queries without a GROUP BY. Single-population,
-    # single-risk-group models (the common case) just get one subpop name
-    # and risk_group=0 throughout -- still queryable the same way, just with
-    # nothing to GROUP BY away.
-    _cur.execute(
-        "CREATE TABLE IF NOT EXISTS results_full "
-        "(scenario TEXT, rep INTEGER, param_set INTEGER, compartment TEXT, kind TEXT, "
-        "subpop TEXT, age_group INTEGER, risk_group INTEGER, day INTEGER, value REAL)"
-    )
-    for _scen, _reps_data in all_results.items():
-        for _ri, (_h, _h_full, _kinds, _psi) in enumerate(_reps_data):
-            for _c, _arr in _h.items():
-                _cur.executemany(
-                    "INSERT INTO results VALUES (?,?,?,?,?,?,?)",
-                    [(_scen, _ri, _psi, _c, _kinds[_c], _d + 1, float(_v))
-                     for _d, _v in enumerate(_arr)],
+
+    # ---- Everything below only runs in the parent process. ----
+    # Guarding it is required (not just tidy) on spawn-based multiprocessing
+    # (the default on macOS and Windows): each pool worker re-imports this
+    # file as __main__, so without this guard every worker would recursively
+    # try to build its own pool and re-run the whole scenario sweep. Under
+    # fork-based multiprocessing (Linux's default) it isn't strictly
+    # required, but keeping it makes the script behave identically on all
+    # three platforms.
+    if __name__ == "__main__":
+        _tasks = []
+        for scenario_name, overrides in SCENARIOS.items():
+            _sp_overrides = SUBPOP_PARAM_OVERRIDES.get(scenario_name)
+            # A scenario absent from DESIGNED_PARAMS was added by hand, so
+            # nothing says which of its params are deliberate — protect all
+            # of them rather than silently letting a sampled set overwrite
+            # the values the user just wrote. An explicit (possibly empty)
+            # list always wins.
+            if scenario_name in DESIGNED_PARAMS:
+                _designed = set(DESIGNED_PARAMS[scenario_name])
+            else:
+                _designed = set(overrides or {})
+            _dose_mult = DOSE_MULTIPLIER.get(scenario_name)
+            _dose_mult_per_subpop = DOSE_MULTIPLIER_PER_SUBPOP.get(scenario_name)
+            _ratios = DESIGNED_PARAM_RATIOS.get(scenario_name, {})
+            # Seed by position in the run schedule so every run gets a
+            # distinct RNG stream once replicates are spread across
+            # parameter sets.
+            for _rep, _pset_idx in enumerate(RUN_SCHEDULE):
+                _tasks.append((
+                    scenario_name, overrides, _designed, _dose_mult,
+                    _dose_mult_per_subpop, _ratios, _sp_overrides, _rep, _pset_idx,
+                ))
+
+        _n_workers = NUM_WORKERS or os.cpu_count() or 1
+        _n_workers = min(_n_workers, len(_tasks)) or 1
+        print(f"Running {len(_tasks)} simulation(s) across {_n_workers} worker process(es)")
+
+        all_results = {_scen: [] for _scen in SCENARIOS}
+        if _n_workers == 1:
+            # Serial fallback (NUM_WORKERS = 1) -- also handy for debugging,
+            # since a worker-process traceback is otherwise harder to inspect.
+            for _t in _tasks:
+                _scen, _rep, _psi, _h, _h_full, _kinds = _run_one(*_t)
+                all_results[_scen].append((_rep, _h, _h_full, _kinds, _psi))
+        else:
+            with ProcessPoolExecutor(max_workers=_n_workers) as _ex:
+                _futures = {_ex.submit(_run_one, *_t): _t for _t in _tasks}
+                for _fut in as_completed(_futures):
+                    _scen_name = _futures[_fut][0]
+                    _scen, _rep, _psi, _h, _h_full, _kinds = _fut.result()
+                    print(f"Finished scenario={_scen_name} rep={_rep}")
+                    all_results[_scen].append((_rep, _h, _h_full, _kinds, _psi))
+
+        # Pool completion order is nondeterministic; sort each scenario's
+        # replicates back into run-schedule order so the `rep` column
+        # written to results.db below matches what a serial run would have
+        # produced.
+        for _scen in all_results:
+            all_results[_scen] = [
+                (_h, _h_full, _kinds, _psi)
+                for (_rep, _h, _h_full, _kinds, _psi) in sorted(all_results[_scen], key=lambda _r: _r[0])
+            ]
+
+        _db = OUTPUT_DIR / "results.db"
+        _con = sqlite3.connect(_db)
+        # Unlike a from-scratch batch script, this results.db is appended to
+        # across export runs (see the column check below), so a full
+        # durability trade-off (synchronous=OFF) risks corrupting rows from
+        # earlier runs too, not just this one. WAL + synchronous=NORMAL is
+        # the standard safer middle ground -- it skips most of the per-write
+        # fsync cost (the dominant cost for stochastic runs with hundreds of
+        # replicates x days x age/risk groups) while staying safe against an
+        # application crash; only a concurrent OS crash/power loss could
+        # still corrupt data.
+        _con.execute("PRAGMA journal_mode = WAL")
+        _con.execute("PRAGMA synchronous = NORMAL")
+        _cur = _con.cursor()
+        # `compartment` keeps its name (so existing queries still work) but now holds
+        # transition-variable names too; `kind` distinguishes them. `param_set` is the
+        # index into the sampled parameter sets (NULL when parameter uncertainty is
+        # off), so replicates can be grouped by draw. A results.db from an older
+        # export lacks these columns, so fail loudly rather than silently dropping the
+        # new rows or corrupting the old table.
+        _existing = _cur.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='results'"
+        ).fetchone()
+        if _existing:
+            _cols = {_r[1] for _r in _cur.execute("PRAGMA table_info(results)")}
+            _missing = {"kind", "param_set"} - _cols
+            if _missing:
+                _con.close()
+                raise SystemExit(
+                    f"{_db} was written by an older version of this script (missing "
+                    f"column(s): {sorted(_missing)}). Delete or rename it and re-run."
                 )
-            for _c, _sp_map in _h_full.items():
-                for _spname, _arr_full in _sp_map.items():
+        _cur.execute(
+            "CREATE TABLE IF NOT EXISTS results "
+            "(scenario TEXT, rep INTEGER, param_set INTEGER, compartment TEXT, kind TEXT, "
+            "day INTEGER, value REAL)"
+        )
+        # Same shape as `results`, plus `subpop`/`age_group`/`risk_group` columns
+        # (age_group/risk_group are 0-based indices into NUM_AGE_GROUPS/
+        # NUM_RISK_GROUPS) -- kept as a separate table rather than adding
+        # nullable columns to `results`, so `results` alone still answers
+        # population-aggregate queries without a GROUP BY. Single-population,
+        # single-risk-group models (the common case) just get one subpop name
+        # and risk_group=0 throughout -- still queryable the same way, just with
+        # nothing to GROUP BY away.
+        _cur.execute(
+            "CREATE TABLE IF NOT EXISTS results_full "
+            "(scenario TEXT, rep INTEGER, param_set INTEGER, compartment TEXT, kind TEXT, "
+            "subpop TEXT, age_group INTEGER, risk_group INTEGER, day INTEGER, value REAL)"
+        )
+        print(f"Writing results for {len(all_results)} scenario(s) to {_db}")
+        for _si, (_scen, _reps_data) in enumerate(all_results.items(), start=1):
+            _n_reps = len(_reps_data)
+            for _ri, (_h, _h_full, _kinds, _psi) in enumerate(_reps_data):
+                for _c, _arr in _h.items():
                     _cur.executemany(
-                        "INSERT INTO results_full VALUES (?,?,?,?,?,?,?,?,?,?)",
-                        [(_scen, _ri, _psi, _c, _kinds[_c], _spname, _a, _r, _d + 1, float(_v))
-                         for _d, _day_slice in enumerate(_arr_full)
-                         for _a, _age_slice in enumerate(_day_slice)
-                         for _r, _v in enumerate(_age_slice)],
+                        "INSERT INTO results VALUES (?,?,?,?,?,?,?)",
+                        [(_scen, _ri, _psi, _c, _kinds[_c], _d + 1, float(_v))
+                         for _d, _v in enumerate(_arr)],
                     )
-    _con.commit()
-    _con.close()
-    print(f"Results saved to {_db}")
+                for _c, _sp_map in _h_full.items():
+                    for _spname, _arr_full in _sp_map.items():
+                        # Vectorized index construction (numpy) instead of a
+                        # triple-nested Python for-loop over day/age_group/
+                        # risk_group -- meaningfully faster once that product
+                        # runs into the hundreds of thousands of rows across
+                        # many stochastic replicates.
+                        _d_idx, _a_idx, _r_idx = np.indices(_arr_full.shape)
+                        _cur.executemany(
+                            "INSERT INTO results_full VALUES (?,?,?,?,?,?,?,?,?,?)",
+                            zip(
+                                itertools.repeat(_scen), itertools.repeat(_ri), itertools.repeat(_psi),
+                                itertools.repeat(_c), itertools.repeat(_kinds[_c]), itertools.repeat(_spname),
+                                _a_idx.ravel().tolist(), _r_idx.ravel().tolist(),
+                                (_d_idx.ravel() + 1).tolist(), _arr_full.ravel().astype(float).tolist(),
+                            ),
+                        )
+                # Progress within a scenario's replicates, so a long
+                # stochastic run (hundreds of reps) doesn't look stuck
+                # between per-scenario lines below.
+                if _n_reps > 20 and (_ri + 1) % 20 == 0:
+                    print(f"  [{_si}/{len(all_results)}] {_scen}: wrote {_ri + 1}/{_n_reps} replicate(s)")
+            print(f"[{_si}/{len(all_results)}] {_scen}: wrote {_n_reps} replicate(s) to {_db}")
+        # Downstream table-building scripts filter on (scenario, compartment)
+        # for every table they build, often re-querying the same scenario
+        # several times -- without this index each of those is a full
+        # sequential scan, which gets very slow once replicates/parameter
+        # sets push `results_full` into the hundreds of millions of rows.
+        _cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_results_full_scenario_compartment "
+            "ON results_full (scenario, compartment)"
+        )
+        _cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_results_scenario_compartment "
+            "ON results (scenario, compartment)"
+        )
+        _con.commit()
+        _con.close()
+        print(f"Results saved to {_db}")
 """
 
     _scen_lines = [

@@ -136,6 +136,22 @@ class ResultsDB:
                 "subpop/risk-group history was saved alongside the population-summed "
                 "totals). Re-run run_simulations_MA_vax.py to regenerate results.db."
             )
+        # results_full can be hundreds of millions of rows for a parameter-
+        # uncertainty run; without an index every (scenario, compartment)
+        # lookup is a full table scan. Older results.db files predate the
+        # index run_simulations_MA_vax*.py now creates, so add it here too
+        # (idempotent -- a no-op once it already exists).
+        _idx = {r[0] for r in self._con.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+        if "idx_results_full_scenario_compartment" not in _idx:
+            self._con.execute(
+                "CREATE INDEX idx_results_full_scenario_compartment ON results_full (scenario, compartment)"
+            )
+            self._con.commit()
+        # The table builders re-query the same scenario's arrays several
+        # times across different tables (e.g. "baseline" is used by S.A.1,
+        # S.A.2, S.A.3, S.A.5, S.A.6, and VAX_CHECK) -- cache per (scenario,
+        # names) so each combination only hits the DB once.
+        self._cache: dict[str, dict[str, np.ndarray]] = {}
 
     def scenarios_present(self) -> set[str]:
         return {r[0] for r in self._con.execute("SELECT DISTINCT scenario FROM results_full")}
@@ -146,37 +162,43 @@ class ResultsDB:
         ).fetchone()[0]
 
     def arrays(self, scenario: str, names: list[str]) -> dict[str, np.ndarray]:
-        placeholders = ",".join("?" * len(names))
-        df = pd.read_sql_query(
-            f"SELECT rep, compartment, age_group, day, SUM(value) AS value FROM results_full "
-            f"WHERE scenario = ? AND compartment IN ({placeholders}) "
-            f"GROUP BY rep, compartment, age_group, day",
-            self._con, params=[scenario, *names],
-        )
-        if df.empty:
-            raise ValueError(
-                f"No rows for scenario {scenario!r} in results_full -- check it's "
-                "in run_simulations_MA_vax.py's SCENARIOS and the script has been re-run."
+        # Table builders re-request the same (scenario, compartment) pairs
+        # across different tables (e.g. "baseline" x "I_to_H" is used by
+        # S.A.1, S.A.2, S.A.3, S.A.5 and S.A.6) -- serve those from cache and
+        # only query the DB for names not already fetched for this scenario.
+        cached = self._cache.setdefault(scenario, {})
+        missing = [n for n in names if n not in cached]
+        if missing:
+            placeholders = ",".join("?" * len(missing))
+            df = pd.read_sql_query(
+                f"SELECT rep, compartment, age_group, day, SUM(value) AS value FROM results_full "
+                f"WHERE scenario = ? AND compartment IN ({placeholders}) "
+                f"GROUP BY rep, compartment, age_group, day",
+                self._con, params=[scenario, *missing],
             )
-        reps = sorted(df["rep"].unique().tolist())
-        days = sorted(df["day"].unique().tolist())
-        n_age = len(AGE_GROUPS)
-        rep_pos = {r: i for i, r in enumerate(reps)}
-        day_pos = {d: i for i, d in enumerate(days)}
-        out = {}
-        for name in names:
-            sub = df[df["compartment"] == name]
-            if sub.empty:
+            if df.empty:
                 raise ValueError(
-                    f"Scenario {scenario!r} has no {name!r} rows -- check TRANSITION_VARS "
-                    "in run_simulations_MA_vax.py includes it."
+                    f"No rows for scenario {scenario!r} in results_full -- check it's "
+                    "in run_simulations_MA_vax.py's SCENARIOS and the script has been re-run."
                 )
-            arr = np.zeros((len(reps), len(days), n_age))
-            arr[sub["rep"].map(rep_pos).to_numpy(),
-                sub["day"].map(day_pos).to_numpy(),
-                sub["age_group"].to_numpy()] = sub["value"].to_numpy()
-            out[name] = arr
-        return out
+            reps = sorted(df["rep"].unique().tolist())
+            days = sorted(df["day"].unique().tolist())
+            n_age = len(AGE_GROUPS)
+            rep_pos = {r: i for i, r in enumerate(reps)}
+            day_pos = {d: i for i, d in enumerate(days)}
+            for name in missing:
+                sub = df[df["compartment"] == name]
+                if sub.empty:
+                    raise ValueError(
+                        f"Scenario {scenario!r} has no {name!r} rows -- check TRANSITION_VARS "
+                        "in run_simulations_MA_vax.py includes it."
+                    )
+                arr = np.zeros((len(reps), len(days), n_age))
+                arr[sub["rep"].map(rep_pos).to_numpy(),
+                    sub["day"].map(day_pos).to_numpy(),
+                    sub["age_group"].to_numpy()] = sub["value"].to_numpy()
+                cached[name] = arr
+        return {name: cached[name] for name in names}
 
     def close(self):
         self._con.close()

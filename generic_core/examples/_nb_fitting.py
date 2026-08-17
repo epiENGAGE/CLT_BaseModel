@@ -1079,11 +1079,19 @@ def _fitting_display(
     )
     _BURN_TIP = (
         "Initial MCMC steps discarded before collecting the posterior, giving\n"
-        "the chains time to reach the stationary distribution. Must be < steps."
+        "the chains time to reach the stationary distribution. Must be < steps.\n"
+        "Recommended: set from the chain's integrated autocorrelation time\n"
+        "(emcee.get_autocorr_time) once it's run — burn-in = 3x the max\n"
+        "per-parameter autocorrelation time, capped at half the chain length.\n"
+        "This field is a fixed value, not auto-computed; check the loss curve\n"
+        "has plateaued before your chosen burn-in if unsure."
     )
     _THIN_TIP = (
         "Keep every k-th post-burn-in step. Reduces autocorrelation between\n"
-        "retained draws and shrinks the stored ensemble."
+        "retained draws and shrinks the stored ensemble.\n"
+        "Recommended: 0.5x the minimum per-parameter integrated autocorrelation\n"
+        "time (emcee.get_autocorr_time) across the chain. This field is a\n"
+        "fixed value, not auto-computed from the chain."
     )
     _MCMC_ITER_TIP = (
         "MCMC steps per walker. Total forward simulations ≈ walkers × steps.\n"

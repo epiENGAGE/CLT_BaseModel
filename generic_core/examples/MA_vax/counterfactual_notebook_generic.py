@@ -1,5 +1,5 @@
 """
-  marimo run generic_core/examples/run_sim_test_MA_vax/counterfactual_notebook_generic.py
+  marimo run generic_core/examples/MA_vax/counterfactual_notebook_generic.py
 """
 
 
@@ -63,7 +63,7 @@ def _(mo):
     computed by
 
     ```
-    python generic_core/examples/run_sim_test_MA_vax/run_counterfactual_tables_generic.py --n-reps 1000
+    python generic_core/examples/MA_vax/run_counterfactual_tables_generic.py --n-reps 1000
     ```
 
     Point it at that run's output folder below. Re-running the CLI script
@@ -85,8 +85,8 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     results_folder = mo.ui.text(
-        value="generic_core/examples/run_sim_test_MA_vax/counterfactual_tables_det",
-        placeholder="generic_core/examples/run_sim_test_MA_vax/counterfactual_tables_det",
+        value="generic_core/examples/MA_vax/counterfactual_tables_from_db",
+        placeholder="generic_core/examples/MA_vax/counterfactual_tables_from_db",
         label="Results folder (from run_counterfactual_tables_generic.py)",
         full_width=True,
     )

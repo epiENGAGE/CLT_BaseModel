@@ -1,8 +1,8 @@
 {
   "source": "run_simulations_MA_vax.py -> results.db (results_by_age table)",
-  "db": "/Users/rfp437/Work/CityLevelTransmission/CLT_BaseModel/generic_core/examples/MA_vax/simulation_output/results.db",
+  "db": "/Users/rfp437/Work/CityLevelTransmission/CLT_BaseModel/generic_core/examples/MA_vax/simulation_output_deterministic/results.db",
   "model_config_file": "model_config.json",
   "fitted_params_file": "fitted_params.json",
   "n_reps": 1,
-  "generated_at": "2026-08-17T19:27:42.145116+00:00"
+  "generated_at": "2026-08-17T19:35:17.491934+00:00"
 }
