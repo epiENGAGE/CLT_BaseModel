@@ -2212,13 +2212,24 @@ def _bayesian_setup(
 
     def _sdfs_with_tvm(tvm_df):
         base = schedule_dfs
-        return SimpleNamespace(
+        out = SimpleNamespace(
             absolute_humidity_df=getattr(base, "absolute_humidity_df", None) if base else None,
             school_work_calendar_df=getattr(base, "school_work_calendar_df", None) if base else None,
             mobility_df=getattr(base, "mobility_df", None) if base else None,
             daily_vaccines_df=getattr(base, "daily_vaccines_df", None) if base else None,
             transmission_multiplier_df=tvm_df,
         )
+        # Carry over any additional scheduled_exact schedule DataFrames (a model
+        # may declare more than one scheduled_exact schedule, each backed by its
+        # own df_attribute). Rebuilding from a fixed whitelist above would
+        # otherwise silently drop them, so those schedules would fall back to
+        # flat all-zero values for the whole fit and their transitions would
+        # move nobody.
+        if base is not None:
+            for _attr, _val in vars(base).items():
+                if not hasattr(out, _attr) and (_attr.endswith("_df") or _attr == "extra_scheduled_dfs"):
+                    setattr(out, _attr, _val)
+        return out
 
     # ── build-once + reset fast path ──────────────────────────────────────────
     # Rebuilding the model from config every eval is ~40% of per-eval cost. When

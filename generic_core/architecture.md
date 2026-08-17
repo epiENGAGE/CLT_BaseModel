@@ -13,6 +13,7 @@ generic_core/
 ├── plan.md                  ← overall goals and approach
 ├── architecture.md          ← this file
 ├── tasks.md                 ← implementation phases
+├── limitations.md           ← known constraints: by-design and not-yet-built
 │
 ├── rate_templates.py        ← RateTemplate ABC + all concrete rate classes
 ├── metric_templates.py      ← MetricTemplate ABC + epi metric update classes

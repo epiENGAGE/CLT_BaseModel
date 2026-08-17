@@ -511,7 +511,7 @@ def _transition_count_ui(mo, loaded_config):
 
 
 @app.cell
-def _transition_forms_ui(compartments, loaded_config, mo):
+def _transition_forms_ui(compartments, loaded_config, mo, slugify_schedule_name):
     _max_t = 12
     _comps = compartments if compartments else ["?"]
     _templates = [
@@ -583,6 +583,55 @@ def _transition_forms_ui(compartments, loaded_config, mo):
         mo.ui.text(
             value=_rcget(_i, "schedule", "vaccinated_transfer_schedule"),
             label="Schedule name",
+        )
+        for _i in range(_max_t)
+    ])
+    # Per-transition compartment-reset date (scheduled_exact only). Each
+    # distinct schedule name gets its own reset-date param
+    # (f"{slug}_compartment_reset_date_mm_dd"), sourced from this row's own
+    # widget -- when two rows share a schedule name, only the first row's
+    # value is used (see _build_config). The default-named schedule
+    # ("vaccinated_transfer_schedule") instead keeps using the single shared
+    # vaccinated_compartment_reset_date_input control for backward
+    # compatibility with existing saved configs.
+    def _reset_date_default(i):
+        _param_name = _rcget(i, "compartment_reset_date_mm_dd_param", None)
+        if not _param_name:
+            return ""
+        return str(loaded_config.get("params", {}).get(_param_name, "") or "")
+
+    t_reset_date = mo.ui.array([
+        mo.ui.text(
+            value=_reset_date_default(_i),
+            placeholder="07_30",
+            label="Compartment reset date MM_DD (blank to use all history)",
+        )
+        for _i in range(_max_t)
+    ])
+
+    # Data-source CSV path for scheduled_exact schedules other than the
+    # default-named "vaccinated_transfer_schedule" (which uses the existing
+    # shared vax_path/vax_mode constant-or-CSV widgets in Step 4 for backward
+    # compatibility). marimo widget arrays must be sized once, so this is
+    # sized to _max_t and keyed by each transition row's own index; when
+    # multiple rows share a schedule name only the first row's value is used
+    # (see scheduled_transfer_schedule_names / _build_config). Only CSV-mode
+    # is supported here for these additional schedules -- there is no
+    # constant-value UI for them (unlike the default schedule).
+    def _extra_schedule_csv_default(i):
+        _name = (_rcget(i, "schedule", "") or "").strip()
+        if not _name or _name == "vaccinated_transfer_schedule":
+            return ""
+        _slug = slugify_schedule_name(_name)
+        return (loaded_config.get("input_files", {}) or {}).get(
+            f"{_slug}_schedule_csv", ""
+        )
+
+    t_extra_schedule_csv_path = mo.ui.array([
+        mo.ui.text(
+            value=_extra_schedule_csv_default(_i),
+            placeholder="antiviral_schedule.csv",
+            label="Schedule CSV (filename)",
         )
         for _i in range(_max_t)
     ])
@@ -694,7 +743,8 @@ def _transition_forms_ui(compartments, loaded_config, mo):
 
     return (
         t_name, t_origin, t_dest, t_template,
-        t_param, t_schedule_name, t_factors, t_complements,
+        t_param, t_schedule_name, t_reset_date, t_extra_schedule_csv_path,
+        t_factors, t_complements,
         t_base_rate, t_proportion, t_is_complement, t_inf_reduce, t_vax_reduce,
         t_beta, t_rel_sus, t_infectious, t_use_humidity, t_humidity_impact,
         t_use_foi_immunity, t_immobile,
@@ -707,7 +757,8 @@ def _transition_show(
     main_tab,
     n_transitions,
     t_name, t_origin, t_dest, t_template,
-    t_param, t_schedule_name, t_factors, t_complements,
+    t_param, t_schedule_name, t_reset_date, t_extra_schedule_csv_path,
+    t_factors, t_complements,
     t_base_rate, t_proportion, t_is_complement, t_inf_reduce, t_vax_reduce,
     t_beta, t_rel_sus, t_infectious, t_use_humidity, t_humidity_impact,
     t_use_foi_immunity, t_immobile,
@@ -794,7 +845,7 @@ def _transition_show(
                 _foi_items.extend([t_inf_reduce[_i], t_vax_reduce[_i]])
             _rate_ui = mo.vstack(_foi_items)
         elif _template == "scheduled_exact":
-            _rate_ui = mo.vstack([
+            _sched_items = [
                 with_tip(
                     "Schedule name",
                     "Name of the schedule providing the exact daily count of\n"
@@ -804,11 +855,36 @@ def _transition_show(
                     "The count is rounded to the nearest integer and capped at\n"
                     "the origin compartment's current population -- this is a\n"
                     "deterministic, exact transfer, not a stochastic rate.\n\n"
-                    "Configure the underlying data source in Step 4 and the "
-                    "transfer delay in Step 5.",
+                    "Configure the underlying data source in Step 4 (default-named\n"
+                    "schedule) or below (any other schedule name) and the transfer\n"
+                    "delay in Step 5.",
                     t_schedule_name[_i],
                 ),
-            ])
+                with_tip(
+                    "Compartment reset date MM_DD",
+                    "Optional. Restricts this schedule's pre-simulation history\n"
+                    "replay to start on this MM_DD date each year, instead of\n"
+                    "using the schedule's full history. Blank = use all history.\n\n"
+                    "Each distinct schedule name gets its own reset-date param;\n"
+                    "when two transitions share a schedule name, only the first\n"
+                    "one's value here is used.",
+                    t_reset_date[_i],
+                ),
+            ]
+            if str(t_schedule_name.value[_i] or "").strip() not in ("", "vaccinated_transfer_schedule"):
+                _sched_items.append(with_tip(
+                    "Schedule CSV",
+                    "CSV filename (resolved against Step 4's shared input folder)\n"
+                    "providing this schedule's daily values -- columns: date,\n"
+                    "daily_vaccines (a JSON AxR array per row, despite the name --\n"
+                    "scheduled_exact isn't specific to vaccination).\n\n"
+                    "Only CSV-mode is available for schedules other than the\n"
+                    "default 'vaccinated_transfer_schedule'; when multiple\n"
+                    "transitions share this schedule name, only the first one's\n"
+                    "CSV path here is used.",
+                    t_extra_schedule_csv_path[_i],
+                ))
+            _rate_ui = mo.vstack(_sched_items)
         else:
             _foit_items = [
                 t_beta[_i],
@@ -885,7 +961,7 @@ def _transition_show(
 
 @app.cell
 def _template_requirements(
-    n_transitions, t_template, t_use_humidity, t_use_foi_immunity,
+    n_transitions, t_template, t_schedule_name, t_use_humidity, t_use_foi_immunity,
 ):
     _n = int(n_transitions.value)
     _uses_contact_matrix = False
@@ -893,6 +969,7 @@ def _template_requirements(
     _uses_mobility = False
     _requires_immunity_metrics = False
     _uses_scheduled_transfer = False
+    _scheduled_transfer_names = []
 
     for _i in range(_n):
         _template = t_template.value[_i]
@@ -909,15 +986,25 @@ def _template_requirements(
             _requires_immunity_metrics = _requires_immunity_metrics or bool(t_use_foi_immunity.value[_i])
         elif _template == "scheduled_exact":
             _uses_scheduled_transfer = True
+            _sched_name = (t_schedule_name.value[_i] or "").strip() or "vaccinated_transfer_schedule"
+            if _sched_name not in _scheduled_transfer_names:
+                _scheduled_transfer_names.append(_sched_name)
 
     uses_absolute_humidity = _uses_absolute_humidity
     uses_contact_matrix = _uses_contact_matrix
     uses_mobility = _uses_mobility
     requires_immunity_metrics = _requires_immunity_metrics
     uses_scheduled_transfer = _uses_scheduled_transfer
+    # Ordered list of distinct schedule names referenced by scheduled_exact
+    # transitions (dedup'd by name; first occurrence order). Downstream code
+    # (SCHEDULES section, vaccines data-source UI) uses this to emit/render
+    # one vaccine_schedule entry / data-source block per distinct schedule,
+    # instead of assuming there is exactly one.
+    scheduled_transfer_schedule_names = _scheduled_transfer_names
     return (
         uses_absolute_humidity, uses_contact_matrix, uses_mobility,
         requires_immunity_metrics, uses_scheduled_transfer,
+        scheduled_transfer_schedule_names,
     )
 
 
@@ -1390,7 +1477,9 @@ def _schedule_csv_show(
     mo, main_tab,
     num_age_groups, num_risk_groups,
     uses_absolute_humidity, uses_contact_matrix, uses_mobility, include_vax_immunity,
-    uses_scheduled_transfer,
+    uses_scheduled_transfer, scheduled_transfer_schedule_names,
+    n_transitions, t_template, t_schedule_name, t_extra_schedule_csv_path,
+    slugify_schedule_name,
     input_folder,
     ah_path,
     cal_mode, cal_path,
@@ -1737,6 +1826,56 @@ def _schedule_csv_show(
                     kind="warn",
                 ))
 
+    # Additional scheduled_exact schedules beyond the default-named one (CSV
+    # mode only -- see t_extra_schedule_csv_path). Each loaded df is collected
+    # into extra_scheduled_dfs, keyed by its df_attribute, for the model-build
+    # call and export bundling. This must stay ABOVE the section_card render
+    # below: mo.vstack(_parts) is built eagerly, so anything appended to
+    # _parts afterwards would never be displayed (silently swallowing this
+    # block's CSV error/success callouts).
+    _extra_scheduled_dfs = {}
+    if uses_scheduled_transfer:
+        _n = int(n_transitions.value)
+        _sched_first_row = {}
+        for _i in range(_n):
+            if t_template.value[_i] == "scheduled_exact":
+                _nm = (t_schedule_name.value[_i] or "").strip() or "vaccinated_transfer_schedule"
+                _sched_first_row.setdefault(_nm, _i)
+        for _sched_name in scheduled_transfer_schedule_names:
+            if _sched_name == "vaccinated_transfer_schedule":
+                continue
+            _first_i = _sched_first_row.get(_sched_name)
+            if _first_i is None:
+                continue
+            _csv_val = (t_extra_schedule_csv_path.value[_first_i] or "").strip()
+            _slug = slugify_schedule_name(_sched_name)
+            _attr = f"{_slug}_df"
+            if _csv_val:
+                _extra_df, _extra_err = load_csv_validated(
+                    resolve_input_path(input_folder.value, _csv_val),
+                    ["date", "daily_vaccines"],
+                )
+                if _extra_err:
+                    _parts.append(mo.callout(
+                        mo.md(f"**Schedule '{_sched_name}' CSV:** {_extra_err}"), kind="danger"
+                    ))
+                else:
+                    _parts.append(mo.callout(
+                        mo.md(f"Schedule '{_sched_name}' CSV: {len(_extra_df)} rows loaded."),
+                        kind="success",
+                    ))
+                    _extra_scheduled_dfs[_attr] = _extra_df
+            else:
+                _parts.append(mo.callout(
+                    mo.md(
+                        f"**Schedule '{_sched_name}' has no CSV set.** Provide a "
+                        f"filename in Step 2 (on that transition's row) — this "
+                        f"schedule will otherwise fall back to all-zero values, "
+                        f"so its `scheduled_exact` transition will move nobody."
+                    ),
+                    kind="warn",
+                ))
+
     if main_tab.value == "Model Builder":
         mo.output.append(section_card(
             step_header(4, "Schedules",
@@ -1755,6 +1894,7 @@ def _schedule_csv_show(
         total_contact_matrix=_total_contact_mat,
         school_contact_matrix=_school_contact_mat,
         work_contact_matrix=_work_contact_mat,
+        extra_scheduled_dfs=_extra_scheduled_dfs,
     )
     return (loaded_schedule_dfs,)
 
@@ -2262,7 +2402,8 @@ def _build_config(
     compartments,
     n_transitions,
     t_name, t_origin, t_dest, t_template,
-    t_param, t_schedule_name, t_factors, t_complements,
+    t_param, t_schedule_name, t_reset_date, t_extra_schedule_csv_path,
+    t_factors, t_complements,
     t_base_rate, t_proportion, t_is_complement, t_inf_reduce, t_vax_reduce,
     t_beta, t_rel_sus, t_infectious, t_use_humidity, t_humidity_impact,
     t_use_foi_immunity, t_immobile,
@@ -2275,7 +2416,8 @@ def _build_config(
     vax_transfer_delay_input,
     vaccinated_compartment_reset_date_input,
     uses_absolute_humidity, uses_contact_matrix, uses_mobility, requires_immunity_metrics,
-    uses_scheduled_transfer,
+    uses_scheduled_transfer, scheduled_transfer_schedule_names,
+    slugify_schedule_name,
     rel_inf_param_name,
     parse_csv_list,
     total_contact_input, school_contact_input, work_contact_input,
@@ -2334,6 +2476,36 @@ def _build_config(
         else:
             params_dict[_name] = float(param_scalar_inputs[_name].value)
 
+    # Per-schedule-name derived identifiers for scheduled_exact transitions.
+    # The default-named schedule keeps its historical fixed names (backward
+    # compat with existing saved configs/exports); any other schedule name
+    # gets slug-derived names instead. When multiple transitions share a
+    # schedule name, only the FIRST row (in transition order) supplies the
+    # reset-date/CSV-path values -- _sched_first_row records that row index.
+    def _sched_name_of(i):
+        return (t_schedule_name.value[i] or "").strip() or "vaccinated_transfer_schedule"
+
+    def _sched_df_attribute(name):
+        if name == "vaccinated_transfer_schedule":
+            return "daily_vaccines_df"
+        return f"{slugify_schedule_name(name)}_df"
+
+    def _sched_reset_date_param(name):
+        if name == "vaccinated_transfer_schedule":
+            return "vaccinated_compartment_reset_date_mm_dd"
+        return f"{slugify_schedule_name(name)}_compartment_reset_date_mm_dd"
+
+    def _sched_delay_param(name):
+        if name == "vaccinated_transfer_schedule":
+            return "vax_transfer_delay_days"
+        return f"{slugify_schedule_name(name)}_vax_transfer_delay_days"
+
+    _sched_first_row = {}
+    for _i in range(_n):
+        if t_template.value[_i] == "scheduled_exact":
+            _nm = _sched_name_of(_i)
+            _sched_first_row.setdefault(_nm, _i)
+
     # --- 2. TRANSITIONS ---
     _transitions = []
     _metapop_travel_config = {}
@@ -2379,14 +2551,29 @@ def _build_config(
                 if _vax_r:
                     _rate_config["vax_reduce_param"] = _vax_r
         elif _template == "scheduled_exact":
-            _rate_config = {
-                "schedule": t_schedule_name.value[_i].strip(),
-                "compartment_reset_date_mm_dd_param": "vaccinated_compartment_reset_date_mm_dd",
-            }
-            if vaccinated_compartment_reset_date_input.value.strip():
-                params_dict["vaccinated_compartment_reset_date_mm_dd"] = (
-                    vaccinated_compartment_reset_date_input.value.strip()
+            _sched_name = _sched_name_of(_i)
+            _rate_config = {"schedule": _sched_name}
+            if _sched_name == "vaccinated_transfer_schedule":
+                # Unchanged from before: this key is always present for the
+                # default-named schedule (byte-identical single-schedule
+                # output), with the referenced param only set when non-blank.
+                _rate_config["compartment_reset_date_mm_dd_param"] = (
+                    "vaccinated_compartment_reset_date_mm_dd"
                 )
+                if vaccinated_compartment_reset_date_input.value.strip():
+                    params_dict["vaccinated_compartment_reset_date_mm_dd"] = (
+                        vaccinated_compartment_reset_date_input.value.strip()
+                    )
+            else:
+                # Additional schedule: value comes from this schedule's first
+                # transition row; the key is only set when non-blank (omitting
+                # it means "use all history", per generic_model.py).
+                _first_i = _sched_first_row.get(_sched_name, _i)
+                _reset_val = (t_reset_date.value[_first_i] or "").strip()
+                if _reset_val:
+                    _reset_param = _sched_reset_date_param(_sched_name)
+                    _rate_config["compartment_reset_date_mm_dd_param"] = _reset_param
+                    params_dict[_reset_param] = _reset_val
         else:
             _travel_config = {
                 "infectious_compartments": _infectious_compartments_map(_i),
@@ -2453,6 +2640,33 @@ def _build_config(
         for _origin, _names in _outflows_by_origin.items()
         if len(_names) > 1
     ]
+
+    # Two or more scheduled_exact transitions leaving the SAME origin compete
+    # for that compartment's population, but each one computes its transfer
+    # against the origin's full current value independently and is clamped on
+    # its own. When their combined demand exceeds the origin, the toolkit
+    # scales all of its outflows down proportionally (population is still
+    # conserved, no compartment goes negative) and emits a runtime warning
+    # suggesting a transition group -- which the config parser explicitly
+    # rejects for scheduled_exact transitions. So warn here instead: the split
+    # between the competing schedules on a depleted origin is a proportional
+    # rescale, not each schedule's requested count.
+    _sched_exact_by_origin = {}
+    for _t in _transitions:
+        if _t["rate_template"] != "scheduled_exact" or not _t["origin"] or not _t["name"]:
+            continue
+        _sched_exact_by_origin.setdefault(_t["origin"], []).append(_t["name"])
+    for _origin, _names in _sched_exact_by_origin.items():
+        if len(_names) > 1:
+            _config_warnings.append(
+                f"Compartment '{_origin}' has {len(_names)} 'scheduled_exact' "
+                f"outflows ({', '.join(_names)}). They are computed independently "
+                f"against '{_origin}'’s full population, so on days their combined "
+                f"demand exceeds it the totals are scaled down proportionally to fit "
+                f"(population is conserved, but neither schedule moves the exact count "
+                f"it asked for). They cannot be placed in a transition group. Keep "
+                f"their combined daily proportions below 1.0 to avoid this."
+            )
 
     # --- 3. CONTACT MATRIX PARAMS ---
     if uses_contact_matrix:
@@ -2545,15 +2759,28 @@ def _build_config(
             },
         })
     if uses_scheduled_transfer:
-        _transfer_schedule_config = {"df_attribute": "daily_vaccines_df"}
-        if int(vax_transfer_delay_input.value) > 0:
-            params_dict["vax_transfer_delay_days"] = int(vax_transfer_delay_input.value)
-            _transfer_schedule_config["vax_protection_delay_days_param"] = "vax_transfer_delay_days"
-        _schedules.append({
-            "name": "vaccinated_transfer_schedule",
-            "schedule_template": "vaccine_schedule",
-            "schedule_config": _transfer_schedule_config,
-        })
+        # One vaccine_schedule entry per DISTINCT schedule name referenced by
+        # a scheduled_exact transition (scheduled_transfer_schedule_names is
+        # already deduped, in first-occurrence order) -- not just one hardcoded
+        # entry. The default-named schedule keeps exactly its historical
+        # df_attribute/delay-param names and single shared delay-days input,
+        # so single-schedule configs are unaffected; any other name gets
+        # slug-derived names and (since there is no per-schedule delay-days
+        # UI control yet) no transfer-delay param.
+        for _sched_name in scheduled_transfer_schedule_names:
+            _df_attr = _sched_df_attribute(_sched_name)
+            _transfer_schedule_config = {"df_attribute": _df_attr}
+            if _sched_name == "vaccinated_transfer_schedule":
+                if int(vax_transfer_delay_input.value) > 0:
+                    params_dict["vax_transfer_delay_days"] = int(vax_transfer_delay_input.value)
+                    _transfer_schedule_config["vax_protection_delay_days_param"] = (
+                        "vax_transfer_delay_days"
+                    )
+            _schedules.append({
+                "name": _sched_name,
+                "schedule_template": "vaccine_schedule",
+                "schedule_config": _transfer_schedule_config,
+            })
     if include_inf_immunity.value:
         params_dict.update({
             "inf_induced_saturation": float(inf_sat_input.value),
@@ -2605,6 +2832,21 @@ def _build_config(
         _input_files["mobility_csv"] = mob_path.value.strip()
     if (include_vax_immunity.value or uses_scheduled_transfer) and vax_mode.value == "csv" and vax_path.value.strip():
         _input_files["vaccines_csv"] = vax_path.value.strip()
+    if uses_scheduled_transfer:
+        # CSV bundling for any scheduled_exact schedule other than the
+        # default-named one -- keyed by its slug so the per-schedule
+        # data-source widgets (Step 2's t_extra_schedule_csv_path, indexed by
+        # each schedule's first transition row) can round-trip on reload.
+        for _sched_name in scheduled_transfer_schedule_names:
+            if _sched_name == "vaccinated_transfer_schedule":
+                continue
+            _first_i = _sched_first_row.get(_sched_name)
+            if _first_i is None:
+                continue
+            _csv_val = (t_extra_schedule_csv_path.value[_first_i] or "").strip()
+            if _csv_val:
+                _slug = slugify_schedule_name(_sched_name)
+                _input_files[f"{_slug}_schedule_csv"] = _csv_val
     if uses_contact_matrix and _A > 1:
         if total_contact_csv_path.value.strip():
             _input_files["total_contact_matrix_csv"] = total_contact_csv_path.value.strip()
@@ -2835,6 +3077,8 @@ def _run_sim(
     mo.stop(main_tab.value != "Model Builder", None)
     mo.stop(not run_button.value, mo.md(""))
 
+    from generic_core.model_factory import config_schedule_df_attributes as _config_schedule_df_attributes
+
     # Runs the preview simulation for Step 10. Structure of this cell:
     #   - run settings (stochastic/deterministic, reps, days, timesteps)
     #   - nested helper _build_schedules_input_for_subpop(...)
@@ -2873,6 +3117,7 @@ def _run_sim(
         mob_df_override=None,
         vax_df_override=None,
         daily_vaccines_value_override=None,
+        extra_scheduled_dfs_override=None,
     ):
         return build_notebook_schedules_input(
             start_date=start_real_date,
@@ -2891,6 +3136,8 @@ def _run_sim(
                 else loaded_schedule_dfs.mobility_df,
             daily_vaccines_df=vax_df_override if vax_df_override is not None
                 else loaded_schedule_dfs.daily_vaccines_df,
+            extra_scheduled_dfs=extra_scheduled_dfs_override if extra_scheduled_dfs_override is not None
+                else getattr(loaded_schedule_dfs, "extra_scheduled_dfs", None),
         )
 
     def _build_subpop(schedules_input, compartment_init, seed_offset, name="aggregate_pop", epi_metric_init=None, param_overrides=None):
@@ -2946,11 +3193,16 @@ def _run_sim(
                         )
                 except Exception:
                     pass
-        for _sched_attr, _col, _label in [
+        _shape_check_dfs = [
             ("mobility_df", "mobility_modifier", "mobility_modifier"),
             ("daily_vaccines_df", "daily_vaccines", "daily_vaccines"),
-        ]:
+        ]
+        for _extra_attr, _extra_df in (getattr(loaded_schedule_dfs, "extra_scheduled_dfs", {}) or {}).items():
+            _shape_check_dfs.append((_extra_attr, "daily_vaccines", _extra_attr))
+        for _sched_attr, _col, _label in _shape_check_dfs:
             _df = getattr(loaded_schedule_dfs, _sched_attr, None)
+            if _df is None:
+                _df = (getattr(loaded_schedule_dfs, "extra_scheduled_dfs", {}) or {}).get(_sched_attr)
             if _df is not None and _col in _df.columns:
                 try:
                     _arr = np.array(json.loads(_df[_col].iloc[0]))
@@ -3075,6 +3327,17 @@ def _run_sim(
             _shared_mob_df = pd.read_csv(_mob_shared_path)
             _shared_mob_df = _shared_mob_df.loc[:, ~_shared_mob_df.columns.str.match(r"^Unnamed")]
 
+        # Additional scheduled_exact schedules beyond the default-named one:
+        # per-subpop CSVs are expected at <df_attribute>_<subpop>.csv,
+        # mirroring the vaccines_<subpop>.csv convention.
+        _base_sched_attrs = {
+            "absolute_humidity_df", "school_work_calendar_df", "mobility_df",
+            "daily_vaccines_df", "transmission_multiplier_df",
+        }
+        _extra_sched_attrs = sorted(
+            _config_schedule_df_attributes(config_dict) - _base_sched_attrs
+        )
+
         def _run_metapop_once(seed_offset):
             _subpop_models = []
             _model_config_ref = None
@@ -3093,6 +3356,15 @@ def _run_sim(
                     _sp_vax_df = pd.read_csv(_sp_vax_path)
                     _sp_vax_df = _sp_vax_df.loc[:, ~_sp_vax_df.columns.str.match(r"^Unnamed")]
 
+                _sp_extra_dfs = {}
+                for _attr in _extra_sched_attrs:
+                    _sp_extra_path = _folder / f"{_attr}_{_sp_name}.csv"
+                    if _sp_extra_path.exists():
+                        _sp_extra_df = pd.read_csv(_sp_extra_path)
+                        _sp_extra_dfs[_attr] = _sp_extra_df.loc[
+                            :, ~_sp_extra_df.columns.str.match(r"^Unnamed")
+                        ]
+
                 _sched = _build_schedules_input_for_subpop(
                     ah_df_override=_shared_ah_df,
                     cal_df_override=_sp_cal_df,
@@ -3101,6 +3373,7 @@ def _run_sim(
                     daily_vaccines_value_override=config_dict.get(
                         "subpop_daily_vaccines", {}
                     ).get(_sp_name),
+                    extra_scheduled_dfs_override=_sp_extra_dfs or None,
                 )
 
                 # Initial conditions: the in-notebook Step 7 tables take precedence

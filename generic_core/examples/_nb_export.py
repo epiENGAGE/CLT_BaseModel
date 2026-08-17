@@ -133,7 +133,7 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
     from generic_core.generic_metapop import ConfigDrivenMetapopModel
     from generic_core.model_factory import (
         build_compartment_init, make_metapop_from_folder, extract_history,
-        extract_history_full, scale_dose_schedule_df,
+        extract_history_full, scale_dose_schedule_df, config_schedule_df_attributes,
     )
     from generic_core.fitting import (
         _scale_compartment_init, _inject_tv_transmission, _tv_knot_days,
@@ -278,13 +278,28 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
             return json.load(_f)
 
 
+    def _dose_mult_for(dose_mult, attr):
+        # A scenario's dose multiplier is either
+        #   - a per-age-group list  -> applied to EVERY vaccine_schedule, or
+        #   - a {df_attribute: per-age-group list} dict -> per-schedule, letting
+        #     two `scheduled_exact` schedules be scaled by different amounts
+        #     (a schedule absent from the dict is left unscaled).
+        # Both shapes are accepted so hand-edited scripts using the simple list
+        # form keep working.
+        if dose_mult is None:
+            return None
+        if isinstance(dose_mult, dict):
+            return dose_mult.get(attr)
+        return dose_mult
+
+
     def _build_schedules(start_date, num_days, tv_increments=None, dose_mult=None):
-        # dose_mult: per-age-group multiplier on the `scheduled_exact`
-        # transition's daily schedule (see scale_dose_schedule_df) -- e.g. 0 to
-        # zero out an age group for a no-dose / single-age-only scenario.
-        # Despite the "daily_vaccines" naming (fixed by the model config
-        # schema), this isn't vaccine-specific -- it scales whatever
-        # `scheduled_exact` represents (antiviral prophylaxis courses, etc.).
+        # dose_mult: per-age-group multiplier on the `vaccine_schedule`-template
+        # schedules (see scale_dose_schedule_df and _dose_mult_for above) -- e.g.
+        # 0 to zero out an age group for a no-dose / single-age-only scenario.
+        # Despite the "daily_vaccines" naming (fixed by the model config schema),
+        # this isn't vaccine-specific -- it scales whatever `scheduled_exact`
+        # represents (antiviral prophylaxis courses, etc.).
         _h = max(num_days + 14, 370)
         _dates = pd.date_range(start=start_date, periods=_h, freq="D").date
         _mob = json.dumps(np.ones((NUM_AGE_GROUPS, NUM_RISK_GROUPS)).tolist())
@@ -300,6 +315,21 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
         _tvm_df = _build_tvm_df(start_date, num_days, tv_increments)
         if _tvm_df is not None:
             _kwargs["transmission_multiplier_df"] = _tvm_df
+        # Any vaccine_schedule-template schedule other than the default-named
+        # "vaccinated_transfer_schedule"/"daily_vaccines" gets its df loaded (or
+        # falls back to an all-zero constant) and scaled by its OWN entry in
+        # dose_mult (see _dose_mult_for).
+        _extra_attrs = sorted({
+            _sc.get("schedule_config", {}).get("df_attribute")
+            for _sc in config_dict.get("schedules", []) or []
+            if _sc.get("schedule_template") == "vaccine_schedule"
+            and _sc.get("schedule_config", {}).get("df_attribute") not in (None, "daily_vaccines_df")
+        })
+        for _attr in _extra_attrs:
+            _kwargs[_attr] = scale_dose_schedule_df(_real_or(
+                _attr,
+                pd.DataFrame({"date": _dates, "daily_vaccines": [_vax] * _h})),
+                _dose_mult_for(dose_mult, _attr))
         return SimpleNamespace(
             absolute_humidity_df=_real_or(
                 "absolute_humidity_df",
@@ -312,7 +342,8 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
                 pd.DataFrame({"day_of_week": ["monday","tuesday","wednesday","thursday","friday","saturday","sunday"], "mobility_modifier": [_mob]*7})),
             daily_vaccines_df=scale_dose_schedule_df(_real_or(
                 "daily_vaccines_df",
-                pd.DataFrame({"date": _dates, "daily_vaccines": [_vax] * _h})), dose_mult),
+                pd.DataFrame({"date": _dates, "daily_vaccines": [_vax] * _h})),
+                _dose_mult_for(dose_mult, "daily_vaccines_df")),
             **_kwargs,
         )
 
@@ -353,6 +384,27 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
                     "(per-subpop seeded initial conditions are read from the metapop folder); "
                     f"ignoring fitted seed scales {sorted(_seed_scales)}."
                 )
+            # Split the scenario's dose multiplier per schedule: the factory
+            # takes the default schedule's vector as `dose_mult` and the rest
+            # as an `extra_dose_mult` dict. _dose_mult_for accepts either a
+            # bare per-age-group list (same scaling for every schedule) or a
+            # {df_attribute: list} dict (per-schedule scaling).
+            _extra_attrs = sorted(config_schedule_df_attributes(_cfg) - {"daily_vaccines_df"})
+            _base_dose_mult = _dose_mult_for(dose_mult, "daily_vaccines_df")
+            _extra_dose_mult = (
+                {_attr: _dose_mult_for(dose_mult, _attr) for _attr in _extra_attrs}
+                if (_extra_attrs and dose_mult is not None) else None
+            )
+            _base_dm_per_sp = _extra_dm_per_sp = None
+            if dose_mult_per_subpop:
+                _base_dm_per_sp = [
+                    _dose_mult_for(_dm, "daily_vaccines_df") for _dm in dose_mult_per_subpop
+                ]
+                _extra_dm_per_sp = [
+                    ({_attr: _dose_mult_for(_dm, _attr) for _attr in _extra_attrs}
+                     if (_extra_attrs and _dm is not None) else None)
+                    for _dm in dose_mult_per_subpop
+                ]
             _m, _ = make_metapop_from_folder(
                 METAPOP_FOLDER, _cfg, START_DATE, NUM_DAYS, _comps,
                 seed_offset=rep, seed_base=SEED_BASE, ts_per_day=TIMESTEPS_PER_DAY,
@@ -362,7 +414,8 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
                 travel_config=METAPOP_TRAVEL_CONFIG or None,
                 num_age_groups=NUM_AGE_GROUPS, num_risk_groups=NUM_RISK_GROUPS,
                 transmission_multiplier_df=_build_tvm_df(START_DATE, NUM_DAYS, _tv_incr),
-                dose_mult=dose_mult, dose_mult_per_subpop=dose_mult_per_subpop,
+                dose_mult=_base_dose_mult, dose_mult_per_subpop=_base_dm_per_sp,
+                extra_dose_mult=_extra_dose_mult, extra_dose_mult_per_subpop=_extra_dm_per_sp,
             )
             return _m
 
@@ -630,13 +683,19 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
         "# scales whatever it represents (antiviral courses, etc.). Applies to",
         "# every subpop identically in a metapop run, except where overridden by",
         "# DOSE_MULTIPLIER_PER_SUBPOP below.",
-        "# Format: {scenario_name: [multiplier_per_age_group, ...]}",
+        "# Format: {scenario_name: [multiplier_per_age_group, ...]}  -- applies the",
+        "# same scaling to every vaccine_schedule in the config; or, to scale two",
+        "# `scheduled_exact` schedules by different amounts, a per-schedule dict:",
+        "#   {scenario_name: {\"daily_vaccines_df\": [...], \"<other>_df\": [...]}}",
+        "# keyed by each schedule's df_attribute (a schedule left out is unscaled).",
         "DOSE_MULTIPLIER = {",
     ]
     _dose_mult_subpop_lines = [
         "# Per-subpopulation override of DOSE_MULTIPLIER above (metapop only).",
-        "# Format: {scenario_name: [multiplier_per_age_group_or_None, ...]}",
-        "# indexed by subpop order; a None entry falls back to DOSE_MULTIPLIER.",
+        "# Format: {scenario_name: [multiplier_or_None, ...]} indexed by subpop",
+        "# order; a None entry falls back to DOSE_MULTIPLIER. Each non-None entry",
+        "# takes either shape accepted by DOSE_MULTIPLIER (list, or per-schedule",
+        "# dict keyed by df_attribute).",
         "DOSE_MULTIPLIER_PER_SUBPOP = {",
     ]
     for _scen_tuple in analysis_scenarios:
@@ -649,10 +708,21 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
             _scen_lines.append(f"    {repr(_sn)}: {{{_inner}}},")
         if _sp_list and any(_r for _r in _sp_list):
             _subpop_lines.append(f"    {repr(_sn)}: {repr(_sp_list)},")
+        # Scenario dose multipliers are {df_attribute: vector} dicts. When a
+        # scenario only scales the default schedule (the common case) emit the
+        # plain vector instead, so single-schedule exports stay in the simpler
+        # historical format; the generated _dose_mult_for reads both.
+        def _dm_repr(_d):
+            if isinstance(_d, dict) and set(_d) == {"daily_vaccines_df"}:
+                return repr(_d["daily_vaccines_df"])
+            return repr(_d)
+
         if _dm is not None:
-            _dose_mult_lines.append(f"    {repr(_sn)}: {repr(_dm)},")
+            _dose_mult_lines.append(f"    {repr(_sn)}: {_dm_repr(_dm)},")
         if _dm_sp is not None:
-            _dose_mult_subpop_lines.append(f"    {repr(_sn)}: {repr(_dm_sp)},")
+            _dose_mult_subpop_lines.append(
+                f"    {repr(_sn)}: [{', '.join(_dm_repr(_x) for _x in _dm_sp)}],"
+            )
     _scen_lines.append("}")
     _subpop_lines.append("}")
     _dose_mult_lines.append("}")
@@ -837,6 +907,7 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
             ("school_work_calendar_df", loaded_schedule_dfs.school_work_calendar_df),
             ("mobility_df", loaded_schedule_dfs.mobility_df),
             ("daily_vaccines_df", loaded_schedule_dfs.daily_vaccines_df),
+            *(getattr(loaded_schedule_dfs, "extra_scheduled_dfs", {}) or {}).items(),
         )
         if _df is not None
     }

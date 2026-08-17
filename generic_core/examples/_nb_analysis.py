@@ -582,29 +582,57 @@ def _analysis_dose_mult_controls(
     # (antiviral prophylaxis courses, etc.), so the UI below is worded
     # generically ("scheduled doses") rather than assuming vaccination.
     _MAX_SC = 5
-    _dose_schedule_names = [
-        (_s or {}).get("name") for _s in config_dict.get("schedules", []) or []
+    # Every vaccine_schedule-template schedule, paired with the schedules_input
+    # attribute it reads from. A model may declare more than one (multiple
+    # scheduled_exact transitions with distinct schedule names), and each is
+    # scaled independently -- the widget arrays below carry a per-schedule
+    # dimension, and the scenario tuples carry a {df_attribute: vector} dict.
+    _dose_scheds = [
+        ((_s or {}).get("name"),
+         ((_s or {}).get("schedule_config", {}) or {}).get("df_attribute", "daily_vaccines_df"))
+        for _s in config_dict.get("schedules", []) or []
         if (_s or {}).get("schedule_template") == "vaccine_schedule"
     ]
-    analysis_dose_mult_enabled = bool(_dose_schedule_names)
+    analysis_dose_schedule_names = [_n for _n, _ in _dose_scheds]
+    analysis_dose_schedule_attrs = [_a for _, _a in _dose_scheds]
+    _n_sched = len(_dose_scheds)
+    analysis_dose_mult_enabled = bool(_dose_scheds)
     _age_labels = param_grid_columns(age_groups, num_age_groups)
 
     # Surface which schedule(s)/file(s) this actually scales, since the config
     # schema's "vaccine_schedule"/`daily_vaccines_df` naming doesn't tell the
     # user what CSV backs it (or that it might not be vaccination at all).
-    if is_metapop:
-        _sp_opts = list(analysis_sp_names) if analysis_sp_names else []
-        if _sp_opts:
-            _file_desc = ", ".join(f"`vaccines_{_sp}.csv`" for _sp in _sp_opts) + " in the metapop folder"
+    _input_files = config_dict.get("input_files", {}) or {}
+    _sp_opts = list(analysis_sp_names) if (is_metapop and analysis_sp_names) else []
+
+    def _file_desc_for(attr):
+        if is_metapop:
+            _stem = "vaccines" if attr == "daily_vaccines_df" else attr
+            if _sp_opts:
+                return ", ".join(f"`{_stem}_{_sp}.csv`" for _sp in _sp_opts) + " in the metapop folder"
+            return f"`{_stem}_<subpop>.csv` files in the metapop folder"
+        if attr == "daily_vaccines_df":
+            _csv = _input_files.get("vaccines_csv")
         else:
-            _file_desc = "`vaccines_<subpop>.csv` files in the metapop folder"
-    else:
-        _vax_csv = (config_dict.get("input_files", {}) or {}).get("vaccines_csv")
-        _file_desc = f"`{_vax_csv}`" if _vax_csv else "a constant value (no CSV configured)"
+            # Additional schedules are bundled under "<slug>_schedule_csv" by
+            # the Model Builder; the slug is the df_attribute minus its "_df".
+            _csv = _input_files.get(f"{attr[:-3]}_schedule_csv")
+        return f"`{_csv}`" if _csv else "a constant value (no CSV configured)"
+
     analysis_dose_schedule_desc = (
-        f"schedule(s) {', '.join(f'`{_n}`' for _n in _dose_schedule_names)} → {_file_desc}"
-        if _dose_schedule_names else ""
+        "; ".join(
+            f"`{_n}` → {_file_desc_for(_a)}" for _n, _a in _dose_scheds
+        ) if _dose_scheds else ""
     )
+
+    # State keys: the FIRST schedule keeps the legacy un-suffixed key so saved
+    # scenario configs written before multi-schedule support still restore.
+    def _dose_key(j, k, a):
+        return f"dose::{j}::{a}" if k == 0 else f"dose::{j}::{analysis_dose_schedule_names[k]}::{a}"
+
+    def _dose_sp_key(sp, j, k, a):
+        return (f"dose_subpop::{sp}::{j}::{a}" if k == 0
+                else f"dose_subpop::{sp}::{j}::{analysis_dose_schedule_names[k]}::{a}")
 
     _st = get_scenario_dose_state()
 
@@ -619,15 +647,19 @@ def _analysis_dose_mult_controls(
         value=_st.get("dose_toggle", False),
         on_change=_cb("dose_toggle"),
     )
+    # Indexed [scenario][schedule][age].
     analysis_dose_mult_inputs = mo.ui.array([
         mo.ui.array([
-            mo.ui.number(
-                start=0.0, stop=10.0, step=None,
-                value=_st.get(f"dose::{_j}::{_a}", 1.0),
-                label=_age_labels[_a],
-                on_change=_cb(f"dose::{_j}::{_a}"),
-            )
-            for _a in range(num_age_groups)
+            mo.ui.array([
+                mo.ui.number(
+                    start=0.0, stop=10.0, step=None,
+                    value=_st.get(_dose_key(_j, _k, _a), 1.0),
+                    label=_age_labels[_a],
+                    on_change=_cb(_dose_key(_j, _k, _a)),
+                )
+                for _a in range(num_age_groups)
+            ])
+            for _k in range(_n_sched)
         ])
         for _j in range(_MAX_SC)
     ])
@@ -639,16 +671,20 @@ def _analysis_dose_mult_controls(
         value=_st.get("dose_per_subpop_toggle", False),
         on_change=_cb("dose_per_subpop_toggle"),
     ) if is_metapop else None
+    # Indexed [subpop][scenario][schedule][age].
     analysis_dose_mult_subpop_inputs = mo.ui.array([
         mo.ui.array([
             mo.ui.array([
-                mo.ui.number(
-                    start=0.0, stop=10.0, step=None,
-                    value=_st.get(f"dose_subpop::{_sp}::{_j}::{_a}", 1.0),
-                    label=_age_labels[_a],
-                    on_change=_cb(f"dose_subpop::{_sp}::{_j}::{_a}"),
-                )
-                for _a in range(num_age_groups)
+                mo.ui.array([
+                    mo.ui.number(
+                        start=0.0, stop=10.0, step=None,
+                        value=_st.get(_dose_sp_key(_sp, _j, _k, _a), 1.0),
+                        label=_age_labels[_a],
+                        on_change=_cb(_dose_sp_key(_sp, _j, _k, _a)),
+                    )
+                    for _a in range(num_age_groups)
+                ])
+                for _k in range(_n_sched)
             ])
             for _j in range(_MAX_SC)
         ])
@@ -659,6 +695,7 @@ def _analysis_dose_mult_controls(
         analysis_dose_mult_enabled, analysis_dose_mult_toggle, analysis_dose_mult_inputs,
         analysis_dose_mult_per_subpop_toggle, analysis_dose_mult_subpop_inputs,
         analysis_dose_schedule_desc,
+        analysis_dose_schedule_names, analysis_dose_schedule_attrs,
     )
 
 
@@ -868,7 +905,7 @@ def _analysis_display(
     analysis_fitted_params,
     analysis_dose_mult_enabled, analysis_dose_mult_toggle, analysis_dose_mult_inputs,
     analysis_dose_mult_per_subpop_toggle, analysis_dose_mult_subpop_inputs,
-    analysis_dose_schedule_desc,
+    analysis_dose_schedule_desc, analysis_dose_schedule_names,
     analysis_array_age_scale_toggles, analysis_array_age_scale_inputs,
     age_groups, num_age_groups, param_grid_columns,
     analysis_scenario_config_upload, analysis_scenario_config_download,
@@ -1073,37 +1110,53 @@ def _analysis_display(
             )
             if is_metapop and analysis_dose_mult_per_subpop_toggle is not None:
                 _scen_body.append(analysis_dose_mult_per_subpop_toggle)
+            # One grid per vaccine_schedule in the config. With a single
+            # schedule (the common case) the per-schedule heading is omitted so
+            # the layout is exactly as it was before multi-schedule support.
+            _n_dose_sched = len(analysis_dose_schedule_names)
+            _multi_sched = _n_dose_sched > 1
             if _per_sp_active and analysis_sp_names:
                 for _si, _sp in enumerate(analysis_sp_names):
                     if _si >= len(analysis_dose_mult_subpop_inputs):
                         break
                     _scen_body.append(mo.md(f"↳ **{_sp}**:"))
-                    _sp_header = mo.hstack(
+                    for _k in range(_n_dose_sched):
+                        if _multi_sched:
+                            _scen_body.append(mo.md(
+                                f"&nbsp;&nbsp;&nbsp;&nbsp;schedule "
+                                f"`{analysis_dose_schedule_names[_k]}`:"
+                            ))
+                        _scen_body.append(mo.hstack(
+                            [mo.md("**Age group**")] + [analysis_scenario_names[j] for j in range(_n_sc)],
+                            justify="start",
+                        ))
+                        for _a in range(num_age_groups):
+                            _label = _dose_age_labels[_a]
+                            _scen_body.append(mo.hstack(
+                                [mo.md(f"  `{_label}`")] + [
+                                    analysis_dose_mult_subpop_inputs[_si][j][_k][_a]
+                                    for j in range(_n_sc)
+                                ],
+                                justify="start",
+                            ))
+            else:
+                for _k in range(_n_dose_sched):
+                    if _multi_sched:
+                        _scen_body.append(mo.md(
+                            f"↳ schedule `{analysis_dose_schedule_names[_k]}`:"
+                        ))
+                    _scen_body.append(mo.hstack(
                         [mo.md("**Age group**")] + [analysis_scenario_names[j] for j in range(_n_sc)],
                         justify="start",
-                    )
-                    _scen_body.append(_sp_header)
+                    ))
                     for _a in range(num_age_groups):
                         _label = _dose_age_labels[_a]
                         _scen_body.append(mo.hstack(
-                            [mo.md(f"  `{_label}`")] + [
-                                analysis_dose_mult_subpop_inputs[_si][j][_a] for j in range(_n_sc)
+                            [mo.md(f"`{_label}`")] + [
+                                analysis_dose_mult_inputs[j][_k][_a] for j in range(_n_sc)
                             ],
                             justify="start",
                         ))
-            else:
-                _dose_header = mo.hstack(
-                    [mo.md("**Age group**")] + [analysis_scenario_names[j] for j in range(_n_sc)],
-                    justify="start",
-                )
-                _dose_rows = [_dose_header]
-                for _a in range(num_age_groups):
-                    _label = _dose_age_labels[_a]
-                    _dose_rows.append(mo.hstack(
-                        [mo.md(f"`{_label}`")] + [analysis_dose_mult_inputs[j][_a] for j in range(_n_sc)],
-                        justify="start",
-                    ))
-                _scen_body += _dose_rows
     _scen_ui = mo.vstack(_scen_body)
 
     # --- Uncertainty-source controls (Run settings) ---
@@ -1260,6 +1313,7 @@ def _analysis_define_scenarios(
     analysis_scalar_subpop_inputs, analysis_array_subpop_scales,
     analysis_dose_mult_enabled, analysis_dose_mult_toggle, analysis_dose_mult_inputs, num_age_groups,
     analysis_dose_mult_per_subpop_toggle, analysis_dose_mult_subpop_inputs,
+    analysis_dose_schedule_attrs,
     analysis_array_age_scale_toggles, analysis_array_age_scale_inputs,
 ):
     _scalar_names = list(ANALYSIS_SCALAR_PARAMS.keys())
@@ -1421,25 +1475,43 @@ def _analysis_define_scenarios(
                                     _base = np.asarray(ANALYSIS_ARRAY_PARAMS[_pn])
                                     _sp_ov_by_name.setdefault(_sp, {})[_pn] = (_base * _sp_scale).tolist()
                 _per_subpop = _make_per_subpop_list(analysis_sp_names, _sp_ov_by_name)
+            # _dose_mult is a {df_attribute: per-age-group vector} dict covering
+            # every vaccine_schedule in the config, so each schedule can be
+            # scaled independently. Schedules left at all-1.0 are omitted (no
+            # scaling), and the whole dict collapses to None when nothing is
+            # scaled -- so a config with no dose scaling behaves exactly as
+            # before. _dose_mult_per_subpop is a list of such dicts (or None)
+            # indexed by subpop.
             _dose_mult = None
             _dose_mult_per_subpop = None
             if _dose_mult_active:
-                _mult_vec = [float(analysis_dose_mult_inputs.value[j][_a]) for _a in range(num_age_groups)]
-                if any(_v != 1.0 for _v in _mult_vec):
-                    _dose_mult = _mult_vec
+                _n_ds = len(analysis_dose_schedule_attrs)
+
+                def _vec_for(_widget_val, _k):
+                    _v = [float(_widget_val[_k][_a]) for _a in range(num_age_groups)]
+                    return _v if any(_x != 1.0 for _x in _v) else None
+
+                _by_attr = {}
+                for _k in range(_n_ds):
+                    _v = _vec_for(analysis_dose_mult_inputs.value[j], _k)
+                    if _v is not None:
+                        _by_attr[analysis_dose_schedule_attrs[_k]] = _v
+                if _by_attr:
+                    _dose_mult = _by_attr
                 if _dose_mult_per_sp_active and analysis_sp_names:
-                    _sp_vecs = []
+                    _sp_dicts = []
                     for _si in range(len(analysis_sp_names)):
                         if _si >= len(analysis_dose_mult_subpop_inputs):
-                            _sp_vecs.append(None)
+                            _sp_dicts.append(None)
                             continue
-                        _sp_vec = [
-                            float(analysis_dose_mult_subpop_inputs.value[_si][j][_a])
-                            for _a in range(num_age_groups)
-                        ]
-                        _sp_vecs.append(_sp_vec if any(_v != 1.0 for _v in _sp_vec) else None)
-                    if any(_v is not None for _v in _sp_vecs):
-                        _dose_mult_per_subpop = _sp_vecs
+                        _sp_by_attr = {}
+                        for _k in range(_n_ds):
+                            _v = _vec_for(analysis_dose_mult_subpop_inputs.value[_si][j], _k)
+                            if _v is not None:
+                                _sp_by_attr[analysis_dose_schedule_attrs[_k]] = _v
+                        _sp_dicts.append(_sp_by_attr or None)
+                    if any(_v is not None for _v in _sp_dicts):
+                        _dose_mult_per_subpop = _sp_dicts
             analysis_scenarios.append((_name, _overrides, _per_subpop, _designed, _dose_mult, _dose_mult_per_subpop, _ratios))
 
     return (analysis_scenarios,)
@@ -1478,6 +1550,19 @@ def _run_analysis(
         not analysis_scenarios,
         mo.callout(mo.md("**No scenarios defined.** Configure sensitivity or scenario settings above."), kind="warn"),
     )
+
+    def _split_dose_mult(mult):
+        # Scenario dose multipliers are a {df_attribute: per-age-group vector}
+        # dict (see _analysis_define_scenarios), one entry per vaccine_schedule
+        # the user actually scaled. make_single_pop_metapop /
+        # make_metapop_from_folder take the default schedule's vector as
+        # `dose_mult` and the rest as an `extra_dose_mult` dict, so split on
+        # that boundary here. Returns (dose_mult, extra_dose_mult).
+        if not mult:
+            return None, None
+        _base = mult.get("daily_vaccines_df")
+        _extra = {_k: _v for _k, _v in mult.items() if _k != "daily_vaccines_df"}
+        return _base, (_extra or None)
 
     _num_days = int(analysis_sim_days.value)
     _n_reps = int(analysis_n_reps.value) if analysis_stochastic.value else 1
@@ -1747,6 +1832,7 @@ def _run_analysis(
                 for _run_i, (_pset_idx, _rep) in enumerate(_run_schedule):
                     _run_ov = _apply_pset(_overrides, _pset_idx, _designed, _ratios)
                     _run_sched = _get_schedule_dfs(_pset_idx)
+                    _base_dose_mult, _extra_dose_mult = _split_dose_mult(_dose_mult)
                     if not is_metapop:
                         _m, _, _ = make_single_pop_metapop(
                             _sim_config, _start, _num_days, _get_ci(_pset_idx),
@@ -1755,9 +1841,15 @@ def _run_analysis(
                             param_overrides=_run_ov or None,
                             travel_config=metapop_travel_config,
                             schedule_dfs=_run_sched,
-                            dose_mult=_dose_mult,
+                            dose_mult=_base_dose_mult,
+                            extra_dose_mult=_extra_dose_mult,
                         )
                     else:
+                        _base_dm_per_sp = _extra_dm_per_sp = None
+                        if _dose_mult_per_subpop:
+                            _split = [_split_dose_mult(_dm) for _dm in _dose_mult_per_subpop]
+                            _base_dm_per_sp = [_b for _b, _ in _split]
+                            _extra_dm_per_sp = [_e for _, _e in _split]
                         _m, _ = make_metapop_from_folder(
                             metapop_folder_input.value, _sim_config, _start, _num_days, list(compartments),
                             seed_offset=_run_i, seed_base=_seed_b, ts_per_day=_ts,
@@ -1768,8 +1860,10 @@ def _run_analysis(
                             transmission_multiplier_df=getattr(
                                 _run_sched, "transmission_multiplier_df", None
                             ),
-                            dose_mult=_dose_mult,
-                            dose_mult_per_subpop=_dose_mult_per_subpop,
+                            dose_mult=_base_dose_mult,
+                            dose_mult_per_subpop=_base_dm_per_sp,
+                            extra_dose_mult=_extra_dose_mult,
+                            extra_dose_mult_per_subpop=_extra_dm_per_sp,
                         )
                     _m.simulate_until_day(_num_days)
                     _reps_hists.append(_extract_detailed(_m, list(compartments), tvs=_tvs))

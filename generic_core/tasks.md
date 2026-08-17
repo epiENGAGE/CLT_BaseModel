@@ -2,7 +2,8 @@
 
 Implementation is divided into 5 phases. Each phase is independently testable
 against existing `flu_core/` and `SIHR_core/` output. See `architecture.md` for
-file responsibilities, interfaces, and invariants.
+file responsibilities, interfaces, and invariants, and `limitations.md` for
+known constraints of what is already built.
 
 ---
 

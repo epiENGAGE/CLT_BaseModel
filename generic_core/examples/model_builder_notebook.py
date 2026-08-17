@@ -174,6 +174,19 @@ def _helpers(Path, SimpleNamespace, json, np, pd):
         """Auto-generated parameter name for a compartment's relative infectiousness."""
         return f"{compartment}_relative_infectiousness"
 
+    import re as _re
+
+    def slugify_schedule_name(name: str) -> str:
+        """Turn a free-text ``scheduled_exact`` schedule name into a safe
+        identifier-ish slug (lowercased, non-alphanumeric runs collapsed to a
+        single underscore, stripped of leading/trailing underscores). Used to
+        derive per-schedule ``df_attribute`` / param names for any
+        ``scheduled_exact`` schedule other than the default
+        ``vaccinated_transfer_schedule`` (which keeps its historical fixed
+        names for backward compatibility)."""
+        _slug = _re.sub(r"[^a-z0-9]+", "_", (name or "").strip().lower()).strip("_")
+        return _slug or "schedule"
+
     def load_csv_validated(path_str: str, required_columns) -> tuple:
         """Load a CSV from path_str and validate column names.
         Returns (df, error_str) — error_str is None on success."""
@@ -547,6 +560,7 @@ def _helpers(Path, SimpleNamespace, json, np, pd):
         build_scalar_array,
         parse_csv_list,
         rel_inf_param_name,
+        slugify_schedule_name,
         load_csv_validated,
         load_contact_matrix_csv,
         load_config_json,
@@ -1926,7 +1940,7 @@ def _transition_count_ui(mo, loaded_config):
 
 
 @app.cell
-def _transition_forms_ui(compartments, loaded_config, mo):
+def _transition_forms_ui(compartments, loaded_config, mo, slugify_schedule_name):
     _max_t = 12
     _comps = compartments if compartments else ["?"]
     _templates = [
@@ -1998,6 +2012,55 @@ def _transition_forms_ui(compartments, loaded_config, mo):
         mo.ui.text(
             value=_rcget(_i, "schedule", "vaccinated_transfer_schedule"),
             label="Schedule name",
+        )
+        for _i in range(_max_t)
+    ])
+    # Per-transition compartment-reset date (scheduled_exact only). Each
+    # distinct schedule name gets its own reset-date param
+    # (f"{slug}_compartment_reset_date_mm_dd"), sourced from this row's own
+    # widget -- when two rows share a schedule name, only the first row's
+    # value is used (see _build_config). The default-named schedule
+    # ("vaccinated_transfer_schedule") instead keeps using the single shared
+    # vaccinated_compartment_reset_date_input control for backward
+    # compatibility with existing saved configs.
+    def _reset_date_default(i):
+        _param_name = _rcget(i, "compartment_reset_date_mm_dd_param", None)
+        if not _param_name:
+            return ""
+        return str(loaded_config.get("params", {}).get(_param_name, "") or "")
+
+    t_reset_date = mo.ui.array([
+        mo.ui.text(
+            value=_reset_date_default(_i),
+            placeholder="07_30",
+            label="Compartment reset date MM_DD (blank to use all history)",
+        )
+        for _i in range(_max_t)
+    ])
+
+    # Data-source CSV path for scheduled_exact schedules other than the
+    # default-named "vaccinated_transfer_schedule" (which uses the existing
+    # shared vax_path/vax_mode constant-or-CSV widgets in Step 4 for backward
+    # compatibility). marimo widget arrays must be sized once, so this is
+    # sized to _max_t and keyed by each transition row's own index; when
+    # multiple rows share a schedule name only the first row's value is used
+    # (see scheduled_transfer_schedule_names / _build_config). Only CSV-mode
+    # is supported here for these additional schedules -- there is no
+    # constant-value UI for them (unlike the default schedule).
+    def _extra_schedule_csv_default(i):
+        _name = (_rcget(i, "schedule", "") or "").strip()
+        if not _name or _name == "vaccinated_transfer_schedule":
+            return ""
+        _slug = slugify_schedule_name(_name)
+        return (loaded_config.get("input_files", {}) or {}).get(
+            f"{_slug}_schedule_csv", ""
+        )
+
+    t_extra_schedule_csv_path = mo.ui.array([
+        mo.ui.text(
+            value=_extra_schedule_csv_default(_i),
+            placeholder="antiviral_schedule.csv",
+            label="Schedule CSV (filename)",
         )
         for _i in range(_max_t)
     ])
@@ -2109,7 +2172,8 @@ def _transition_forms_ui(compartments, loaded_config, mo):
 
     return (
         t_name, t_origin, t_dest, t_template,
-        t_param, t_schedule_name, t_factors, t_complements,
+        t_param, t_schedule_name, t_reset_date, t_extra_schedule_csv_path,
+        t_factors, t_complements,
         t_base_rate, t_proportion, t_is_complement, t_inf_reduce, t_vax_reduce,
         t_beta, t_rel_sus, t_infectious, t_use_humidity, t_humidity_impact,
         t_use_foi_immunity, t_immobile,
@@ -2122,7 +2186,8 @@ def _transition_show(
     main_tab,
     n_transitions,
     t_name, t_origin, t_dest, t_template,
-    t_param, t_schedule_name, t_factors, t_complements,
+    t_param, t_schedule_name, t_reset_date, t_extra_schedule_csv_path,
+    t_factors, t_complements,
     t_base_rate, t_proportion, t_is_complement, t_inf_reduce, t_vax_reduce,
     t_beta, t_rel_sus, t_infectious, t_use_humidity, t_humidity_impact,
     t_use_foi_immunity, t_immobile,
@@ -2209,7 +2274,7 @@ def _transition_show(
                 _foi_items.extend([t_inf_reduce[_i], t_vax_reduce[_i]])
             _rate_ui = mo.vstack(_foi_items)
         elif _template == "scheduled_exact":
-            _rate_ui = mo.vstack([
+            _sched_items = [
                 with_tip(
                     "Schedule name",
                     "Name of the schedule providing the exact daily count of\n"
@@ -2219,11 +2284,36 @@ def _transition_show(
                     "The count is rounded to the nearest integer and capped at\n"
                     "the origin compartment's current population -- this is a\n"
                     "deterministic, exact transfer, not a stochastic rate.\n\n"
-                    "Configure the underlying data source in Step 4 and the "
-                    "transfer delay in Step 5.",
+                    "Configure the underlying data source in Step 4 (default-named\n"
+                    "schedule) or below (any other schedule name) and the transfer\n"
+                    "delay in Step 5.",
                     t_schedule_name[_i],
                 ),
-            ])
+                with_tip(
+                    "Compartment reset date MM_DD",
+                    "Optional. Restricts this schedule's pre-simulation history\n"
+                    "replay to start on this MM_DD date each year, instead of\n"
+                    "using the schedule's full history. Blank = use all history.\n\n"
+                    "Each distinct schedule name gets its own reset-date param;\n"
+                    "when two transitions share a schedule name, only the first\n"
+                    "one's value here is used.",
+                    t_reset_date[_i],
+                ),
+            ]
+            if str(t_schedule_name.value[_i] or "").strip() not in ("", "vaccinated_transfer_schedule"):
+                _sched_items.append(with_tip(
+                    "Schedule CSV",
+                    "CSV filename (resolved against Step 4's shared input folder)\n"
+                    "providing this schedule's daily values -- columns: date,\n"
+                    "daily_vaccines (a JSON AxR array per row, despite the name --\n"
+                    "scheduled_exact isn't specific to vaccination).\n\n"
+                    "Only CSV-mode is available for schedules other than the\n"
+                    "default 'vaccinated_transfer_schedule'; when multiple\n"
+                    "transitions share this schedule name, only the first one's\n"
+                    "CSV path here is used.",
+                    t_extra_schedule_csv_path[_i],
+                ))
+            _rate_ui = mo.vstack(_sched_items)
         else:
             _foit_items = [
                 t_beta[_i],
@@ -2300,7 +2390,7 @@ def _transition_show(
 
 @app.cell
 def _template_requirements(
-    n_transitions, t_template, t_use_humidity, t_use_foi_immunity,
+    n_transitions, t_template, t_schedule_name, t_use_humidity, t_use_foi_immunity,
 ):
     _n = int(n_transitions.value)
     _uses_contact_matrix = False
@@ -2308,6 +2398,7 @@ def _template_requirements(
     _uses_mobility = False
     _requires_immunity_metrics = False
     _uses_scheduled_transfer = False
+    _scheduled_transfer_names = []
 
     for _i in range(_n):
         _template = t_template.value[_i]
@@ -2324,15 +2415,25 @@ def _template_requirements(
             _requires_immunity_metrics = _requires_immunity_metrics or bool(t_use_foi_immunity.value[_i])
         elif _template == "scheduled_exact":
             _uses_scheduled_transfer = True
+            _sched_name = (t_schedule_name.value[_i] or "").strip() or "vaccinated_transfer_schedule"
+            if _sched_name not in _scheduled_transfer_names:
+                _scheduled_transfer_names.append(_sched_name)
 
     uses_absolute_humidity = _uses_absolute_humidity
     uses_contact_matrix = _uses_contact_matrix
     uses_mobility = _uses_mobility
     requires_immunity_metrics = _requires_immunity_metrics
     uses_scheduled_transfer = _uses_scheduled_transfer
+    # Ordered list of distinct schedule names referenced by scheduled_exact
+    # transitions (dedup'd by name; first occurrence order). Downstream code
+    # (SCHEDULES section, vaccines data-source UI) uses this to emit/render
+    # one vaccine_schedule entry / data-source block per distinct schedule,
+    # instead of assuming there is exactly one.
+    scheduled_transfer_schedule_names = _scheduled_transfer_names
     return (
         uses_absolute_humidity, uses_contact_matrix, uses_mobility,
         requires_immunity_metrics, uses_scheduled_transfer,
+        scheduled_transfer_schedule_names,
     )
 
 
@@ -2805,7 +2906,9 @@ def _schedule_csv_show(
     mo, main_tab,
     num_age_groups, num_risk_groups,
     uses_absolute_humidity, uses_contact_matrix, uses_mobility, include_vax_immunity,
-    uses_scheduled_transfer,
+    uses_scheduled_transfer, scheduled_transfer_schedule_names,
+    n_transitions, t_template, t_schedule_name, t_extra_schedule_csv_path,
+    slugify_schedule_name,
     input_folder,
     ah_path,
     cal_mode, cal_path,
@@ -3152,6 +3255,56 @@ def _schedule_csv_show(
                     kind="warn",
                 ))
 
+    # Additional scheduled_exact schedules beyond the default-named one (CSV
+    # mode only -- see t_extra_schedule_csv_path). Each loaded df is collected
+    # into extra_scheduled_dfs, keyed by its df_attribute, for the model-build
+    # call and export bundling. This must stay ABOVE the section_card render
+    # below: mo.vstack(_parts) is built eagerly, so anything appended to
+    # _parts afterwards would never be displayed (silently swallowing this
+    # block's CSV error/success callouts).
+    _extra_scheduled_dfs = {}
+    if uses_scheduled_transfer:
+        _n = int(n_transitions.value)
+        _sched_first_row = {}
+        for _i in range(_n):
+            if t_template.value[_i] == "scheduled_exact":
+                _nm = (t_schedule_name.value[_i] or "").strip() or "vaccinated_transfer_schedule"
+                _sched_first_row.setdefault(_nm, _i)
+        for _sched_name in scheduled_transfer_schedule_names:
+            if _sched_name == "vaccinated_transfer_schedule":
+                continue
+            _first_i = _sched_first_row.get(_sched_name)
+            if _first_i is None:
+                continue
+            _csv_val = (t_extra_schedule_csv_path.value[_first_i] or "").strip()
+            _slug = slugify_schedule_name(_sched_name)
+            _attr = f"{_slug}_df"
+            if _csv_val:
+                _extra_df, _extra_err = load_csv_validated(
+                    resolve_input_path(input_folder.value, _csv_val),
+                    ["date", "daily_vaccines"],
+                )
+                if _extra_err:
+                    _parts.append(mo.callout(
+                        mo.md(f"**Schedule '{_sched_name}' CSV:** {_extra_err}"), kind="danger"
+                    ))
+                else:
+                    _parts.append(mo.callout(
+                        mo.md(f"Schedule '{_sched_name}' CSV: {len(_extra_df)} rows loaded."),
+                        kind="success",
+                    ))
+                    _extra_scheduled_dfs[_attr] = _extra_df
+            else:
+                _parts.append(mo.callout(
+                    mo.md(
+                        f"**Schedule '{_sched_name}' has no CSV set.** Provide a "
+                        f"filename in Step 2 (on that transition's row) — this "
+                        f"schedule will otherwise fall back to all-zero values, "
+                        f"so its `scheduled_exact` transition will move nobody."
+                    ),
+                    kind="warn",
+                ))
+
     if main_tab.value == "Model Builder":
         mo.output.append(section_card(
             step_header(4, "Schedules",
@@ -3170,6 +3323,7 @@ def _schedule_csv_show(
         total_contact_matrix=_total_contact_mat,
         school_contact_matrix=_school_contact_mat,
         work_contact_matrix=_work_contact_mat,
+        extra_scheduled_dfs=_extra_scheduled_dfs,
     )
     return (loaded_schedule_dfs,)
 
@@ -3677,7 +3831,8 @@ def _build_config(
     compartments,
     n_transitions,
     t_name, t_origin, t_dest, t_template,
-    t_param, t_schedule_name, t_factors, t_complements,
+    t_param, t_schedule_name, t_reset_date, t_extra_schedule_csv_path,
+    t_factors, t_complements,
     t_base_rate, t_proportion, t_is_complement, t_inf_reduce, t_vax_reduce,
     t_beta, t_rel_sus, t_infectious, t_use_humidity, t_humidity_impact,
     t_use_foi_immunity, t_immobile,
@@ -3690,7 +3845,8 @@ def _build_config(
     vax_transfer_delay_input,
     vaccinated_compartment_reset_date_input,
     uses_absolute_humidity, uses_contact_matrix, uses_mobility, requires_immunity_metrics,
-    uses_scheduled_transfer,
+    uses_scheduled_transfer, scheduled_transfer_schedule_names,
+    slugify_schedule_name,
     rel_inf_param_name,
     parse_csv_list,
     total_contact_input, school_contact_input, work_contact_input,
@@ -3749,6 +3905,36 @@ def _build_config(
         else:
             params_dict[_name] = float(param_scalar_inputs[_name].value)
 
+    # Per-schedule-name derived identifiers for scheduled_exact transitions.
+    # The default-named schedule keeps its historical fixed names (backward
+    # compat with existing saved configs/exports); any other schedule name
+    # gets slug-derived names instead. When multiple transitions share a
+    # schedule name, only the FIRST row (in transition order) supplies the
+    # reset-date/CSV-path values -- _sched_first_row records that row index.
+    def _sched_name_of(i):
+        return (t_schedule_name.value[i] or "").strip() or "vaccinated_transfer_schedule"
+
+    def _sched_df_attribute(name):
+        if name == "vaccinated_transfer_schedule":
+            return "daily_vaccines_df"
+        return f"{slugify_schedule_name(name)}_df"
+
+    def _sched_reset_date_param(name):
+        if name == "vaccinated_transfer_schedule":
+            return "vaccinated_compartment_reset_date_mm_dd"
+        return f"{slugify_schedule_name(name)}_compartment_reset_date_mm_dd"
+
+    def _sched_delay_param(name):
+        if name == "vaccinated_transfer_schedule":
+            return "vax_transfer_delay_days"
+        return f"{slugify_schedule_name(name)}_vax_transfer_delay_days"
+
+    _sched_first_row = {}
+    for _i in range(_n):
+        if t_template.value[_i] == "scheduled_exact":
+            _nm = _sched_name_of(_i)
+            _sched_first_row.setdefault(_nm, _i)
+
     # --- 2. TRANSITIONS ---
     _transitions = []
     _metapop_travel_config = {}
@@ -3794,14 +3980,29 @@ def _build_config(
                 if _vax_r:
                     _rate_config["vax_reduce_param"] = _vax_r
         elif _template == "scheduled_exact":
-            _rate_config = {
-                "schedule": t_schedule_name.value[_i].strip(),
-                "compartment_reset_date_mm_dd_param": "vaccinated_compartment_reset_date_mm_dd",
-            }
-            if vaccinated_compartment_reset_date_input.value.strip():
-                params_dict["vaccinated_compartment_reset_date_mm_dd"] = (
-                    vaccinated_compartment_reset_date_input.value.strip()
+            _sched_name = _sched_name_of(_i)
+            _rate_config = {"schedule": _sched_name}
+            if _sched_name == "vaccinated_transfer_schedule":
+                # Unchanged from before: this key is always present for the
+                # default-named schedule (byte-identical single-schedule
+                # output), with the referenced param only set when non-blank.
+                _rate_config["compartment_reset_date_mm_dd_param"] = (
+                    "vaccinated_compartment_reset_date_mm_dd"
                 )
+                if vaccinated_compartment_reset_date_input.value.strip():
+                    params_dict["vaccinated_compartment_reset_date_mm_dd"] = (
+                        vaccinated_compartment_reset_date_input.value.strip()
+                    )
+            else:
+                # Additional schedule: value comes from this schedule's first
+                # transition row; the key is only set when non-blank (omitting
+                # it means "use all history", per generic_model.py).
+                _first_i = _sched_first_row.get(_sched_name, _i)
+                _reset_val = (t_reset_date.value[_first_i] or "").strip()
+                if _reset_val:
+                    _reset_param = _sched_reset_date_param(_sched_name)
+                    _rate_config["compartment_reset_date_mm_dd_param"] = _reset_param
+                    params_dict[_reset_param] = _reset_val
         else:
             _travel_config = {
                 "infectious_compartments": _infectious_compartments_map(_i),
@@ -3868,6 +4069,33 @@ def _build_config(
         for _origin, _names in _outflows_by_origin.items()
         if len(_names) > 1
     ]
+
+    # Two or more scheduled_exact transitions leaving the SAME origin compete
+    # for that compartment's population, but each one computes its transfer
+    # against the origin's full current value independently and is clamped on
+    # its own. When their combined demand exceeds the origin, the toolkit
+    # scales all of its outflows down proportionally (population is still
+    # conserved, no compartment goes negative) and emits a runtime warning
+    # suggesting a transition group -- which the config parser explicitly
+    # rejects for scheduled_exact transitions. So warn here instead: the split
+    # between the competing schedules on a depleted origin is a proportional
+    # rescale, not each schedule's requested count.
+    _sched_exact_by_origin = {}
+    for _t in _transitions:
+        if _t["rate_template"] != "scheduled_exact" or not _t["origin"] or not _t["name"]:
+            continue
+        _sched_exact_by_origin.setdefault(_t["origin"], []).append(_t["name"])
+    for _origin, _names in _sched_exact_by_origin.items():
+        if len(_names) > 1:
+            _config_warnings.append(
+                f"Compartment '{_origin}' has {len(_names)} 'scheduled_exact' "
+                f"outflows ({', '.join(_names)}). They are computed independently "
+                f"against '{_origin}'’s full population, so on days their combined "
+                f"demand exceeds it the totals are scaled down proportionally to fit "
+                f"(population is conserved, but neither schedule moves the exact count "
+                f"it asked for). They cannot be placed in a transition group. Keep "
+                f"their combined daily proportions below 1.0 to avoid this."
+            )
 
     # --- 3. CONTACT MATRIX PARAMS ---
     if uses_contact_matrix:
@@ -3960,15 +4188,28 @@ def _build_config(
             },
         })
     if uses_scheduled_transfer:
-        _transfer_schedule_config = {"df_attribute": "daily_vaccines_df"}
-        if int(vax_transfer_delay_input.value) > 0:
-            params_dict["vax_transfer_delay_days"] = int(vax_transfer_delay_input.value)
-            _transfer_schedule_config["vax_protection_delay_days_param"] = "vax_transfer_delay_days"
-        _schedules.append({
-            "name": "vaccinated_transfer_schedule",
-            "schedule_template": "vaccine_schedule",
-            "schedule_config": _transfer_schedule_config,
-        })
+        # One vaccine_schedule entry per DISTINCT schedule name referenced by
+        # a scheduled_exact transition (scheduled_transfer_schedule_names is
+        # already deduped, in first-occurrence order) -- not just one hardcoded
+        # entry. The default-named schedule keeps exactly its historical
+        # df_attribute/delay-param names and single shared delay-days input,
+        # so single-schedule configs are unaffected; any other name gets
+        # slug-derived names and (since there is no per-schedule delay-days
+        # UI control yet) no transfer-delay param.
+        for _sched_name in scheduled_transfer_schedule_names:
+            _df_attr = _sched_df_attribute(_sched_name)
+            _transfer_schedule_config = {"df_attribute": _df_attr}
+            if _sched_name == "vaccinated_transfer_schedule":
+                if int(vax_transfer_delay_input.value) > 0:
+                    params_dict["vax_transfer_delay_days"] = int(vax_transfer_delay_input.value)
+                    _transfer_schedule_config["vax_protection_delay_days_param"] = (
+                        "vax_transfer_delay_days"
+                    )
+            _schedules.append({
+                "name": _sched_name,
+                "schedule_template": "vaccine_schedule",
+                "schedule_config": _transfer_schedule_config,
+            })
     if include_inf_immunity.value:
         params_dict.update({
             "inf_induced_saturation": float(inf_sat_input.value),
@@ -4020,6 +4261,21 @@ def _build_config(
         _input_files["mobility_csv"] = mob_path.value.strip()
     if (include_vax_immunity.value or uses_scheduled_transfer) and vax_mode.value == "csv" and vax_path.value.strip():
         _input_files["vaccines_csv"] = vax_path.value.strip()
+    if uses_scheduled_transfer:
+        # CSV bundling for any scheduled_exact schedule other than the
+        # default-named one -- keyed by its slug so the per-schedule
+        # data-source widgets (Step 2's t_extra_schedule_csv_path, indexed by
+        # each schedule's first transition row) can round-trip on reload.
+        for _sched_name in scheduled_transfer_schedule_names:
+            if _sched_name == "vaccinated_transfer_schedule":
+                continue
+            _first_i = _sched_first_row.get(_sched_name)
+            if _first_i is None:
+                continue
+            _csv_val = (t_extra_schedule_csv_path.value[_first_i] or "").strip()
+            if _csv_val:
+                _slug = slugify_schedule_name(_sched_name)
+                _input_files[f"{_slug}_schedule_csv"] = _csv_val
     if uses_contact_matrix and _A > 1:
         if total_contact_csv_path.value.strip():
             _input_files["total_contact_matrix_csv"] = total_contact_csv_path.value.strip()
@@ -4250,6 +4506,8 @@ def _run_sim(
     mo.stop(main_tab.value != "Model Builder", None)
     mo.stop(not run_button.value, mo.md(""))
 
+    from generic_core.model_factory import config_schedule_df_attributes as _config_schedule_df_attributes
+
     # Runs the preview simulation for Step 10. Structure of this cell:
     #   - run settings (stochastic/deterministic, reps, days, timesteps)
     #   - nested helper _build_schedules_input_for_subpop(...)
@@ -4288,6 +4546,7 @@ def _run_sim(
         mob_df_override=None,
         vax_df_override=None,
         daily_vaccines_value_override=None,
+        extra_scheduled_dfs_override=None,
     ):
         return build_notebook_schedules_input(
             start_date=start_real_date,
@@ -4306,6 +4565,8 @@ def _run_sim(
                 else loaded_schedule_dfs.mobility_df,
             daily_vaccines_df=vax_df_override if vax_df_override is not None
                 else loaded_schedule_dfs.daily_vaccines_df,
+            extra_scheduled_dfs=extra_scheduled_dfs_override if extra_scheduled_dfs_override is not None
+                else getattr(loaded_schedule_dfs, "extra_scheduled_dfs", None),
         )
 
     def _build_subpop(schedules_input, compartment_init, seed_offset, name="aggregate_pop", epi_metric_init=None, param_overrides=None):
@@ -4361,11 +4622,16 @@ def _run_sim(
                         )
                 except Exception:
                     pass
-        for _sched_attr, _col, _label in [
+        _shape_check_dfs = [
             ("mobility_df", "mobility_modifier", "mobility_modifier"),
             ("daily_vaccines_df", "daily_vaccines", "daily_vaccines"),
-        ]:
+        ]
+        for _extra_attr, _extra_df in (getattr(loaded_schedule_dfs, "extra_scheduled_dfs", {}) or {}).items():
+            _shape_check_dfs.append((_extra_attr, "daily_vaccines", _extra_attr))
+        for _sched_attr, _col, _label in _shape_check_dfs:
             _df = getattr(loaded_schedule_dfs, _sched_attr, None)
+            if _df is None:
+                _df = (getattr(loaded_schedule_dfs, "extra_scheduled_dfs", {}) or {}).get(_sched_attr)
             if _df is not None and _col in _df.columns:
                 try:
                     _arr = np.array(json.loads(_df[_col].iloc[0]))
@@ -4490,6 +4756,17 @@ def _run_sim(
             _shared_mob_df = pd.read_csv(_mob_shared_path)
             _shared_mob_df = _shared_mob_df.loc[:, ~_shared_mob_df.columns.str.match(r"^Unnamed")]
 
+        # Additional scheduled_exact schedules beyond the default-named one:
+        # per-subpop CSVs are expected at <df_attribute>_<subpop>.csv,
+        # mirroring the vaccines_<subpop>.csv convention.
+        _base_sched_attrs = {
+            "absolute_humidity_df", "school_work_calendar_df", "mobility_df",
+            "daily_vaccines_df", "transmission_multiplier_df",
+        }
+        _extra_sched_attrs = sorted(
+            _config_schedule_df_attributes(config_dict) - _base_sched_attrs
+        )
+
         def _run_metapop_once(seed_offset):
             _subpop_models = []
             _model_config_ref = None
@@ -4508,6 +4785,15 @@ def _run_sim(
                     _sp_vax_df = pd.read_csv(_sp_vax_path)
                     _sp_vax_df = _sp_vax_df.loc[:, ~_sp_vax_df.columns.str.match(r"^Unnamed")]
 
+                _sp_extra_dfs = {}
+                for _attr in _extra_sched_attrs:
+                    _sp_extra_path = _folder / f"{_attr}_{_sp_name}.csv"
+                    if _sp_extra_path.exists():
+                        _sp_extra_df = pd.read_csv(_sp_extra_path)
+                        _sp_extra_dfs[_attr] = _sp_extra_df.loc[
+                            :, ~_sp_extra_df.columns.str.match(r"^Unnamed")
+                        ]
+
                 _sched = _build_schedules_input_for_subpop(
                     ah_df_override=_shared_ah_df,
                     cal_df_override=_sp_cal_df,
@@ -4516,6 +4802,7 @@ def _run_sim(
                     daily_vaccines_value_override=config_dict.get(
                         "subpop_daily_vaccines", {}
                     ).get(_sp_name),
+                    extra_scheduled_dfs_override=_sp_extra_dfs or None,
                 )
 
                 # Initial conditions: the in-notebook Step 7 tables take precedence
@@ -8362,7 +8649,7 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
     from generic_core.generic_metapop import ConfigDrivenMetapopModel
     from generic_core.model_factory import (
         build_compartment_init, make_metapop_from_folder, extract_history,
-        extract_history_full, scale_dose_schedule_df,
+        extract_history_full, scale_dose_schedule_df, config_schedule_df_attributes,
     )
     from generic_core.fitting import (
         _scale_compartment_init, _inject_tv_transmission, _tv_knot_days,
@@ -8507,13 +8794,28 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
             return json.load(_f)
 
 
+    def _dose_mult_for(dose_mult, attr):
+        # A scenario's dose multiplier is either
+        #   - a per-age-group list  -> applied to EVERY vaccine_schedule, or
+        #   - a {df_attribute: per-age-group list} dict -> per-schedule, letting
+        #     two `scheduled_exact` schedules be scaled by different amounts
+        #     (a schedule absent from the dict is left unscaled).
+        # Both shapes are accepted so hand-edited scripts using the simple list
+        # form keep working.
+        if dose_mult is None:
+            return None
+        if isinstance(dose_mult, dict):
+            return dose_mult.get(attr)
+        return dose_mult
+
+
     def _build_schedules(start_date, num_days, tv_increments=None, dose_mult=None):
-        # dose_mult: per-age-group multiplier on the `scheduled_exact`
-        # transition's daily schedule (see scale_dose_schedule_df) -- e.g. 0 to
-        # zero out an age group for a no-dose / single-age-only scenario.
-        # Despite the "daily_vaccines" naming (fixed by the model config
-        # schema), this isn't vaccine-specific -- it scales whatever
-        # `scheduled_exact` represents (antiviral prophylaxis courses, etc.).
+        # dose_mult: per-age-group multiplier on the `vaccine_schedule`-template
+        # schedules (see scale_dose_schedule_df and _dose_mult_for above) -- e.g.
+        # 0 to zero out an age group for a no-dose / single-age-only scenario.
+        # Despite the "daily_vaccines" naming (fixed by the model config schema),
+        # this isn't vaccine-specific -- it scales whatever `scheduled_exact`
+        # represents (antiviral prophylaxis courses, etc.).
         _h = max(num_days + 14, 370)
         _dates = pd.date_range(start=start_date, periods=_h, freq="D").date
         _mob = json.dumps(np.ones((NUM_AGE_GROUPS, NUM_RISK_GROUPS)).tolist())
@@ -8529,6 +8831,21 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
         _tvm_df = _build_tvm_df(start_date, num_days, tv_increments)
         if _tvm_df is not None:
             _kwargs["transmission_multiplier_df"] = _tvm_df
+        # Any vaccine_schedule-template schedule other than the default-named
+        # "vaccinated_transfer_schedule"/"daily_vaccines" gets its df loaded (or
+        # falls back to an all-zero constant) and scaled by its OWN entry in
+        # dose_mult (see _dose_mult_for).
+        _extra_attrs = sorted({
+            _sc.get("schedule_config", {}).get("df_attribute")
+            for _sc in config_dict.get("schedules", []) or []
+            if _sc.get("schedule_template") == "vaccine_schedule"
+            and _sc.get("schedule_config", {}).get("df_attribute") not in (None, "daily_vaccines_df")
+        })
+        for _attr in _extra_attrs:
+            _kwargs[_attr] = scale_dose_schedule_df(_real_or(
+                _attr,
+                pd.DataFrame({"date": _dates, "daily_vaccines": [_vax] * _h})),
+                _dose_mult_for(dose_mult, _attr))
         return SimpleNamespace(
             absolute_humidity_df=_real_or(
                 "absolute_humidity_df",
@@ -8541,7 +8858,8 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
                 pd.DataFrame({"day_of_week": ["monday","tuesday","wednesday","thursday","friday","saturday","sunday"], "mobility_modifier": [_mob]*7})),
             daily_vaccines_df=scale_dose_schedule_df(_real_or(
                 "daily_vaccines_df",
-                pd.DataFrame({"date": _dates, "daily_vaccines": [_vax] * _h})), dose_mult),
+                pd.DataFrame({"date": _dates, "daily_vaccines": [_vax] * _h})),
+                _dose_mult_for(dose_mult, "daily_vaccines_df")),
             **_kwargs,
         )
 
@@ -8582,6 +8900,27 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
                     "(per-subpop seeded initial conditions are read from the metapop folder); "
                     f"ignoring fitted seed scales {sorted(_seed_scales)}."
                 )
+            # Split the scenario's dose multiplier per schedule: the factory
+            # takes the default schedule's vector as `dose_mult` and the rest
+            # as an `extra_dose_mult` dict. _dose_mult_for accepts either a
+            # bare per-age-group list (same scaling for every schedule) or a
+            # {df_attribute: list} dict (per-schedule scaling).
+            _extra_attrs = sorted(config_schedule_df_attributes(_cfg) - {"daily_vaccines_df"})
+            _base_dose_mult = _dose_mult_for(dose_mult, "daily_vaccines_df")
+            _extra_dose_mult = (
+                {_attr: _dose_mult_for(dose_mult, _attr) for _attr in _extra_attrs}
+                if (_extra_attrs and dose_mult is not None) else None
+            )
+            _base_dm_per_sp = _extra_dm_per_sp = None
+            if dose_mult_per_subpop:
+                _base_dm_per_sp = [
+                    _dose_mult_for(_dm, "daily_vaccines_df") for _dm in dose_mult_per_subpop
+                ]
+                _extra_dm_per_sp = [
+                    ({_attr: _dose_mult_for(_dm, _attr) for _attr in _extra_attrs}
+                     if (_extra_attrs and _dm is not None) else None)
+                    for _dm in dose_mult_per_subpop
+                ]
             _m, _ = make_metapop_from_folder(
                 METAPOP_FOLDER, _cfg, START_DATE, NUM_DAYS, _comps,
                 seed_offset=rep, seed_base=SEED_BASE, ts_per_day=TIMESTEPS_PER_DAY,
@@ -8591,7 +8930,8 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
                 travel_config=METAPOP_TRAVEL_CONFIG or None,
                 num_age_groups=NUM_AGE_GROUPS, num_risk_groups=NUM_RISK_GROUPS,
                 transmission_multiplier_df=_build_tvm_df(START_DATE, NUM_DAYS, _tv_incr),
-                dose_mult=dose_mult, dose_mult_per_subpop=dose_mult_per_subpop,
+                dose_mult=_base_dose_mult, dose_mult_per_subpop=_base_dm_per_sp,
+                extra_dose_mult=_extra_dose_mult, extra_dose_mult_per_subpop=_extra_dm_per_sp,
             )
             return _m
 
@@ -8859,13 +9199,19 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
         "# scales whatever it represents (antiviral courses, etc.). Applies to",
         "# every subpop identically in a metapop run, except where overridden by",
         "# DOSE_MULTIPLIER_PER_SUBPOP below.",
-        "# Format: {scenario_name: [multiplier_per_age_group, ...]}",
+        "# Format: {scenario_name: [multiplier_per_age_group, ...]}  -- applies the",
+        "# same scaling to every vaccine_schedule in the config; or, to scale two",
+        "# `scheduled_exact` schedules by different amounts, a per-schedule dict:",
+        "#   {scenario_name: {\"daily_vaccines_df\": [...], \"<other>_df\": [...]}}",
+        "# keyed by each schedule's df_attribute (a schedule left out is unscaled).",
         "DOSE_MULTIPLIER = {",
     ]
     _dose_mult_subpop_lines = [
         "# Per-subpopulation override of DOSE_MULTIPLIER above (metapop only).",
-        "# Format: {scenario_name: [multiplier_per_age_group_or_None, ...]}",
-        "# indexed by subpop order; a None entry falls back to DOSE_MULTIPLIER.",
+        "# Format: {scenario_name: [multiplier_or_None, ...]} indexed by subpop",
+        "# order; a None entry falls back to DOSE_MULTIPLIER. Each non-None entry",
+        "# takes either shape accepted by DOSE_MULTIPLIER (list, or per-schedule",
+        "# dict keyed by df_attribute).",
         "DOSE_MULTIPLIER_PER_SUBPOP = {",
     ]
     for _scen_tuple in analysis_scenarios:
@@ -8878,10 +9224,21 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
             _scen_lines.append(f"    {repr(_sn)}: {{{_inner}}},")
         if _sp_list and any(_r for _r in _sp_list):
             _subpop_lines.append(f"    {repr(_sn)}: {repr(_sp_list)},")
+        # Scenario dose multipliers are {df_attribute: vector} dicts. When a
+        # scenario only scales the default schedule (the common case) emit the
+        # plain vector instead, so single-schedule exports stay in the simpler
+        # historical format; the generated _dose_mult_for reads both.
+        def _dm_repr(_d):
+            if isinstance(_d, dict) and set(_d) == {"daily_vaccines_df"}:
+                return repr(_d["daily_vaccines_df"])
+            return repr(_d)
+
         if _dm is not None:
-            _dose_mult_lines.append(f"    {repr(_sn)}: {repr(_dm)},")
+            _dose_mult_lines.append(f"    {repr(_sn)}: {_dm_repr(_dm)},")
         if _dm_sp is not None:
-            _dose_mult_subpop_lines.append(f"    {repr(_sn)}: {repr(_dm_sp)},")
+            _dose_mult_subpop_lines.append(
+                f"    {repr(_sn)}: [{', '.join(_dm_repr(_x) for _x in _dm_sp)}],"
+            )
     _scen_lines.append("}")
     _subpop_lines.append("}")
     _dose_mult_lines.append("}")
@@ -9066,6 +9423,7 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
             ("school_work_calendar_df", loaded_schedule_dfs.school_work_calendar_df),
             ("mobility_df", loaded_schedule_dfs.mobility_df),
             ("daily_vaccines_df", loaded_schedule_dfs.daily_vaccines_df),
+            *(getattr(loaded_schedule_dfs, "extra_scheduled_dfs", {}) or {}).items(),
         )
         if _df is not None
     }
@@ -9783,29 +10141,57 @@ def _analysis_dose_mult_controls(
     # (antiviral prophylaxis courses, etc.), so the UI below is worded
     # generically ("scheduled doses") rather than assuming vaccination.
     _MAX_SC = 5
-    _dose_schedule_names = [
-        (_s or {}).get("name") for _s in config_dict.get("schedules", []) or []
+    # Every vaccine_schedule-template schedule, paired with the schedules_input
+    # attribute it reads from. A model may declare more than one (multiple
+    # scheduled_exact transitions with distinct schedule names), and each is
+    # scaled independently -- the widget arrays below carry a per-schedule
+    # dimension, and the scenario tuples carry a {df_attribute: vector} dict.
+    _dose_scheds = [
+        ((_s or {}).get("name"),
+         ((_s or {}).get("schedule_config", {}) or {}).get("df_attribute", "daily_vaccines_df"))
+        for _s in config_dict.get("schedules", []) or []
         if (_s or {}).get("schedule_template") == "vaccine_schedule"
     ]
-    analysis_dose_mult_enabled = bool(_dose_schedule_names)
+    analysis_dose_schedule_names = [_n for _n, _ in _dose_scheds]
+    analysis_dose_schedule_attrs = [_a for _, _a in _dose_scheds]
+    _n_sched = len(_dose_scheds)
+    analysis_dose_mult_enabled = bool(_dose_scheds)
     _age_labels = param_grid_columns(age_groups, num_age_groups)
 
     # Surface which schedule(s)/file(s) this actually scales, since the config
     # schema's "vaccine_schedule"/`daily_vaccines_df` naming doesn't tell the
     # user what CSV backs it (or that it might not be vaccination at all).
-    if is_metapop:
-        _sp_opts = list(analysis_sp_names) if analysis_sp_names else []
-        if _sp_opts:
-            _file_desc = ", ".join(f"`vaccines_{_sp}.csv`" for _sp in _sp_opts) + " in the metapop folder"
+    _input_files = config_dict.get("input_files", {}) or {}
+    _sp_opts = list(analysis_sp_names) if (is_metapop and analysis_sp_names) else []
+
+    def _file_desc_for(attr):
+        if is_metapop:
+            _stem = "vaccines" if attr == "daily_vaccines_df" else attr
+            if _sp_opts:
+                return ", ".join(f"`{_stem}_{_sp}.csv`" for _sp in _sp_opts) + " in the metapop folder"
+            return f"`{_stem}_<subpop>.csv` files in the metapop folder"
+        if attr == "daily_vaccines_df":
+            _csv = _input_files.get("vaccines_csv")
         else:
-            _file_desc = "`vaccines_<subpop>.csv` files in the metapop folder"
-    else:
-        _vax_csv = (config_dict.get("input_files", {}) or {}).get("vaccines_csv")
-        _file_desc = f"`{_vax_csv}`" if _vax_csv else "a constant value (no CSV configured)"
+            # Additional schedules are bundled under "<slug>_schedule_csv" by
+            # the Model Builder; the slug is the df_attribute minus its "_df".
+            _csv = _input_files.get(f"{attr[:-3]}_schedule_csv")
+        return f"`{_csv}`" if _csv else "a constant value (no CSV configured)"
+
     analysis_dose_schedule_desc = (
-        f"schedule(s) {', '.join(f'`{_n}`' for _n in _dose_schedule_names)} → {_file_desc}"
-        if _dose_schedule_names else ""
+        "; ".join(
+            f"`{_n}` → {_file_desc_for(_a)}" for _n, _a in _dose_scheds
+        ) if _dose_scheds else ""
     )
+
+    # State keys: the FIRST schedule keeps the legacy un-suffixed key so saved
+    # scenario configs written before multi-schedule support still restore.
+    def _dose_key(j, k, a):
+        return f"dose::{j}::{a}" if k == 0 else f"dose::{j}::{analysis_dose_schedule_names[k]}::{a}"
+
+    def _dose_sp_key(sp, j, k, a):
+        return (f"dose_subpop::{sp}::{j}::{a}" if k == 0
+                else f"dose_subpop::{sp}::{j}::{analysis_dose_schedule_names[k]}::{a}")
 
     _st = get_scenario_dose_state()
 
@@ -9820,15 +10206,19 @@ def _analysis_dose_mult_controls(
         value=_st.get("dose_toggle", False),
         on_change=_cb("dose_toggle"),
     )
+    # Indexed [scenario][schedule][age].
     analysis_dose_mult_inputs = mo.ui.array([
         mo.ui.array([
-            mo.ui.number(
-                start=0.0, stop=10.0, step=None,
-                value=_st.get(f"dose::{_j}::{_a}", 1.0),
-                label=_age_labels[_a],
-                on_change=_cb(f"dose::{_j}::{_a}"),
-            )
-            for _a in range(num_age_groups)
+            mo.ui.array([
+                mo.ui.number(
+                    start=0.0, stop=10.0, step=None,
+                    value=_st.get(_dose_key(_j, _k, _a), 1.0),
+                    label=_age_labels[_a],
+                    on_change=_cb(_dose_key(_j, _k, _a)),
+                )
+                for _a in range(num_age_groups)
+            ])
+            for _k in range(_n_sched)
         ])
         for _j in range(_MAX_SC)
     ])
@@ -9840,16 +10230,20 @@ def _analysis_dose_mult_controls(
         value=_st.get("dose_per_subpop_toggle", False),
         on_change=_cb("dose_per_subpop_toggle"),
     ) if is_metapop else None
+    # Indexed [subpop][scenario][schedule][age].
     analysis_dose_mult_subpop_inputs = mo.ui.array([
         mo.ui.array([
             mo.ui.array([
-                mo.ui.number(
-                    start=0.0, stop=10.0, step=None,
-                    value=_st.get(f"dose_subpop::{_sp}::{_j}::{_a}", 1.0),
-                    label=_age_labels[_a],
-                    on_change=_cb(f"dose_subpop::{_sp}::{_j}::{_a}"),
-                )
-                for _a in range(num_age_groups)
+                mo.ui.array([
+                    mo.ui.number(
+                        start=0.0, stop=10.0, step=None,
+                        value=_st.get(_dose_sp_key(_sp, _j, _k, _a), 1.0),
+                        label=_age_labels[_a],
+                        on_change=_cb(_dose_sp_key(_sp, _j, _k, _a)),
+                    )
+                    for _a in range(num_age_groups)
+                ])
+                for _k in range(_n_sched)
             ])
             for _j in range(_MAX_SC)
         ])
@@ -9860,6 +10254,7 @@ def _analysis_dose_mult_controls(
         analysis_dose_mult_enabled, analysis_dose_mult_toggle, analysis_dose_mult_inputs,
         analysis_dose_mult_per_subpop_toggle, analysis_dose_mult_subpop_inputs,
         analysis_dose_schedule_desc,
+        analysis_dose_schedule_names, analysis_dose_schedule_attrs,
     )
 
 
@@ -10069,7 +10464,7 @@ def _analysis_display(
     analysis_fitted_params,
     analysis_dose_mult_enabled, analysis_dose_mult_toggle, analysis_dose_mult_inputs,
     analysis_dose_mult_per_subpop_toggle, analysis_dose_mult_subpop_inputs,
-    analysis_dose_schedule_desc,
+    analysis_dose_schedule_desc, analysis_dose_schedule_names,
     analysis_array_age_scale_toggles, analysis_array_age_scale_inputs,
     age_groups, num_age_groups, param_grid_columns,
     analysis_scenario_config_upload, analysis_scenario_config_download,
@@ -10274,37 +10669,53 @@ def _analysis_display(
             )
             if is_metapop and analysis_dose_mult_per_subpop_toggle is not None:
                 _scen_body.append(analysis_dose_mult_per_subpop_toggle)
+            # One grid per vaccine_schedule in the config. With a single
+            # schedule (the common case) the per-schedule heading is omitted so
+            # the layout is exactly as it was before multi-schedule support.
+            _n_dose_sched = len(analysis_dose_schedule_names)
+            _multi_sched = _n_dose_sched > 1
             if _per_sp_active and analysis_sp_names:
                 for _si, _sp in enumerate(analysis_sp_names):
                     if _si >= len(analysis_dose_mult_subpop_inputs):
                         break
                     _scen_body.append(mo.md(f"↳ **{_sp}**:"))
-                    _sp_header = mo.hstack(
+                    for _k in range(_n_dose_sched):
+                        if _multi_sched:
+                            _scen_body.append(mo.md(
+                                f"&nbsp;&nbsp;&nbsp;&nbsp;schedule "
+                                f"`{analysis_dose_schedule_names[_k]}`:"
+                            ))
+                        _scen_body.append(mo.hstack(
+                            [mo.md("**Age group**")] + [analysis_scenario_names[j] for j in range(_n_sc)],
+                            justify="start",
+                        ))
+                        for _a in range(num_age_groups):
+                            _label = _dose_age_labels[_a]
+                            _scen_body.append(mo.hstack(
+                                [mo.md(f"  `{_label}`")] + [
+                                    analysis_dose_mult_subpop_inputs[_si][j][_k][_a]
+                                    for j in range(_n_sc)
+                                ],
+                                justify="start",
+                            ))
+            else:
+                for _k in range(_n_dose_sched):
+                    if _multi_sched:
+                        _scen_body.append(mo.md(
+                            f"↳ schedule `{analysis_dose_schedule_names[_k]}`:"
+                        ))
+                    _scen_body.append(mo.hstack(
                         [mo.md("**Age group**")] + [analysis_scenario_names[j] for j in range(_n_sc)],
                         justify="start",
-                    )
-                    _scen_body.append(_sp_header)
+                    ))
                     for _a in range(num_age_groups):
                         _label = _dose_age_labels[_a]
                         _scen_body.append(mo.hstack(
-                            [mo.md(f"  `{_label}`")] + [
-                                analysis_dose_mult_subpop_inputs[_si][j][_a] for j in range(_n_sc)
+                            [mo.md(f"`{_label}`")] + [
+                                analysis_dose_mult_inputs[j][_k][_a] for j in range(_n_sc)
                             ],
                             justify="start",
                         ))
-            else:
-                _dose_header = mo.hstack(
-                    [mo.md("**Age group**")] + [analysis_scenario_names[j] for j in range(_n_sc)],
-                    justify="start",
-                )
-                _dose_rows = [_dose_header]
-                for _a in range(num_age_groups):
-                    _label = _dose_age_labels[_a]
-                    _dose_rows.append(mo.hstack(
-                        [mo.md(f"`{_label}`")] + [analysis_dose_mult_inputs[j][_a] for j in range(_n_sc)],
-                        justify="start",
-                    ))
-                _scen_body += _dose_rows
     _scen_ui = mo.vstack(_scen_body)
 
     # --- Uncertainty-source controls (Run settings) ---
@@ -10461,6 +10872,7 @@ def _analysis_define_scenarios(
     analysis_scalar_subpop_inputs, analysis_array_subpop_scales,
     analysis_dose_mult_enabled, analysis_dose_mult_toggle, analysis_dose_mult_inputs, num_age_groups,
     analysis_dose_mult_per_subpop_toggle, analysis_dose_mult_subpop_inputs,
+    analysis_dose_schedule_attrs,
     analysis_array_age_scale_toggles, analysis_array_age_scale_inputs,
 ):
     _scalar_names = list(ANALYSIS_SCALAR_PARAMS.keys())
@@ -10622,25 +11034,43 @@ def _analysis_define_scenarios(
                                     _base = np.asarray(ANALYSIS_ARRAY_PARAMS[_pn])
                                     _sp_ov_by_name.setdefault(_sp, {})[_pn] = (_base * _sp_scale).tolist()
                 _per_subpop = _make_per_subpop_list(analysis_sp_names, _sp_ov_by_name)
+            # _dose_mult is a {df_attribute: per-age-group vector} dict covering
+            # every vaccine_schedule in the config, so each schedule can be
+            # scaled independently. Schedules left at all-1.0 are omitted (no
+            # scaling), and the whole dict collapses to None when nothing is
+            # scaled -- so a config with no dose scaling behaves exactly as
+            # before. _dose_mult_per_subpop is a list of such dicts (or None)
+            # indexed by subpop.
             _dose_mult = None
             _dose_mult_per_subpop = None
             if _dose_mult_active:
-                _mult_vec = [float(analysis_dose_mult_inputs.value[j][_a]) for _a in range(num_age_groups)]
-                if any(_v != 1.0 for _v in _mult_vec):
-                    _dose_mult = _mult_vec
+                _n_ds = len(analysis_dose_schedule_attrs)
+
+                def _vec_for(_widget_val, _k):
+                    _v = [float(_widget_val[_k][_a]) for _a in range(num_age_groups)]
+                    return _v if any(_x != 1.0 for _x in _v) else None
+
+                _by_attr = {}
+                for _k in range(_n_ds):
+                    _v = _vec_for(analysis_dose_mult_inputs.value[j], _k)
+                    if _v is not None:
+                        _by_attr[analysis_dose_schedule_attrs[_k]] = _v
+                if _by_attr:
+                    _dose_mult = _by_attr
                 if _dose_mult_per_sp_active and analysis_sp_names:
-                    _sp_vecs = []
+                    _sp_dicts = []
                     for _si in range(len(analysis_sp_names)):
                         if _si >= len(analysis_dose_mult_subpop_inputs):
-                            _sp_vecs.append(None)
+                            _sp_dicts.append(None)
                             continue
-                        _sp_vec = [
-                            float(analysis_dose_mult_subpop_inputs.value[_si][j][_a])
-                            for _a in range(num_age_groups)
-                        ]
-                        _sp_vecs.append(_sp_vec if any(_v != 1.0 for _v in _sp_vec) else None)
-                    if any(_v is not None for _v in _sp_vecs):
-                        _dose_mult_per_subpop = _sp_vecs
+                        _sp_by_attr = {}
+                        for _k in range(_n_ds):
+                            _v = _vec_for(analysis_dose_mult_subpop_inputs.value[_si][j], _k)
+                            if _v is not None:
+                                _sp_by_attr[analysis_dose_schedule_attrs[_k]] = _v
+                        _sp_dicts.append(_sp_by_attr or None)
+                    if any(_v is not None for _v in _sp_dicts):
+                        _dose_mult_per_subpop = _sp_dicts
             analysis_scenarios.append((_name, _overrides, _per_subpop, _designed, _dose_mult, _dose_mult_per_subpop, _ratios))
 
     return (analysis_scenarios,)
@@ -10679,6 +11109,19 @@ def _run_analysis(
         not analysis_scenarios,
         mo.callout(mo.md("**No scenarios defined.** Configure sensitivity or scenario settings above."), kind="warn"),
     )
+
+    def _split_dose_mult(mult):
+        # Scenario dose multipliers are a {df_attribute: per-age-group vector}
+        # dict (see _analysis_define_scenarios), one entry per vaccine_schedule
+        # the user actually scaled. make_single_pop_metapop /
+        # make_metapop_from_folder take the default schedule's vector as
+        # `dose_mult` and the rest as an `extra_dose_mult` dict, so split on
+        # that boundary here. Returns (dose_mult, extra_dose_mult).
+        if not mult:
+            return None, None
+        _base = mult.get("daily_vaccines_df")
+        _extra = {_k: _v for _k, _v in mult.items() if _k != "daily_vaccines_df"}
+        return _base, (_extra or None)
 
     _num_days = int(analysis_sim_days.value)
     _n_reps = int(analysis_n_reps.value) if analysis_stochastic.value else 1
@@ -10948,6 +11391,7 @@ def _run_analysis(
                 for _run_i, (_pset_idx, _rep) in enumerate(_run_schedule):
                     _run_ov = _apply_pset(_overrides, _pset_idx, _designed, _ratios)
                     _run_sched = _get_schedule_dfs(_pset_idx)
+                    _base_dose_mult, _extra_dose_mult = _split_dose_mult(_dose_mult)
                     if not is_metapop:
                         _m, _, _ = make_single_pop_metapop(
                             _sim_config, _start, _num_days, _get_ci(_pset_idx),
@@ -10956,9 +11400,15 @@ def _run_analysis(
                             param_overrides=_run_ov or None,
                             travel_config=metapop_travel_config,
                             schedule_dfs=_run_sched,
-                            dose_mult=_dose_mult,
+                            dose_mult=_base_dose_mult,
+                            extra_dose_mult=_extra_dose_mult,
                         )
                     else:
+                        _base_dm_per_sp = _extra_dm_per_sp = None
+                        if _dose_mult_per_subpop:
+                            _split = [_split_dose_mult(_dm) for _dm in _dose_mult_per_subpop]
+                            _base_dm_per_sp = [_b for _b, _ in _split]
+                            _extra_dm_per_sp = [_e for _, _e in _split]
                         _m, _ = make_metapop_from_folder(
                             metapop_folder_input.value, _sim_config, _start, _num_days, list(compartments),
                             seed_offset=_run_i, seed_base=_seed_b, ts_per_day=_ts,
@@ -10969,8 +11419,10 @@ def _run_analysis(
                             transmission_multiplier_df=getattr(
                                 _run_sched, "transmission_multiplier_df", None
                             ),
-                            dose_mult=_dose_mult,
-                            dose_mult_per_subpop=_dose_mult_per_subpop,
+                            dose_mult=_base_dose_mult,
+                            dose_mult_per_subpop=_base_dm_per_sp,
+                            extra_dose_mult=_extra_dose_mult,
+                            extra_dose_mult_per_subpop=_extra_dm_per_sp,
                         )
                     _m.simulate_until_day(_num_days)
                     _reps_hists.append(_extract_detailed(_m, list(compartments), tvs=_tvs))

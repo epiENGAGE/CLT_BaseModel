@@ -47,9 +47,17 @@ def build_notebook_schedules_input(
     mobility_df=None,
     daily_vaccines_df=None,
     transmission_multiplier_df=None,
+    extra_scheduled_dfs: dict[str, pd.DataFrame] | None = None,
 ) -> SimpleNamespace:
     """Assemble a schedules-input namespace for the model from the per-schedule
-    DataFrames, falling back to constant-valued DataFrames where a df is None."""
+    DataFrames, falling back to constant-valued DataFrames where a df is None.
+
+    ``extra_scheduled_dfs`` (optional): additional ``scheduled_exact``-backing
+    DataFrames beyond the default ``daily_vaccines_df``, keyed by their
+    ``df_attribute`` name (e.g. ``{"antiviral_schedule_df": df}``). Each is set
+    directly as an attribute on the returned namespace -- no constant-value
+    fallback is generated for these (a config that references one but doesn't
+    receive a df here will be caught by ``warn_missing_schedule_dfs``)."""
     _horizon = max(int(num_days) + 14, 370)
     _dates = pd.date_range(start=start_date, periods=_horizon, freq="D").date
 
@@ -103,13 +111,16 @@ def build_notebook_schedules_input(
             "transmission_multiplier": [1.0] * _horizon,
         })
 
-    return SimpleNamespace(
+    _ns = SimpleNamespace(
         absolute_humidity_df=_ah_df,
         school_work_calendar_df=_cal_df,
         mobility_df=_mob_df,
         daily_vaccines_df=_vax_df,
         transmission_multiplier_df=_tvm_df,
     )
+    for _attr, _df in (extra_scheduled_dfs or {}).items():
+        setattr(_ns, _attr, _df)
+    return _ns
 
 
 def scale_dose_schedule_df(df, mult):
@@ -240,6 +251,8 @@ def make_single_pop_metapop(
     mobility_value: float = 1.0, daily_vaccines_value=0.0,
     schedule_dfs: SimpleNamespace | None = None,
     dose_mult=None,
+    extra_scheduled_dfs: dict[str, pd.DataFrame] | None = None,
+    extra_dose_mult: dict[str, object] | None = None,
 ):
     """Build a single-subpopulation ConfigDrivenMetapopModel from a config dict.
 
@@ -252,6 +265,14 @@ def make_single_pop_metapop(
     ``schedule_dfs.daily_vaccines_df`` (see ``scale_dose_schedule_df``) before
     the model is built -- e.g. to zero out or scale doses for a scenario
     without needing to pre-scale the schedule bundle yourself.
+
+    ``extra_scheduled_dfs`` (optional): additional ``scheduled_exact``-backing
+    DataFrames beyond the default ``daily_vaccines_df``, keyed by their
+    ``df_attribute`` name -- e.g. for a model with more than one
+    ``scheduled_exact`` transition/schedule. ``extra_dose_mult`` (optional):
+    a ``{df_attribute: mult}`` dict of per-age-group multipliers (see
+    ``dose_mult``) applied to the corresponding entry of
+    ``extra_scheduled_dfs`` before the model is built.
     """
     _A, _R = num_age_groups, num_risk_groups
     _cfg = config
@@ -264,6 +285,35 @@ def make_single_pop_metapop(
     )
     warn_missing_schedule_dfs(_cfg, _sched_dfs, context="make_single_pop_metapop")
     _dose_df = scale_dose_schedule_df(_sched_dfs.daily_vaccines_df, dose_mult)
+    _extra_dfs = dict(extra_scheduled_dfs or {})
+    if not _extra_dfs:
+        # Fall back to any extra scheduled dfs already carried on schedule_dfs,
+        # in either of the two shapes callers may use:
+        #  - a dict attribute named `extra_scheduled_dfs` (e.g. as set by the
+        #    notebook's `loaded_schedule_dfs` SimpleNamespace), or
+        #  - flat `*_df`-named attributes beyond the known base ones (e.g. as
+        #    set by build_notebook_schedules_input's own extra_scheduled_dfs).
+        _bundled = getattr(_sched_dfs, "extra_scheduled_dfs", None)
+        if isinstance(_bundled, dict):
+            _extra_dfs.update({_a: _v for _a, _v in _bundled.items() if _v is not None})
+        for _attr, _val in vars(_sched_dfs).items():
+            if _attr in (
+                "absolute_humidity_df", "school_work_calendar_df", "mobility_df",
+                "daily_vaccines_df", "transmission_multiplier_df",
+                "extra_scheduled_dfs",
+            ):
+                continue
+            # Only pick up other DataFrame-shaped `*_df` attributes -- the
+            # notebook's `loaded_schedule_dfs` also carries non-schedule
+            # attributes (contact matrices) that must NOT be treated as
+            # scheduled_exact dose dfs.
+            if _attr.endswith("_df") and _val is not None:
+                _extra_dfs[_attr] = _val
+    _extra_mult = extra_dose_mult or {}
+    _extra_dfs = {
+        _attr: scale_dose_schedule_df(_df, _extra_mult.get(_attr))
+        for _attr, _df in _extra_dfs.items()
+    }
     _sched = build_notebook_schedules_input(
         start_date=start_date, num_days=num_days,
         absolute_humidity=0.0, mobility_value=mobility_value,
@@ -274,6 +324,7 @@ def make_single_pop_metapop(
         mobility_df=_sched_dfs.mobility_df,
         daily_vaccines_df=_dose_df,
         transmission_multiplier_df=getattr(_sched_dfs, "transmission_multiplier_df", None),
+        extra_scheduled_dfs=_extra_dfs or None,
     )
     _mc = parse_model_config_from_dict(_cfg, schedules_input=_sched)
     _state = build_state_from_config(_mc, compartment_init, epi_metric_init=epi_metric_init or {})
@@ -306,6 +357,7 @@ def make_metapop_from_folder(
     mobility_value: float = 1.0, daily_vaccines_value=0.0,
     transmission_multiplier_df=None,
     dose_mult=None, dose_mult_per_subpop=None,
+    extra_dose_mult=None, extra_dose_mult_per_subpop=None,
 ):
     """Build a multi-subpopulation ConfigDrivenMetapopModel from a metapop
     input folder (``metapop_config.json`` + per-subpop schedule/IC files).
@@ -323,7 +375,14 @@ def make_metapop_from_folder(
     ``dose_mult_per_subpop`` (optional): a list indexed by subpop order
     (matching ``metapop_config.json``'s ``subpopulations``); a non-``None``
     entry overrides ``dose_mult`` for that subpop specifically, so a scenario
-    can mix "same everywhere" with a few deliberately different subpops."""
+    can mix "same everywhere" with a few deliberately different subpops.
+
+    ``extra_dose_mult`` / ``extra_dose_mult_per_subpop`` (optional): the same
+    idea as ``dose_mult``/``dose_mult_per_subpop`` but for additional
+    ``scheduled_exact`` schedules beyond the default-named one, keyed by
+    their ``df_attribute`` name. Each schedule's per-subpop CSV is expected
+    at ``<folder>/<df_attribute>_<subpop>.csv`` (mirroring the default
+    ``vaccines_<subpop>.csv`` convention)."""
     _A, _R = num_age_groups, num_risk_groups
     _folder = Path(folder_path)
     with open(_folder / "metapop_config.json") as _f:
@@ -340,6 +399,11 @@ def make_metapop_from_folder(
         _shared_mob = pd.read_csv(_mob_p)
         _shared_mob = _shared_mob.loc[:, ~_shared_mob.columns.str.match(r"^Unnamed")]
     _tt = clt.TransitionTypes.BINOM if stochastic else clt.TransitionTypes.BINOM_DETERMINISTIC_NO_ROUND
+    _base_attrs = {
+        "absolute_humidity_df", "school_work_calendar_df", "mobility_df",
+        "daily_vaccines_df", "transmission_multiplier_df",
+    }
+    _extra_attrs = sorted(config_schedule_df_attributes(config) - _base_attrs)
     _subpops = []
     _mc_ref = None
     for _si, _sp_name in enumerate(_sp_names):
@@ -357,13 +421,34 @@ def make_metapop_from_folder(
         if dose_mult_per_subpop and _si < len(dose_mult_per_subpop) and dose_mult_per_subpop[_si] is not None:
             _sp_dose_mult = dose_mult_per_subpop[_si]
         _vax_df = scale_dose_schedule_df(_vax_df, _sp_dose_mult)
+
+        _extra_dfs = {}
+        for _attr in _extra_attrs:
+            _p = _folder / f"{_attr}_{_sp_name}.csv"
+            _df = None
+            if _p.exists():
+                _df = pd.read_csv(_p)
+                _df = _df.loc[:, ~_df.columns.str.match(r"^Unnamed")]
+            _attr_mult = (extra_dose_mult or {}).get(_attr)
+            if (
+                extra_dose_mult_per_subpop
+                and _si < len(extra_dose_mult_per_subpop)
+                and extra_dose_mult_per_subpop[_si]
+                and extra_dose_mult_per_subpop[_si].get(_attr) is not None
+            ):
+                _attr_mult = extra_dose_mult_per_subpop[_si][_attr]
+            _extra_dfs[_attr] = scale_dose_schedule_df(_df, _attr_mult)
+
+        _sched_dfs_for_warn = SimpleNamespace(
+            absolute_humidity_df=_shared_ah, school_work_calendar_df=_cal_df,
+            mobility_df=_shared_mob, daily_vaccines_df=_vax_df,
+            transmission_multiplier_df=transmission_multiplier_df,
+        )
+        for _attr, _df in _extra_dfs.items():
+            setattr(_sched_dfs_for_warn, _attr, _df)
         warn_missing_schedule_dfs(
             config,
-            SimpleNamespace(
-                absolute_humidity_df=_shared_ah, school_work_calendar_df=_cal_df,
-                mobility_df=_shared_mob, daily_vaccines_df=_vax_df,
-                transmission_multiplier_df=transmission_multiplier_df,
-            ),
+            _sched_dfs_for_warn,
             context=f"subpopulation '{_sp_name}' — missing CSV(s) in {_folder}",
         )
         _sched = build_notebook_schedules_input(
@@ -374,6 +459,7 @@ def make_metapop_from_folder(
             absolute_humidity_df=_shared_ah, school_work_calendar_df=_cal_df,
             mobility_df=_shared_mob, daily_vaccines_df=_vax_df,
             transmission_multiplier_df=transmission_multiplier_df,
+            extra_scheduled_dfs=_extra_dfs or None,
         )
         _comp_init = {_c: build_scalar_array(0.0, _A, _R) for _c in compartments_list}
         _epi_init = {}

@@ -102,6 +102,19 @@ def _helpers(Path, SimpleNamespace, json, np, pd):
         """Auto-generated parameter name for a compartment's relative infectiousness."""
         return f"{compartment}_relative_infectiousness"
 
+    import re as _re
+
+    def slugify_schedule_name(name: str) -> str:
+        """Turn a free-text ``scheduled_exact`` schedule name into a safe
+        identifier-ish slug (lowercased, non-alphanumeric runs collapsed to a
+        single underscore, stripped of leading/trailing underscores). Used to
+        derive per-schedule ``df_attribute`` / param names for any
+        ``scheduled_exact`` schedule other than the default
+        ``vaccinated_transfer_schedule`` (which keeps its historical fixed
+        names for backward compatibility)."""
+        _slug = _re.sub(r"[^a-z0-9]+", "_", (name or "").strip().lower()).strip("_")
+        return _slug or "schedule"
+
     def load_csv_validated(path_str: str, required_columns) -> tuple:
         """Load a CSV from path_str and validate column names.
         Returns (df, error_str) — error_str is None on success."""
@@ -475,6 +488,7 @@ def _helpers(Path, SimpleNamespace, json, np, pd):
         build_scalar_array,
         parse_csv_list,
         rel_inf_param_name,
+        slugify_schedule_name,
         load_csv_validated,
         load_contact_matrix_csv,
         load_config_json,
