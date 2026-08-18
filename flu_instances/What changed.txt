@@ -1,3 +1,11 @@
+8/17/26
+Updated common_subpop_params.json for Austin and Dallas, so that "inf_induced_hosp_risk_reduce": 0.884.  Forgot to update this when changed season.  This is a weighted average of the values for H1N1 and H3N2, since season is a mix of both.  
+
+Updated mobility_modifier.csv for Austin and Dallas.  Didn't have duplicate entries now that risk group = 2.
+
+Updated simulation_setting.json for Austin and Dallas so that "start_real_date": "2024-08-01", which fits better for calibration. 
+
+
 08/03/26
 
 init_vals for Austin and Dallas, so M(0) is for 7/1/2024.  
