@@ -235,7 +235,12 @@ Click **Run analysis**.
   (scenario, metric) combination.
 - **Download summary CSV** — Export the summary table for use in external tools.
 
-Auto-saved to `{output_dir}/analysis_results.json`.
+Summary statistics (median + 95% interval per scenario/compartment) are
+auto-saved to `{output_dir}/analysis_results.json` after every run. Click
+**Export full results (JSON)** to additionally write the full per-
+subpopulation/age/risk/replicate detail to
+`{output_dir}/analysis_results_full.json` — slower and much larger, so it's
+on demand rather than automatic.
 
 ---
 

@@ -29,6 +29,7 @@ import numpy as np
 from generic_core.model_factory import (
     make_metapop_from_folder,
     make_single_pop_metapop,
+    extract_history,
     extract_history_full,
 )
 from generic_core.fitting import (
@@ -87,6 +88,7 @@ def _analysis_setup(
     daily_vaccines_value,
     analysis_fitted_num_days,
     analysis_fitted_tv_spacing,
+    keep_full_detail,
 ) -> SimpleNamespace:
     """Rebuild, from plain data, the per-run helpers the Analysis cell used to
     nest as closures. Called once per worker process (via the Pool
@@ -207,7 +209,16 @@ def _analysis_setup(
                 extra_dose_mult_per_subpop=extra_dm_per_sp,
             )
         m.simulate_until_day(num_days)
-        return _extract_detailed(m, list(compartments), tvs=tvs)
+        if keep_full_detail:
+            return _extract_detailed(m, list(compartments), tvs=tvs)
+        # Population-total (summed over subpop/age/risk) daily series only --
+        # avoids holding a (day, age, risk) array per subpop per replicate in
+        # memory, which is what makes large replicate counts (hundreds to
+        # thousands, now reachable quickly thanks to parallelization) blow up
+        # memory downstream (autosave, plots, tables all re-derive stats from
+        # it). run_analysis_scenarios reduces these across replicates into a
+        # median/95% interval per scenario/key before returning.
+        return extract_history(m, list(compartments), tvs=tvs)
 
     return SimpleNamespace(run_one=run_one)
 
@@ -265,15 +276,27 @@ def run_analysis_scenarios(
     daily_vaccines_value,
     analysis_fitted_num_days,
     analysis_fitted_tv_spacing,
+    keep_full_detail: bool = False,
     progress_callback: Callable[[dict], None] | None = None,
-) -> dict[str, list[dict]]:
-    """Run every (scenario, run_schedule) combination and return
-    ``{scenario_name: [replicate_result, ...]}`` in the same order/shape the
-    notebook's inline loop used to produce. Uses a spawn-context process pool
-    when there's more than one task (see module docstring for why plain
-    ``ProcessPoolExecutor``/closures can't be used directly from a marimo
-    cell); falls back to running serially in-process otherwise, or if the
-    pool fails to start.
+) -> dict:
+    """Run every (scenario, run_schedule) combination. Uses a spawn-context
+    process pool when there's more than one task (see module docstring for
+    why plain ``ProcessPoolExecutor``/closures can't be used directly from a
+    marimo cell); falls back to running serially in-process otherwise, or if
+    the pool fails to start.
+
+    ``keep_full_detail=True`` returns ``{scenario_name: [replicate_result,
+    ...]}`` with the full per-subpop/(day, age, risk) detail per replicate,
+    same as the notebook's original inline loop -- fine for drill-down/export
+    with a modest replicate count, but holding that for every replicate of a
+    large ensemble is what drove a real memory blowup on a ~3000-replicate
+    run. The default, ``keep_full_detail=False``, has each worker return only
+    the population-total (summed over subpop/age/risk) daily series (see
+    ``generic_core.model_factory.extract_history``), then reduces those
+    across replicates into a per-scenario/key ``{"median", "p2_5", "p97_5",
+    "n_reps"}`` summary here -- independent of replicate count, and safe at
+    any scale. Returns ``{scenario_name: {key: {"median": array, "p2_5":
+    array, "p97_5": array, "n_reps": int}}}`` in that mode.
     """
     tasks: list[tuple] = []
     task_scenarios: list[str] = []
@@ -301,6 +324,7 @@ def run_analysis_scenarios(
         mobility_value=mobility_value, daily_vaccines_value=daily_vaccines_value,
         analysis_fitted_num_days=analysis_fitted_num_days,
         analysis_fitted_tv_spacing=analysis_fitted_tv_spacing,
+        keep_full_detail=keep_full_detail,
     )
 
     n_workers = _analysis_worker_count(len(tasks))
@@ -313,6 +337,7 @@ def run_analysis_scenarios(
             print(f"[analysis] could not start process pool ({exc}); running single-process", flush=True)
             pool = None
         if pool is not None:
+            print(f"[analysis] running {len(tasks)} task(s) across {n_workers} processes", flush=True)
             results = []
             try:
                 with pool:
@@ -328,6 +353,7 @@ def run_analysis_scenarios(
                 results = None
 
     if results is None:
+        print(f"[analysis] running {len(tasks)} task(s) single-process", flush=True)
         run_ctx = _analysis_setup(**payload)
         results = []
         for i, task in enumerate(tasks):
@@ -341,4 +367,24 @@ def run_analysis_scenarios(
     all_results: dict[str, list[dict]] = {}
     for scen_name, result in zip(task_scenarios, results):
         all_results.setdefault(scen_name, []).append(result)
-    return all_results
+
+    if keep_full_detail:
+        return all_results
+
+    summary: dict[str, dict] = {}
+    for scen_name, reps in all_results.items():
+        scen_summary: dict[str, dict] = {}
+        keys = {k for rep in reps for k in rep}
+        for key in keys:
+            arrs = [rep[key] for rep in reps if key in rep]
+            if not arrs:
+                continue
+            stacked = np.stack(arrs, axis=0)
+            scen_summary[key] = {
+                "median": np.median(stacked, axis=0),
+                "p2_5": np.percentile(stacked, 2.5, axis=0),
+                "p97_5": np.percentile(stacked, 97.5, axis=0),
+                "n_reps": len(arrs),
+            }
+        summary[scen_name] = scen_summary
+    return summary

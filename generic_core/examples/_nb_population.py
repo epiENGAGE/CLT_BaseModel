@@ -433,7 +433,7 @@ def _population_data(
     population_source_radio, risk_fraction_inputs, population_csv_input,
     fetched_populations, fetched_matrices_scope,
     is_metapop, geo_subpop_names,
-    num_age_groups, num_risk_groups, age_groups,
+    num_age_groups, num_risk_groups, age_groups, age_group_mode,
     loaded_config, load_population_csv, np,
 ):
     # Resolve the per-subpopulation population into A×R arrays. Not gated on the
@@ -464,10 +464,17 @@ def _population_data(
             population_by_subpop = _pop
     else:  # Fetch from geography
         if not fetched_populations:
-            population_errors["info"] = (
-                "No population fetched yet — choose a geography and press "
-                "**Fetch contact matrices & population** above."
-            )
+            if age_group_mode != "Named age bands" and num_age_groups != 1:
+                population_errors["info"] = (
+                    "Switch to **Named age bands** above to fetch a population "
+                    "for a geography — a geography can't be chosen in count-only "
+                    "mode with A > 1."
+                )
+            else:
+                population_errors["info"] = (
+                    "No population fetched yet — choose a geography and press "
+                    "**Fetch contact matrices & population** above."
+                )
         elif fetched_matrices_scope == "per_subpop":
             for _name in pop_subpop_names:
                 _nk = fetched_populations.get(_name)

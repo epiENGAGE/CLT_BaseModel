@@ -22,12 +22,14 @@ def _shared_import_ui(mo):
     shared_import_upload = mo.ui.file(
         multiple=True,
         filetypes=[".json"],
-        label=(
-            "Import config files (drop any combination of a model config, "
-            "fit config, fitted params / fit result, and scenario config)"
-        ),
+        label="Import config files",
     )
-    return (shared_import_upload,)
+    shared_import_upload_note = mo.md(
+        "Drop any combination of a model config, fit config, fitted "
+        "params / fit result, and scenario config. Once you confirm each "
+        "file's type below, click Apply to import it."
+    )
+    return shared_import_upload, shared_import_upload_note
 
 
 @app.cell

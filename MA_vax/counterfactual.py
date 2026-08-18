@@ -289,14 +289,18 @@ def averted_summary(reference: dict, scenario: dict, by_age: bool = True,
     ref_H, scen_H = reference["new_H"], scenario["new_H"]   # (n_reps, A)
     averted = ref_H - scen_H
     pop = reference["population"]
-    doses = scenario["doses"] - reference["doses"]           # (A,) additional doses given
+    doses = scenario["doses"] - reference["doses"]           # (A,) or (n_reps, A) additional doses given
     pct_denom_H = reference["new_H"] if pct_reference is None else pct_reference["new_H"]
 
     def row(label, averted_col, ref_col, pop_val, doses_val):
         pct = np.where(ref_col > 0, averted_col / np.where(ref_col > 0, ref_col, 1) * 100, np.nan)
         per100k = averted_col / pop_val * 1e5
-        if doses_val > 0:
-            per100k_doses = averted_col / doses_val * 1e5
+        # doses_val is either a scalar (one schedule shared by every replicate)
+        # or a per-replicate array (paired with averted_col) -- broadcasting
+        # handles both the same way.
+        doses_arr = np.broadcast_to(np.asarray(doses_val, dtype=float), np.shape(averted_col))
+        if np.any(doses_arr > 0):
+            per100k_doses = averted_col / np.where(doses_arr > 0, doses_arr, 1) * 1e5
             dm, dl, dh = _summ(per100k_doses)
             doses_str = f"{dm:.1f} [{dl:.1f} - {dh:.1f}]"
         else:
@@ -314,8 +318,9 @@ def averted_summary(reference: dict, scenario: dict, by_age: bool = True,
     A = ref_H.shape[1]
     if by_age:
         for i in range(A):
-            rows.append(row(AGE_GROUPS[i], averted[:, i], pct_denom_H[:, i], pop[i], doses[i]))
-    rows.append(row("All", averted.sum(axis=1), pct_denom_H.sum(axis=1), pop.sum(), doses.sum()))
+            rows.append(row(AGE_GROUPS[i], averted[:, i], pct_denom_H[:, i], pop[i],
+                             np.take(doses, i, axis=-1)))
+    rows.append(row("All", averted.sum(axis=1), pct_denom_H.sum(axis=1), pop.sum(), doses.sum(axis=-1)))
     return pd.DataFrame(rows).set_index("age_group")
 
 

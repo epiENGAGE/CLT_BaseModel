@@ -75,13 +75,17 @@ def _posterior_param_sets():
         yield cf._split_pset(expanded)
 
 
-def run_posterior_baseline_bands(base_inputs):
+def run_posterior_scenario_bands(base_inputs, scenario: dict, label: str):
     """Returns (dates, new_H_by_age) where new_H_by_age has shape
     (n_posterior_draws, num_days, num_age_groups) -- new_H = I_to_H + IV_to_H,
-    one deterministic simulation per posterior draw, baseline scenario."""
+    one deterministic simulation per posterior draw, for the given scenario
+    (e.g. baseline_scenario() or no_vaccine_scenario()). Every draw uses the
+    same posterior-parameter-set ordering across scenarios, so per-draw
+    differences between two calls of this function are paired (parameter
+    uncertainty cancels out of the difference between scenarios)."""
     param_sets = list(_posterior_param_sets())
     n = len(param_sets)
-    print(f"Running {n} posterior baseline simulations...")
+    print(f"Running {n} posterior simulations ({label})...")
     A = cf.NUM_AGE_GROUPS
     out = np.zeros((n, cf.NUM_DAYS, A))
     dates = None
@@ -89,7 +93,8 @@ def run_posterior_baseline_bands(base_inputs):
         bi = dict(base_inputs)
         bi["seed_scales"] = seed_scales
         bi["tv_increments"] = tv_increments
-        m = cf.build_model(bi, param_overrides=model_params, rng_seed=cf.SEED_BASE, stochastic=False)
+        m = cf.build_model(bi, param_overrides=model_params, dose_mult=scenario.get("dose_mult"),
+                            rng_seed=cf.SEED_BASE, stochastic=False)
         m.simulate_until_day(cf.NUM_DAYS)
         subpop = list(m.subpop_models.values())[0]
         h = cf._extract_age_arrays(subpop)
@@ -102,18 +107,23 @@ def run_posterior_baseline_bands(base_inputs):
     return dates, out
 
 
+def _cached_posterior_scenario_bands(base_inputs, scenario: dict, label: str, cache_name: str):
+    cache = os.path.join(OUT_DIR, cache_name)
+    if os.path.exists(cache):
+        z = np.load(cache, allow_pickle=True)
+        return pd.to_datetime(z["dates"]), z["new_H"]
+    dates, new_H = run_posterior_scenario_bands(base_inputs, scenario, label)
+    np.savez(cache, dates=dates.astype(str), new_H=new_H)
+    return dates, new_H
+
+
 def main():
     base_inputs = cf.load_base_inputs()
     raw_age_H = _load_raw_age_hospitalizations()
 
     # ---- 1. Posterior baseline bands ----
-    cache = os.path.join(OUT_DIR, "posterior_baseline_new_H.npz")
-    if os.path.exists(cache):
-        z = np.load(cache, allow_pickle=True)
-        dates, new_H = pd.to_datetime(z["dates"]), z["new_H"]
-    else:
-        dates, new_H = run_posterior_baseline_bands(base_inputs)
-        np.savez(cache, dates=dates.astype(str), new_H=new_H)
+    dates, new_H = _cached_posterior_scenario_bands(
+        base_inputs, cf.baseline_scenario(), "baseline", "posterior_baseline_new_H.npz")
 
     sim_dates = pd.DatetimeIndex(dates)
     common_dates = sim_dates.intersection(raw_age_H.index)
@@ -188,16 +198,21 @@ def main():
     _band_plot(True, "fit_check_cumulative_by_age.png",
                "Cumulative hospitalizations: posterior median + 95% CI vs. raw data, by age group")
 
-    # ---- 2. Baseline vs no-vaccination (best point, deterministic) ----
-    ds_base = cf._run_reps(base_inputs, cf.baseline_scenario(), n_reps=1, seed=0, stochastic=False)
-    ds_novax = cf._run_reps(base_inputs, cf.no_vaccine_scenario(), n_reps=1, seed=0, stochastic=False)
-    base_new_H = (ds_base["I_to_H"] + ds_base["IV_to_H"]).isel(replication=0).sum(dim="age_group").to_numpy()
-    novax_new_H = (ds_novax["I_to_H"] + ds_novax["IV_to_H"]).isel(replication=0).sum(dim="age_group").to_numpy()
-    plot_dates = pd.to_datetime(ds_base["day"].to_numpy())
+    # ---- 2. Baseline vs no-vaccination, posterior median + 95% CI ----
+    _, novax_new_H_by_age = _cached_posterior_scenario_bands(
+        base_inputs, cf.no_vaccine_scenario(), "no vaccination", "posterior_novax_new_H.npz")
+    base_total = new_H.sum(axis=2)      # (n_draws, num_days)
+    novax_total = novax_new_H_by_age.sum(axis=2)
+
+    base_med, base_lo, base_hi = np.median(base_total, axis=0), np.percentile(base_total, 2.5, axis=0), np.percentile(base_total, 97.5, axis=0)
+    novax_med, novax_lo, novax_hi = np.median(novax_total, axis=0), np.percentile(novax_total, 2.5, axis=0), np.percentile(novax_total, 97.5, axis=0)
+    plot_dates = sim_dates
 
     fig, ax = plt.subplots(figsize=(9, 5))
-    ax.plot(plot_dates, novax_new_H, color=NO_VAX_COLOR, linewidth=1.5, label="No vaccination")
-    ax.plot(plot_dates, base_new_H, color=BAND_COLOR, linewidth=1.5, label="Baseline (fitted vaccination)")
+    ax.fill_between(plot_dates, novax_lo, novax_hi, color=NO_VAX_COLOR, alpha=0.2)
+    ax.plot(plot_dates, novax_med, color=NO_VAX_COLOR, linewidth=1.5, label="No vaccination (median, 95% CI)")
+    ax.fill_between(plot_dates, base_lo, base_hi, color=BAND_COLOR, alpha=0.2)
+    ax.plot(plot_dates, base_med, color=BAND_COLOR, linewidth=1.5, label="Baseline (fitted vaccination) (median, 95% CI)")
     ax.set_ylabel("New hospitalizations / day (all ages)")
     ax.set_xlabel("date")
     ax.set_title("Daily new hospitalizations: baseline vs. no vaccination")
@@ -207,6 +222,11 @@ def main():
     plt.tight_layout()
     fig.savefig(os.path.join(OUT_DIR, "baseline_vs_no_vaccination_daily_H.png"), dpi=150)
     plt.close(fig)
+
+    date_arr = plot_dates.to_numpy()
+    print(f"Baseline median peak: {base_med.max():.1f} (day {pd.Timestamp(date_arr[base_med.argmax()]).date()})")
+    print(f"No-vaccination median peak: {novax_med.max():.1f} (day {pd.Timestamp(date_arr[novax_med.argmax()]).date()})")
+    print(f"Ratio (no-vax / baseline) at each's own peak: {novax_med.max() / base_med.max():.2f}x")
 
     print("Done. Assets written to", OUT_DIR)
 

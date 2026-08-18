@@ -473,7 +473,6 @@ def _analysis_scenario_controls(
     analysis_scenario_names = mo.ui.array([
         mo.ui.text(
             value=_st.get(f"name::{j}", f"Scenario {j + 1}"),
-            label=f"Name {j + 1}",
             on_change=_cb(f"name::{j}"),
         )
         for j in range(_MAX_SC)
@@ -528,7 +527,6 @@ def _analysis_array_age_scale_controls(
     # Off by default so existing scenarios (uniform ×scale) are unaffected.
     _MAX_SC = 5
     _array_names = list(ANALYSIS_ARRAY_PARAMS.keys())
-    _age_labels = param_grid_columns(age_groups, num_age_groups)
     _st = get_scenario_agescale_state()
 
     def _cb(key):
@@ -552,7 +550,6 @@ def _analysis_array_age_scale_controls(
                 mo.ui.number(
                     start=0.0, stop=10.0, step=None,
                     value=_st.get(f"age_scale::{_pn}::{_a}::{_j}", 1.0),
-                    label=_age_labels[_a],
                     on_change=_cb(f"age_scale::{_pn}::{_a}::{_j}"),
                 )
                 for _j in range(_MAX_SC)
@@ -597,7 +594,6 @@ def _analysis_dose_mult_controls(
     analysis_dose_schedule_attrs = [_a for _, _a in _dose_scheds]
     _n_sched = len(_dose_scheds)
     analysis_dose_mult_enabled = bool(_dose_scheds)
-    _age_labels = param_grid_columns(age_groups, num_age_groups)
 
     # Surface which schedule(s)/file(s) this actually scales, since the config
     # schema's "vaccine_schedule"/`daily_vaccines_df` naming doesn't tell the
@@ -654,7 +650,6 @@ def _analysis_dose_mult_controls(
                 mo.ui.number(
                     start=0.0, stop=10.0, step=None,
                     value=_st.get(_dose_key(_j, _k, _a), 1.0),
-                    label=_age_labels[_a],
                     on_change=_cb(_dose_key(_j, _k, _a)),
                 )
                 for _a in range(num_age_groups)
@@ -679,7 +674,6 @@ def _analysis_dose_mult_controls(
                     mo.ui.number(
                         start=0.0, stop=10.0, step=None,
                         value=_st.get(_dose_sp_key(_sp, _j, _k, _a), 1.0),
-                        label=_age_labels[_a],
                         on_change=_cb(_dose_sp_key(_sp, _j, _k, _a)),
                     )
                     for _a in range(num_age_groups)
@@ -857,11 +851,23 @@ def _analysis_shared_controls(mo, num_age_groups, is_metapop, metapop_folder_inp
     analysis_n_param_sets = mo.ui.number(
         value=10, start=1, stop=1000, step=1, label="Sampled parameter sets",
     )
+    # Off by default: only population-total median + 95% interval per
+    # scenario/metric is kept, independent of replicate count -- safe for
+    # large ensembles. On keeps the full per-subpop/age/risk/replicate detail
+    # in memory (enabling subpop/age slicing, the detailed CSV download, and
+    # user-defined metric plots/box plots), which scales with replicate count
+    # and can exhaust memory for large runs -- meant for smaller, exploratory
+    # runs where per-replicate drill-down is actually needed.
+    analysis_keep_full_detail = mo.ui.switch(
+        label="Keep full per-replicate results (drill-down / full export)",
+        value=False,
+    )
     analysis_run_button = mo.ui.run_button(label="Run analysis")
     return (
         analysis_subpop_selector, analysis_age_selector,
         analysis_sim_days, analysis_n_reps, analysis_timesteps, analysis_stochastic,
-        analysis_uncertainty_source, analysis_n_param_sets, analysis_run_button,
+        analysis_uncertainty_source, analysis_n_param_sets, analysis_keep_full_detail,
+        analysis_run_button,
     )
 
 
@@ -891,11 +897,10 @@ def _analysis_display(
     analysis_n_values, analysis_sens_sliders, ANALYSIS_NO_SWEEP,
     analysis_n_scenarios, analysis_scenario_names,
     analysis_scenario_scalar_inputs, analysis_scenario_array_scales,
-    analysis_subpop_selector, analysis_age_selector,
     analysis_sim_days, analysis_n_reps, analysis_timesteps, analysis_stochastic,
-    analysis_uncertainty_source, analysis_n_param_sets, analysis_run_button,
+    analysis_uncertainty_source, analysis_n_param_sets, analysis_keep_full_detail,
+    analysis_run_button,
     analysis_n_param_sets_avail,
-    analysis_comp_checkboxes,
     ANALYSIS_SCALAR_PARAMS, ANALYSIS_ARRAY_PARAMS,
     is_metapop, analysis_sp_names,
     analysis_sens_subpop_sel, analysis_sens_subpop_sliders,
@@ -915,6 +920,18 @@ def _analysis_display(
     mo.stop(main_tab.value != "Analysis", None)
     _ACC = CLT_ACCENT["analysis"]
     _n_sc = int(analysis_n_scenarios.value)
+    # "Scenario i" above the name box (rather than marimo's default inline
+    # label, which wraps awkwardly in these narrow grid columns).
+    _scenario_name_cells = [
+        mo.vstack([mo.md(f"**Scenario {j + 1}**"), analysis_scenario_names[j]])
+        for j in range(_n_sc)
+    ]
+    # Read-only echo of each scenario's name, for grids below the top-level
+    # scenario table where the name is just a column header, not editable.
+    _scenario_name_labels = [
+        mo.md(f"**{(analysis_scenario_names[j].value or f'Scenario {j + 1}').strip()}**")
+        for j in range(_n_sc)
+    ]
     _n_values = int(analysis_n_values.value)
     _scalar_names = list(ANALYSIS_SCALAR_PARAMS.keys())
     _array_names = list(ANALYSIS_ARRAY_PARAMS.keys())
@@ -1029,17 +1046,23 @@ def _analysis_display(
     # --- Scenario sub-tab ---
     _show_sp_col = _use_subpop
 
-    _header_items = [mo.md("**Parameter**")] + [analysis_scenario_names[j] for j in range(_n_sc)]
+    # Fixed relative column widths (label column wider than the per-scenario
+    # value columns) shared by the header and every scalar row below, so the
+    # value boxes line up vertically instead of hugging each row's label text.
+    _row_widths = [2] + [1] * _n_sc + ([1] if _show_sp_col else [])
+    _row_widths_no_sp = [2] + [1] * _n_sc
+
+    _header_items = [mo.md("**Parameter**")] + _scenario_name_cells
     if _show_sp_col:
         _header_items.append(mo.md("**Subpopulations**"))
-    _header = mo.hstack(_header_items, justify="start")
+    _header = mo.hstack(_header_items, justify="start", widths=_row_widths)
 
     _scalar_rows = []
     for _i, _pn in enumerate(_scalar_names):
         _row_items = [mo.md(f"`{_pn}`")] + [analysis_scenario_scalar_inputs[_i][j] for j in range(_n_sc)]
         if _show_sp_col and _i < len(analysis_scalar_subpop_sels):
             _row_items.append(analysis_scalar_subpop_sels[_i])
-        _scalar_rows.append(mo.hstack(_row_items, justify="start"))
+        _scalar_rows.append(mo.hstack(_row_items, justify="start", widths=_row_widths))
         if _show_sp_col and _i < len(analysis_scalar_subpop_sels):
             _sel_sps_i = list(analysis_scalar_subpop_sels.value[_i]) if _i < len(analysis_scalar_subpop_sels.value) else []
             for _sp in _sel_sps_i:
@@ -1048,7 +1071,7 @@ def _analysis_display(
                     if _i < len(analysis_scalar_subpop_inputs) and _sp_idx < len(analysis_scalar_subpop_inputs[_i]):
                         _sp_inputs = [analysis_scalar_subpop_inputs[_i][_sp_idx][j] for j in range(_n_sc)]
                         _sp_row_items = [mo.md(f"  ↳ *{_sp}*")] + _sp_inputs + [mo.md("")]
-                        _scalar_rows.append(mo.hstack(_sp_row_items, justify="start"))
+                        _scalar_rows.append(mo.hstack(_sp_row_items, justify="start", widths=_row_widths))
 
     _array_age_labels = param_grid_columns(age_groups, num_age_groups)
     _array_rows = []
@@ -1067,12 +1090,12 @@ def _analysis_display(
                 _age_row_items = [mo.md(f"`{_pn}` [{_array_age_labels[_a]}] ×scale")] + [
                     analysis_array_age_scale_inputs[_k][_a][j] for j in range(_n_sc)
                 ]
-                _array_rows.append(mo.hstack(_age_row_items, justify="start"))
+                _array_rows.append(mo.hstack(_age_row_items, justify="start", widths=_row_widths_no_sp))
             continue
         _arr_row_items = [mo.md(f"`{_pn}` ×scale")] + [analysis_scenario_array_scales[_k][j] for j in range(_n_sc)]
         if _show_sp_col and _k < len(analysis_array_subpop_sels):
             _arr_row_items.append(analysis_array_subpop_sels[_k])
-        _array_rows.append(mo.hstack(_arr_row_items, justify="start"))
+        _array_rows.append(mo.hstack(_arr_row_items, justify="start", widths=_row_widths))
         if _show_sp_col and _k < len(analysis_array_subpop_sels):
             _sel_sps_k = list(analysis_array_subpop_sels.value[_k]) if _k < len(analysis_array_subpop_sels.value) else []
             for _sp in _sel_sps_k:
@@ -1081,7 +1104,7 @@ def _analysis_display(
                     if _k < len(analysis_array_subpop_scales) and _sp_idx < len(analysis_array_subpop_scales[_k]):
                         _sp_scale_inputs = [analysis_array_subpop_scales[_k][_sp_idx][j] for j in range(_n_sc)]
                         _arr_sp_row = [mo.md(f"  ↳ *{_sp}* ×scale")] + _sp_scale_inputs + [mo.md("")]
-                        _array_rows.append(mo.hstack(_arr_sp_row, justify="start"))
+                        _array_rows.append(mo.hstack(_arr_sp_row, justify="start", widths=_row_widths))
 
     _scen_body = [mo.md("**Define N scenarios with per-parameter overrides.**"), analysis_n_scenarios, _header]
     if _scalar_rows:
@@ -1127,8 +1150,8 @@ def _analysis_display(
                                 f"`{analysis_dose_schedule_names[_k]}`:"
                             ))
                         _scen_body.append(mo.hstack(
-                            [mo.md("**Age group**")] + [analysis_scenario_names[j] for j in range(_n_sc)],
-                            justify="start",
+                            [mo.md("**Age group**")] + _scenario_name_labels,
+                            justify="start", widths=_row_widths_no_sp,
                         ))
                         for _a in range(num_age_groups):
                             _label = _dose_age_labels[_a]
@@ -1137,7 +1160,7 @@ def _analysis_display(
                                     analysis_dose_mult_subpop_inputs[_si][j][_k][_a]
                                     for j in range(_n_sc)
                                 ],
-                                justify="start",
+                                justify="start", widths=_row_widths_no_sp,
                             ))
             else:
                 for _k in range(_n_dose_sched):
@@ -1146,8 +1169,8 @@ def _analysis_display(
                             f"↳ schedule `{analysis_dose_schedule_names[_k]}`:"
                         ))
                     _scen_body.append(mo.hstack(
-                        [mo.md("**Age group**")] + [analysis_scenario_names[j] for j in range(_n_sc)],
-                        justify="start",
+                        [mo.md("**Age group**")] + _scenario_name_labels,
+                        justify="start", widths=_row_widths_no_sp,
                     ))
                     for _a in range(num_age_groups):
                         _label = _dose_age_labels[_a]
@@ -1155,7 +1178,7 @@ def _analysis_display(
                             [mo.md(f"`{_label}`")] + [
                                 analysis_dose_mult_inputs[j][_k][_a] for j in range(_n_sc)
                             ],
-                            justify="start",
+                            justify="start", widths=_row_widths_no_sp,
                         ))
     _scen_ui = mo.vstack(_scen_body)
 
@@ -1288,9 +1311,15 @@ def _analysis_display(
                     if not analysis_stochastic.value else mo.md(""),
                 ], justify="start"),
                 mo.vstack(_unc_parts) if _unc_parts else mo.md(""),
-                mo.hstack([analysis_subpop_selector, analysis_age_selector], justify="start"),
-                mo.md("**Compartments / metrics to display:**"),
-                mo.hstack(list(analysis_comp_checkboxes), wrap=True, justify="start"),
+                analysis_keep_full_detail,
+                mo.md(
+                    "*Off (default): only a population-total median + 95% interval is kept "
+                    "per scenario/metric — fast and memory-safe at any replicate count, but "
+                    "no subpop/age slicing, detailed CSV, full JSON export, or user-defined "
+                    "metric plots. On: full per-subpop/age/risk detail is kept for every "
+                    "replicate — enables those, but scales with replicate count; only for "
+                    "smaller, exploratory runs.*"
+                ) if not analysis_keep_full_detail.value else mo.md(""),
                 analysis_run_button,
             ]),
             accent=_ACC,
@@ -1534,6 +1563,7 @@ def _run_analysis(
     analysis_run_button, analysis_scenarios,
     analysis_sim_days, analysis_n_reps, analysis_timesteps, analysis_stochastic,
     analysis_uncertainty_source, analysis_n_param_sets, analysis_param_sets,
+    analysis_keep_full_detail,
     config_dict, compartments, is_metapop,
     metapop_folder_input, metapop_travel_config,
     transition_vars_input,
@@ -1709,18 +1739,37 @@ def _run_analysis(
                 mobility_value=float(mobility_input.value), daily_vaccines_value=float(daily_vaccines_input.value),
                 analysis_fitted_num_days=analysis_fitted_num_days,
                 analysis_fitted_tv_spacing=analysis_fitted_tv_spacing,
+                keep_full_detail=analysis_keep_full_detail.value,
                 progress_callback=_on_progress,
             )
         except Exception as _exc:
             mo.stop(True, mo.callout(mo.md(f"**Analysis error:** {_exc}"), kind="danger"))
 
-    _first_rep = next(iter(_all.values()))[0]
-    _first_sp_data = next(iter(_first_rep.values()))
-    _comp_set = set(compartments)
-    _tvs_actual = [k for k in _first_sp_data if k not in _comp_set]
+        _n_runs_done = (
+            sum(len(_r) for _r in _all.values()) if analysis_keep_full_detail.value
+            else len(_run_schedule) * len(analysis_scenarios)
+        )
+        mo.output.replace(mo.callout(
+            mo.md(f"Done — {_n_runs_done} run(s) completed."),
+            kind="success",
+        ))
+
+    _keep_full = analysis_keep_full_detail.value
+    if _keep_full:
+        _first_rep = next(iter(_all.values()))[0]
+        _first_sp_data = next(iter(_first_rep.values()))
+        _comp_set = set(compartments)
+        _tvs_actual = [k for k in _first_sp_data if k not in _comp_set]
+        _subpop_names_out = list(_first_rep.keys())
+    else:
+        _first_scen_summary = next(iter(_all.values()))
+        _comp_set = set(compartments)
+        _tvs_actual = [k for k in _first_scen_summary if k not in _comp_set]
+        _subpop_names_out = ["all subpops"]
     set_analysis_results({
         "scenarios": _all,
-        "subpop_names": list(_first_rep.keys()),
+        "keep_full_detail": _keep_full,
+        "subpop_names": _subpop_names_out,
         "compartments": list(compartments),
         "tvs": _tvs_actual,
         "num_days": _num_days,
@@ -1738,24 +1787,162 @@ def _run_analysis(
 
 
 @app.cell
-def _analysis_autosave(analysis_results, output_dir, json):
+def _analysis_autosave(analysis_results, output_dir, json, np):
     if analysis_results is not None:
+        _comps = analysis_results["compartments"]
+        _tvs = analysis_results["tvs"]
+        _sp_names = analysis_results["subpop_names"]
+        # Population-total (summed over subpop/age/risk) median + 95% interval
+        # across replicates, per scenario/compartment/tv -- not the full
+        # per-subpop/age/risk/replicate detail. That full detail is much
+        # larger and slow to serialize (every array .tolist()'d, for every
+        # replicate); it's written on demand instead, see
+        # _analysis_export_full below (only available when "Keep full
+        # per-replicate results" was on for this run).
+        if analysis_results.get("keep_full_detail", True):
+            _summary = {}
+            for _scen, _reps in analysis_results["scenarios"].items():
+                _scen_summary = {}
+                for _key in _comps + _tvs:
+                    _rep_totals = [
+                        sum(
+                            np.asarray(_rep[_sp][_key]).sum(axis=(1, 2))
+                            for _sp in _sp_names if _key in _rep.get(_sp, {})
+                        )
+                        for _rep in _reps
+                    ]
+                    _rep_totals = [_t for _t in _rep_totals if not np.isscalar(_t)]
+                    if not _rep_totals:
+                        continue
+                    _stacked = np.stack(_rep_totals, axis=0)
+                    _scen_summary[_key] = {
+                        "median": np.median(_stacked, axis=0).tolist(),
+                        "p2_5": np.percentile(_stacked, 2.5, axis=0).tolist(),
+                        "p97_5": np.percentile(_stacked, 97.5, axis=0).tolist(),
+                    }
+                _summary[_scen] = _scen_summary
+        else:
+            # analysis_results["scenarios"] is already the reduced
+            # {scenario: {key: {"median", "p2_5", "p97_5", "n_reps"}}} summary
+            # -- just convert arrays to lists for JSON.
+            _summary = {
+                _scen: {
+                    _key: {
+                        "median": np.asarray(_stats["median"]).tolist(),
+                        "p2_5": np.asarray(_stats["p2_5"]).tolist(),
+                        "p97_5": np.asarray(_stats["p97_5"]).tolist(),
+                    }
+                    for _key, _stats in _scen_data.items()
+                }
+                for _scen, _scen_data in analysis_results["scenarios"].items()
+            }
+
         _p = output_dir / "analysis_results.json"
+        # No indent -- this file isn't meant to be read by eye, and
+        # pretty-printing is pure serialization overhead at this size.
         _p.write_text(json.dumps({
-            "compartments": analysis_results["compartments"],
-            "tvs": analysis_results["tvs"],
+            "compartments": _comps,
+            "tvs": _tvs,
             "num_days": analysis_results["num_days"],
             "start_date": analysis_results.get("start_date", ""),
-            "subpop_names": analysis_results["subpop_names"],
-            "scenarios": {
-                _scen: [
-                    {_sp: {k: v.tolist() for k, v in _sp_data.items()}
-                     for _sp, _sp_data in _rep.items()}
-                    for _rep in _reps
-                ]
-                for _scen, _reps in analysis_results["scenarios"].items()
-            },
-        }, indent=2))
+            "subpop_names": _sp_names,
+            "scenarios_summary": _summary,
+        }, separators=(",", ":")))
+    return
+
+
+@app.cell
+def _analysis_export_full_button(mo):
+    analysis_export_full_button = mo.ui.run_button(label="Export full results (JSON)")
+    mo.vstack([
+        mo.md(
+            "*The autosave above only stores population-level summary "
+            "statistics (median + 95% interval per scenario/compartment). "
+            "Click to additionally write the full per-subpopulation/age/"
+            "risk/replicate detail to disk — slower and much larger for "
+            "many replicates, and only available when **Keep full "
+            "per-replicate results** was on for the current run.*"
+        ),
+        analysis_export_full_button,
+    ])
+    return (analysis_export_full_button,)
+
+
+@app.cell
+def _analysis_export_full(
+    analysis_export_full_button, analysis_results, output_dir, json, np, mo,
+):
+    import itertools
+
+    mo.stop(not analysis_export_full_button.value)
+    mo.stop(
+        analysis_results is None,
+        mo.callout(mo.md("**No analysis results yet.** Run analysis above first."), kind="warn"),
+    )
+    mo.stop(
+        not analysis_results.get("keep_full_detail", True),
+        mo.callout(
+            mo.md(
+                "**No full per-replicate detail available.** This run used "
+                "the summary-only mode. Turn on **Keep full per-replicate "
+                "results** in Run settings and re-run analysis first."
+            ),
+            kind="warn",
+        ),
+    )
+    # Same tidy row schema as the exported script's results.db
+    # (results/results_full tables in _nb_export.py) -- scenario, rep,
+    # param_set, compartment, kind, day, value (population-total) and the
+    # same plus subpop/age_group/risk_group (full detail) -- so downstream
+    # analysis code can treat either source the same way, just
+    # pd.DataFrame(data["results_full"], columns=data["results_full_columns"])
+    # instead of pd.read_sql. Row-of-lists rather than row-of-dicts to avoid
+    # repeating column names in every row.
+    _comp_set = set(analysis_results["compartments"])
+    _kind_of = lambda _key: "compartment" if _key in _comp_set else "transition"
+    _psets = analysis_results.get("param_set_indices", [])
+
+    _results_rows = []
+    _results_full_rows = []
+    for _scen, _reps in analysis_results["scenarios"].items():
+        for _ri, _rep in enumerate(_reps):
+            _psi = _psets[_ri] if _ri < len(_psets) else None
+            _agg_by_key = {}
+            for _sp_data in _rep.values():
+                for _key, _arr in _sp_data.items():
+                    _arr = np.asarray(_arr)
+                    _agg_by_key[_key] = _arr if _key not in _agg_by_key else _agg_by_key[_key] + _arr
+            for _key, _arr in _agg_by_key.items():
+                _totals = _arr.sum(axis=(1, 2))  # (days,)
+                _results_rows.extend(
+                    [_scen, _ri, _psi, _key, _kind_of(_key), _d + 1, float(_v)]
+                    for _d, _v in enumerate(_totals)
+                )
+            for _sp_name, _sp_data in _rep.items():
+                for _key, _arr in _sp_data.items():
+                    _arr = np.asarray(_arr)
+                    _d_idx, _a_idx, _r_idx = np.indices(_arr.shape)
+                    _results_full_rows.extend(zip(
+                        itertools.repeat(_scen), itertools.repeat(_ri), itertools.repeat(_psi),
+                        itertools.repeat(_key), itertools.repeat(_kind_of(_key)), itertools.repeat(_sp_name),
+                        _a_idx.ravel().tolist(), _r_idx.ravel().tolist(),
+                        (_d_idx.ravel() + 1).tolist(), _arr.ravel().astype(float).tolist(),
+                    ))
+
+    _p = output_dir / "analysis_results_full.json"
+    _p.write_text(json.dumps({
+        "results_columns": ["scenario", "rep", "param_set", "compartment", "kind", "day", "value"],
+        "results": _results_rows,
+        "results_full_columns": [
+            "scenario", "rep", "param_set", "compartment", "kind",
+            "subpop", "age_group", "risk_group", "day", "value",
+        ],
+        "results_full": _results_full_rows,
+    }, separators=(",", ":")))
+    mo.callout(
+        mo.md(f"Full results saved to `{_p}` ({_p.stat().st_size / 1e6:.1f} MB)."),
+        kind="success",
+    )
     return
 
 
@@ -1768,9 +1955,14 @@ def _analysis_plot_compartments(
     mo.stop(main_tab.value != "Analysis", None)
     mo.stop(analysis_results is None, mo.md("*Run analysis to see results.*"))
 
+    _keep_full = analysis_results.get("keep_full_detail", True)
     _selected = [k for k, v in zip(analysis_all_keys, analysis_comp_checkboxes.value) if v] or analysis_all_keys
     _sel_subpops = analysis_subpop_selector.value or ["all subpops"]
     _sel_ages = analysis_age_selector.value or ["all ages"]
+    if not _keep_full:
+        # Summary mode only has the population total -- subpop/age slicing
+        # needs "Keep full per-replicate results" on for the run.
+        _sel_subpops, _sel_ages = ["all subpops"], ["all ages"]
     _scens = analysis_results["scenarios"]
     _sp_names = analysis_results["subpop_names"]
     _start = analysis_results.get("start_date", "2024-01-01")
@@ -1780,39 +1972,59 @@ def _analysis_plot_compartments(
     _colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
     _LINE_STYLES = ["-", "--", ":", "-."]
 
-    def _agg(rep_data, sp_sel, age_sel, key):
-        _sps = (
-            [rep_data[sp] for sp in _sp_names if sp in rep_data]
-            if sp_sel == "all subpops"
-            else ([rep_data[sp_sel]] if sp_sel in rep_data else [])
-        )
-        if not _sps or key not in _sps[0]:
-            return None
-        _total = np.stack([d[key] for d in _sps], axis=0).sum(axis=0)  # (days, A, R)
+    def _sp_totals(rep_list, sp_sel, key):
+        # Per-rep subpop-selection stack/sum, independent of age. combos
+        # iterates ages within the same subpop consecutively (see _combos
+        # above), so caching this by (sp, scenario, key) means it's computed
+        # once per subpop rather than once per age group too.
+        _out = []
+        for _rep_data in rep_list:
+            _sps = (
+                [_rep_data[sp] for sp in _sp_names if sp in _rep_data]
+                if sp_sel == "all subpops"
+                else ([_rep_data[sp_sel]] if sp_sel in _rep_data else [])
+            )
+            if _sps and key in _sps[0]:
+                _out.append(np.stack([d[key] for d in _sps], axis=0).sum(axis=0))  # (days, A, R)
+        return _out
+
+    def _age_slice(total, age_sel):
         if age_sel == "all ages":
-            return _total.sum(axis=(1, 2))
-        return _total[:, int(age_sel.split()[-1]), :].sum(axis=1)
+            return total.sum(axis=(1, 2))
+        return total[:, int(age_sel.split()[-1]), :].sum(axis=1)
 
     _fig, _axes = plt.subplots(
         _n_combos, 1, figsize=(11, min(4 * _n_combos, 80)), squeeze=False,
         constrained_layout=True,
     )
 
+    _totals_cache = {}
     for _c_idx, (_sp, _ag) in enumerate(_combos):
         _ax = _axes[_c_idx, 0]
-        for _s_idx, (_scen_name, _reps) in enumerate(_scens.items()):
+        for _s_idx, (_scen_name, _scen_data) in enumerate(_scens.items()):
             _color = _colors[_s_idx % len(_colors)]
             for _k_idx, _key in enumerate(_selected):
                 _ls = _LINE_STYLES[_k_idx % len(_LINE_STYLES)]
-                _rep_arrs = [_agg(rep, _sp, _ag, _key) for rep in _reps]
-                _rep_arrs = [a for a in _rep_arrs if a is not None]
-                if not _rep_arrs:
-                    continue
-                _stacked = np.stack(_rep_arrs, axis=0)
-                _dates = pd.date_range(start=_start, periods=_stacked.shape[1], freq="D")
-                _med = np.median(_stacked, axis=0)
-                _lo = np.percentile(_stacked, 2.5, axis=0)
-                _hi = np.percentile(_stacked, 97.5, axis=0)
+                if _keep_full:
+                    _cache_key = (_sp, _scen_name, _key)
+                    if _cache_key not in _totals_cache:
+                        _totals_cache[_cache_key] = _sp_totals(_scen_data, _sp, _key)
+                    _totals = _totals_cache[_cache_key]
+                    if not _totals:
+                        continue
+                    _stacked = np.stack([_age_slice(t, _ag) for t in _totals], axis=0)
+                    _med = np.median(_stacked, axis=0)
+                    _lo = np.percentile(_stacked, 2.5, axis=0)
+                    _hi = np.percentile(_stacked, 97.5, axis=0)
+                else:
+                    # Precomputed by analysis_runner across all replicates --
+                    # no per-rep stacking needed here, independent of how
+                    # many replicates the run used.
+                    _stats = _scen_data.get(_key)
+                    if _stats is None:
+                        continue
+                    _med, _lo, _hi = _stats["median"], _stats["p2_5"], _stats["p97_5"]
+                _dates = pd.date_range(start=_start, periods=len(_med), freq="D")
                 _ax.plot(_dates, _med, label=f"{_scen_name} — {_key}",
                          color=_color, linestyle=_ls)
                 _ax.fill_between(_dates, _lo, _hi, color=_color, alpha=0.15)
@@ -1845,27 +2057,82 @@ def _analysis_plot_compartments(
             + (f" across {_n_sets_used} parameter set(s)" if _n_sets_used else "")
             + ". Re-click **Run analysis** after changing any run setting.*"
         ),
+        mo.md("**Compartments / metrics to display:**"),
+        mo.hstack(list(analysis_comp_checkboxes), wrap=True, justify="start"),
+        mo.hstack([analysis_subpop_selector, analysis_age_selector], justify="start")
+        if _keep_full else mo.md(
+            "*Subpopulation/age slicing needs **Keep full per-replicate "
+            "results** on for the run — showing the population total.*"
+        ),
         _fig,
     ])
     return
 
 
 @app.cell
+def _analysis_detailed_download_button(mo):
+    # Explicit button, not automatic -- this cell's output used to rebuild
+    # unconditionally on every analysis_results change (including the
+    # scenario/rep loop above just finishing), with a per-row Python dict
+    # appended inside a scenario x rep x subpop x key x age x day loop. Since
+    # marimo runs cells in dependency order on one kernel thread, that made
+    # the Summary Table and User-defined Metrics cells (which run after this
+    # one) wait behind it every single run, even when nobody wanted the CSV.
+    analysis_detailed_download_button = mo.ui.run_button(label="Build detailed timeseries CSV")
+    return (analysis_detailed_download_button,)
+
+
+@app.cell
 def _analysis_detailed_download(
-    analysis_results, np, pd, mo, main_tab,
+    analysis_detailed_download_button, analysis_results, np, pd, mo, main_tab,
 ):
     mo.stop(main_tab.value != "Analysis", None)
     mo.stop(analysis_results is None, mo.md(""))
+    # Needs full per-replicate detail -- iterates every rep x subpop x age x
+    # key x day into a long-format DataFrame, which scales with replicate
+    # count and isn't available in the default summary-only mode.
+    mo.stop(not analysis_results.get("keep_full_detail", True), mo.md(
+        "*Detailed timeseries CSV needs **Keep full per-replicate results** "
+        "on for the run.*"
+    ))
+    mo.stop(not analysis_detailed_download_button.value, mo.vstack([
+        mo.md("*Click to build the detailed per-replicate timeseries CSV (not built automatically).*"),
+        analysis_detailed_download_button,
+    ]))
 
     _scens = analysis_results["scenarios"]
     _sp_names = analysis_results["subpop_names"]
     _all_keys = analysis_results["compartments"] + analysis_results["tvs"]
     _start = analysis_results.get("start_date", "2024-01-01")
 
-    _rows = []
+    # Vectorized row construction (numpy.indices + itertools.repeat), same
+    # approach as the full-JSON export cell -- avoids a Python dict-append
+    # per (scenario, rep, subpop, key, age, day) combination.
+    import itertools as _itertools
+
+    _cols = ["date", "scenario", "subpopulation", "age_group", "replicate", "metric", "value"]
+    _col_chunks = {c: [] for c in _cols}
+
+    def _append_rows(_scen_name, _sp, _rep_idx, _key, _arr, _dates):
+        # _arr: (days, A, R) -- age_group "aggregated" (sum over age+risk)
+        # plus one row per individual age group (summed over risk).
+        _n_days, _n_ages, _ = _arr.shape
+        _by_age = _arr.sum(axis=2)  # (days, A)
+        _agg = _by_age.sum(axis=1)  # (days,)
+        _n = _n_days * (_n_ages + 1)
+        _col_chunks["date"].append(np.tile([_d.date().isoformat() for _d in _dates], _n_ages + 1))
+        _col_chunks["scenario"].append(list(_itertools.repeat(_scen_name, _n)))
+        _col_chunks["subpopulation"].append(list(_itertools.repeat(_sp, _n)))
+        _col_chunks["age_group"].append(
+            list(_itertools.chain.from_iterable(_itertools.repeat(_a, _n_days) for _a in range(_n_ages)))
+            + list(_itertools.repeat("aggregated", _n_days))
+        )
+        _col_chunks["replicate"].append(list(_itertools.repeat(_rep_idx, _n)))
+        _col_chunks["metric"].append(list(_itertools.repeat(_key, _n)))
+        _col_chunks["value"].append(np.concatenate([_by_age.T.ravel(), _agg]).astype(float))
+
     for _scen_name, _reps in _scens.items():
         for _rep_idx, _rep_data in enumerate(_reps):
-            # Aggregate across subpops for each key: shape (days, A, R)
             _agg_by_key = {}
             for _key in _all_keys:
                 _arrays = [_rep_data[_sp][_key] for _sp in _sp_names if _key in _rep_data.get(_sp, {})]
@@ -1874,45 +2141,26 @@ def _analysis_detailed_download(
 
             for _sp in _sp_names + ["aggregated"]:
                 for _key in _all_keys:
-                    if _sp == "aggregated":
-                        _arr = _agg_by_key.get(_key)
-                    else:
-                        _arr = _rep_data.get(_sp, {}).get(_key)
+                    _arr = _agg_by_key.get(_key) if _sp == "aggregated" else _rep_data.get(_sp, {}).get(_key)
                     if _arr is None:
                         continue
-                    _arr = np.array(_arr)  # (days, A, R)
-                    _n_days, _n_ages, _n_risks = _arr.shape
-                    _dates = pd.date_range(start=_start, periods=_n_days, freq="D")
+                    _arr = np.asarray(_arr)  # (days, A, R)
+                    _dates = pd.date_range(start=_start, periods=_arr.shape[0], freq="D")
+                    _append_rows(_scen_name, _sp, _rep_idx, _key, _arr, _dates)
 
-                    for _age_idx in range(_n_ages):
-                        _series = _arr[:, _age_idx, :].sum(axis=1)
-                        for _day_i, (_date, _val) in enumerate(zip(_dates, _series)):
-                            _rows.append({
-                                "date": _date.date().isoformat(),
-                                "scenario": _scen_name,
-                                "subpopulation": _sp,
-                                "age_group": _age_idx,
-                                "replicate": _rep_idx,
-                                "metric": _key,
-                                "value": float(_val),
-                            })
+    if _col_chunks["value"]:
+        _detail_df = pd.DataFrame({
+            "date": np.concatenate(_col_chunks["date"]),
+            "scenario": list(_itertools.chain.from_iterable(_col_chunks["scenario"])),
+            "subpopulation": list(_itertools.chain.from_iterable(_col_chunks["subpopulation"])),
+            "age_group": list(_itertools.chain.from_iterable(_col_chunks["age_group"])),
+            "replicate": list(_itertools.chain.from_iterable(_col_chunks["replicate"])),
+            "metric": list(_itertools.chain.from_iterable(_col_chunks["metric"])),
+            "value": np.concatenate(_col_chunks["value"]),
+        })
+    else:
+        _detail_df = pd.DataFrame(columns=_cols)
 
-                    # Aggregated age group (sum over all ages and risks)
-                    _series_agg = _arr.sum(axis=(1, 2))
-                    for _day_i, (_date, _val) in enumerate(zip(_dates, _series_agg)):
-                        _rows.append({
-                            "date": _date.date().isoformat(),
-                            "scenario": _scen_name,
-                            "subpopulation": _sp,
-                            "age_group": "aggregated",
-                            "replicate": _rep_idx,
-                            "metric": _key,
-                            "value": float(_val),
-                        })
-
-    _detail_df = pd.DataFrame(_rows) if _rows else pd.DataFrame(
-        columns=["date", "scenario", "subpopulation", "age_group", "replicate", "metric", "value"]
-    )
     _detail_csv_dl = mo.download(
         data=_detail_df.to_csv(index=False).encode(),
         filename="analysis_detailed_timeseries.csv",
@@ -1931,13 +2179,19 @@ def _analysis_summary_table(
     mo.stop(main_tab.value != "Analysis", None)
     mo.stop(analysis_results is None, mo.md(""))
 
+    _keep_full = analysis_results.get("keep_full_detail", True)
     _selected = [k for k, v in zip(analysis_all_keys, analysis_comp_checkboxes.value) if v] or analysis_all_keys
     _sel_subpops = analysis_subpop_selector.value or ["all subpops"]
     _sel_ages = analysis_age_selector.value or ["all ages"]
+    if not _keep_full:
+        _sel_subpops, _sel_ages = ["all subpops"], ["all ages"]
     _scens = analysis_results["scenarios"]
     _sp_names = analysis_results["subpop_names"]
 
-    def _agg(rep_data, sp_sel, age_sel, key):
+    def _sp_total(rep_data, sp_sel, key):
+        # Subpop-selection stack/sum, independent of age -- hoisted out of
+        # the age loop below so it's computed once per (subpop selection,
+        # scenario, key, replicate) rather than once per age group too.
         _sps = (
             [rep_data[sp] for sp in _sp_names if sp in rep_data]
             if sp_sel == "all subpops"
@@ -1945,30 +2199,51 @@ def _analysis_summary_table(
         )
         if not _sps or key not in _sps[0]:
             return None
-        _total = np.stack([d[key] for d in _sps], axis=0).sum(axis=0)  # (days, A, R)
+        return np.stack([d[key] for d in _sps], axis=0).sum(axis=0)  # (days, A, R)
+
+    def _age_slice(total, age_sel):
         if age_sel == "all ages":
-            return _total.sum(axis=(1, 2))
-        return _total[:, int(age_sel.split()[-1]), :].sum(axis=1)
+            return total.sum(axis=(1, 2))
+        return total[:, int(age_sel.split()[-1]), :].sum(axis=1)
 
     _rows = []
     for _sp in _sel_subpops:
-        for _ag in _sel_ages:
-            for _scen_name, _reps in _scens.items():
-                for _key in _selected:
-                    _arrays = [_agg(rep, _sp, _ag, _key) for rep in _reps]
-                    _arrays = [a for a in _arrays if a is not None]
-                    if not _arrays:
+        for _scen_name, _scen_data in _scens.items():
+            for _key in _selected:
+                if _keep_full:
+                    _totals = [_sp_total(rep, _sp, _key) for rep in _scen_data]
+                    _totals = [t for t in _totals if t is not None]
+                    if not _totals:
                         continue
-                    _mat = np.stack(_arrays, axis=0)
-                    _rows.append({
-                        "Scenario": _scen_name,
-                        "Subpopulation": _sp,
-                        "Age group": _ag,
-                        "Metric": _key,
-                        "Peak (median)": f"{float(np.median(np.max(_mat, axis=1))):,.0f}",
-                        "Peak day (median)": int(np.median(np.argmax(_mat, axis=1))) + 1,
-                        "Day-end (median)": f"{float(np.median(_mat[:, -1])):,.0f}",
-                    })
+                    for _ag in _sel_ages:
+                        _mat = np.stack([_age_slice(t, _ag) for t in _totals], axis=0)
+                        _rows.append({
+                            "Scenario": _scen_name,
+                            "Subpopulation": _sp,
+                            "Age group": _ag,
+                            "Metric": _key,
+                            "Peak (median)": f"{float(np.median(np.max(_mat, axis=1))):,.0f}",
+                            "Peak day (median)": int(np.median(np.argmax(_mat, axis=1))) + 1,
+                            "Day-end (median)": f"{float(np.median(_mat[:, -1])):,.0f}",
+                        })
+                else:
+                    # Precomputed median series -- peak/day-end read
+                    # directly off it (no per-rep distribution available
+                    # in summary mode, so no per-rep peak-day spread).
+                    _stats = _scen_data.get(_key)
+                    if _stats is None:
+                        continue
+                    _med = np.asarray(_stats["median"])
+                    for _ag in _sel_ages:
+                        _rows.append({
+                            "Scenario": _scen_name,
+                            "Subpopulation": _sp,
+                            "Age group": _ag,
+                            "Metric": _key,
+                            "Peak (median)": f"{float(np.max(_med)):,.0f}",
+                            "Peak day (median)": int(np.argmax(_med)) + 1,
+                            "Day-end (median)": f"{float(_med[-1]):,.0f}",
+                        })
 
     _df = pd.DataFrame(_rows) if _rows else pd.DataFrame(
         columns=["Scenario", "Subpopulation", "Age group", "Metric",
@@ -2009,7 +2284,7 @@ def _analysis_metric_plot_options(mo):
 
 @app.cell
 def _analysis_metric_defs_show(
-    mo, main_tab,
+    mo, main_tab, analysis_results,
     analysis_n_metrics_input, analysis_metric_names, analysis_metric_tvs,
     analysis_plot_metric_sel, transition_vars_input, tv_opts,
     analysis_metric_per_age, analysis_metric_cumulative,
@@ -2017,7 +2292,18 @@ def _analysis_metric_defs_show(
     mo.stop(main_tab.value != "Analysis", None)
     _n = int(analysis_n_metrics_input.value)
     _tvars_explicit = [v.strip() for v in transition_vars_input.value.split(",") if v.strip()]
-    if tv_opts:
+    if analysis_results is not None and not analysis_results.get("keep_full_detail", True):
+        # The plots below need the per-replicate detail this run didn't keep
+        # (see Run settings above) -- showing which transition variables
+        # *would* be tracked is moot until that's turned on and re-run.
+        _hint = (
+            "This run used summary-only mode, which doesn't keep the "
+            "per-replicate detail these plots need. Turn on **Keep full "
+            "per-replicate results** in Run settings above and re-run "
+            "analysis."
+        )
+        _hint_kind = "warn"
+    elif tv_opts:
         _hint = (
             ("Saving all transition variables. " if not _tvars_explicit else "")
             + "Available: "
@@ -2053,15 +2339,28 @@ def _analysis_metric_defs_show(
 def _analysis_compute_metric_series(
     analysis_results,
     analysis_n_metrics_input, analysis_metric_names, analysis_metric_tvs,
+    analysis_plot_metric_sel,
     np,
 ):
     analysis_metric_series = None
 
-    if analysis_results is not None:
+    # User-defined metric plots/box plots need per-replicate detail (box
+    # plots in particular need the actual per-rep distribution); not
+    # available in the default summary-only mode.
+    if analysis_results is not None and analysis_results.get("keep_full_detail", True):
         _n = int(analysis_n_metrics_input.value)
+        # Only the metric(s) actually selected for display -- computing every
+        # defined metric regardless of selection redoes this per-replicate
+        # scan for metrics nobody's looking at. analysis_plot_metric_sel's
+        # options come from analysis_metric_names directly (not from this
+        # cell's own output), so filtering here doesn't create a dependency
+        # cycle.
+        _sel_names = set(analysis_plot_metric_sel.value or [])
         _metric_defs = []
         for _i in range(_n):
             _name = analysis_metric_names.value[_i].strip() or f"metric_{_i + 1}"
+            if _sel_names and _name not in _sel_names:
+                continue
             _raw = analysis_metric_tvs.value[_i]
             _tvs = _raw if isinstance(_raw, list) else [t.strip() for t in _raw.split(",") if t.strip()]
             if _tvs:
@@ -2079,7 +2378,11 @@ def _analysis_compute_metric_series(
                             _total = None
                             for _tv in _mtvs:
                                 if _tv in _sp_hist:
-                                    _arr = np.array(_sp_hist[_tv])
+                                    # asarray, not array -- these are already
+                                    # ndarrays, so array() would force a full
+                                    # copy of every (day, age, risk) history
+                                    # for no reason, for every tv/rep/subpop.
+                                    _arr = np.asarray(_sp_hist[_tv])
                                     _total = _arr if _total is None else _total + _arr
                             if _total is not None:
                                 _sp_data[_sp_name] = _total  # shape (T, A, R)
@@ -2098,12 +2401,19 @@ def _analysis_compute_metric_series(
 
 @app.cell
 def _analysis_plot_daily_metrics(
-    analysis_metric_series, analysis_plot_metric_sel,
+    analysis_metric_series, analysis_plot_metric_sel, analysis_results,
     analysis_subpop_selector, analysis_age_selector,
     analysis_metric_per_age, analysis_metric_cumulative,
     num_age_groups, np, pd, plt, mo, main_tab,
 ):
     mo.stop(main_tab.value != "Analysis", None)
+    mo.stop(
+        analysis_results is not None and not analysis_results.get("keep_full_detail", True),
+        mo.md(
+            "*User-defined metric plots need **Keep full per-replicate "
+            "results** on for the run (Run settings above).*"
+        ),
+    )
     mo.stop(
         analysis_metric_series is None,
         mo.md("*Define metrics above and run analysis to see metric plots.*"),
@@ -2200,12 +2510,16 @@ def _analysis_plot_daily_metrics(
 
 @app.cell
 def _analysis_plot_cumulative_boxplot(
-    analysis_metric_series, analysis_plot_metric_sel,
+    analysis_metric_series, analysis_plot_metric_sel, analysis_results,
     analysis_subpop_selector, analysis_age_selector,
     analysis_metric_per_age, num_age_groups,
     np, pd, plt, mo, main_tab,
 ):
     mo.stop(main_tab.value != "Analysis", None)
+    mo.stop(
+        analysis_results is not None and not analysis_results.get("keep_full_detail", True),
+        mo.md(""),
+    )
     mo.stop(analysis_metric_series is None, mo.md(""))
     _sel_metrics = [
         m for m in (analysis_plot_metric_sel.value or [])
@@ -2282,11 +2596,15 @@ def _analysis_plot_cumulative_boxplot(
 
 @app.cell
 def _analysis_plot_age_bars(
-    analysis_metric_series, analysis_plot_metric_sel,
+    analysis_metric_series, analysis_plot_metric_sel, analysis_results,
     analysis_subpop_selector,
     num_age_groups, np, pd, plt, mo, main_tab,
 ):
     mo.stop(main_tab.value != "Analysis", None)
+    mo.stop(
+        analysis_results is not None and not analysis_results.get("keep_full_detail", True),
+        mo.md(""),
+    )
     mo.stop(analysis_metric_series is None, mo.md(""))
     _sel_metrics = [
         m for m in (analysis_plot_metric_sel.value or [])

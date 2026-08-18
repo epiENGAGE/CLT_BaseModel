@@ -207,10 +207,15 @@ class ResultsDB:
 def scenario_totals(db: ResultsDB, scenario: str, population: np.ndarray) -> dict:
     arrs = db.arrays(scenario, ["I_to_H", "IV_to_H", "S_to_SV"])
     new_H = (arrs["I_to_H"] + arrs["IV_to_H"]).sum(axis=1)  # (reps, A)
-    # Doses are schedule-driven, not transition-RNG-driven, so replicate 0's
-    # total is representative even under STOCHASTIC=True -- only the
-    # infection/hospitalization arms carry meaningful across-replicate spread.
-    doses = arrs["S_to_SV"][0].sum(axis=0)  # (A,)
+    # Doses are schedule-driven, not transition-RNG-driven, so under
+    # UNCERTAINTY_SOURCE="transitions" every replicate's schedule is
+    # identical and any one of them is representative. But under
+    # UNCERTAINTY_SOURCE="parameters" each replicate is a different sampled
+    # parameter set, and coverage-target scenarios (e.g. table S.A.3/S.A.6's
+    # "scale to 70% coverage") derive their dose multiplier from that
+    # replicate's own baseline coverage -- so the schedule itself varies
+    # per replicate and must be kept per-replicate here, paired with new_H.
+    doses = arrs["S_to_SV"].sum(axis=1)  # (reps, A)
     return {"new_H": new_H, "doses": doses, "population": population}
 
 
