@@ -41,6 +41,7 @@ h11==0.16.0
 httpcore==1.0.9
 httpx==0.28.1
 idna==3.11
+ijson==3.5.1
 importlib_metadata==8.7.1
 iniconfig==2.3.0
 ipykernel==7.1.0

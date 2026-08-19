@@ -1774,6 +1774,12 @@ def _run_analysis(
         "tvs": _tvs_actual,
         "num_days": _num_days,
         "start_date": _start,
+        # Run settings carried alongside the results so the SQLite export can
+        # record them in its `meta` table — the results rows themselves only
+        # carry day indices, so without these a downstream reader cannot
+        # reconstruct real dates or tell a deterministic run from a stochastic one.
+        "timesteps_per_day": _ts,
+        "stochastic": _stoch,
         # Which sampled param set each replicate used (None when parameter
         # uncertainty is off) — lets downstream code group replicates by draw.
         "param_set_indices": [_i for _i, _ in _run_schedule],
@@ -1853,7 +1859,7 @@ def _analysis_autosave(analysis_results, output_dir, json, np):
 
 @app.cell
 def _analysis_export_full_button(mo):
-    analysis_export_full_button = mo.ui.run_button(label="Export full results (JSON)")
+    analysis_export_full_button = mo.ui.run_button(label="Export full results (SQLite)")
     mo.vstack([
         mo.md(
             "*The autosave above only stores population-level summary "
@@ -1861,7 +1867,11 @@ def _analysis_export_full_button(mo):
             "Click to additionally write the full per-subpopulation/age/"
             "risk/replicate detail to disk — slower and much larger for "
             "many replicates, and only available when **Keep full "
-            "per-replicate results** was on for the current run.*"
+            "per-replicate results** was on for the current run.*\n\n"
+            "*Written as a SQLite `.db` with the same `results`/`results_full` "
+            "schema the Export tab's `run_simulation.py` produces, so either "
+            "source opens in the Results Explorer notebook "
+            "(`results_explorer_notebook.py`) without conversion.*"
         ),
         analysis_export_full_button,
     ])
@@ -1870,7 +1880,8 @@ def _analysis_export_full_button(mo):
 
 @app.cell
 def _analysis_export_full(
-    analysis_export_full_button, analysis_results, output_dir, json, np, mo,
+    analysis_export_full_button, analysis_results, output_dir, config_dict,
+    json, np, mo, sqlite3,
 ):
     import itertools
 
@@ -1890,57 +1901,141 @@ def _analysis_export_full(
             kind="warn",
         ),
     )
-    # Same tidy row schema as the exported script's results.db
-    # (results/results_full tables in _nb_export.py) -- scenario, rep,
-    # param_set, compartment, kind, day, value (population-total) and the
-    # same plus subpop/age_group/risk_group (full detail) -- so downstream
-    # analysis code can treat either source the same way, just
-    # pd.DataFrame(data["results_full"], columns=data["results_full_columns"])
-    # instead of pd.read_sql. Row-of-lists rather than row-of-dicts to avoid
-    # repeating column names in every row.
+    # Written as SQLite with exactly the schema the exported script's
+    # results.db uses (results/results_full tables in _nb_export.py) --
+    # scenario, rep, param_set, compartment, kind, day, value
+    # (population-total) and the same plus subpop/age_group/risk_group (full
+    # detail) -- so the Results Explorer notebook opens either source with no
+    # conversion and no format branch.
+    #
+    # Rows are inserted per array with executemany as the loops walk the
+    # results, rather than accumulated into one big list and serialized at
+    # the end (what the earlier JSON export did). That keeps peak memory
+    # bounded by a single (days, A, R) array instead of growing with the size
+    # of the whole export: the JSON path measured ~5.5x the output size in
+    # peak RSS and scaled linearly with it (~8 GB to write a 1.4 GB export),
+    # while this stays flat at tens of MB regardless of scenario/replicate
+    # count.
     _comp_set = set(analysis_results["compartments"])
     _kind_of = lambda _key: "compartment" if _key in _comp_set else "transition"
     _psets = analysis_results.get("param_set_indices", [])
 
-    _results_rows = []
-    _results_full_rows = []
-    for _scen, _reps in analysis_results["scenarios"].items():
-        for _ri, _rep in enumerate(_reps):
-            _psi = _psets[_ri] if _ri < len(_psets) else None
-            _agg_by_key = {}
-            for _sp_data in _rep.values():
-                for _key, _arr in _sp_data.items():
-                    _arr = np.asarray(_arr)
-                    _agg_by_key[_key] = _arr if _key not in _agg_by_key else _agg_by_key[_key] + _arr
-            for _key, _arr in _agg_by_key.items():
-                _totals = _arr.sum(axis=(1, 2))  # (days,)
-                _results_rows.extend(
-                    [_scen, _ri, _psi, _key, _kind_of(_key), _d + 1, float(_v)]
-                    for _d, _v in enumerate(_totals)
-                )
-            for _sp_name, _sp_data in _rep.items():
-                for _key, _arr in _sp_data.items():
-                    _arr = np.asarray(_arr)
-                    _d_idx, _a_idx, _r_idx = np.indices(_arr.shape)
-                    _results_full_rows.extend(zip(
-                        itertools.repeat(_scen), itertools.repeat(_ri), itertools.repeat(_psi),
-                        itertools.repeat(_key), itertools.repeat(_kind_of(_key)), itertools.repeat(_sp_name),
-                        _a_idx.ravel().tolist(), _r_idx.ravel().tolist(),
-                        (_d_idx.ravel() + 1).tolist(), _arr.ravel().astype(float).tolist(),
-                    ))
+    _p = output_dir / "analysis_results_full.db"
+    # Rebuilt from scratch each export -- appending would mix replicates from
+    # different runs under the same rep indices.
+    _p.unlink(missing_ok=True)
+    for _stale in output_dir.glob("analysis_results_full.db-*"):
+        _stale.unlink(missing_ok=True)
+    _con = sqlite3.connect(_p)
+    _con.execute("PRAGMA journal_mode = WAL")
+    _con.execute("PRAGMA synchronous = NORMAL")
+    _cur = _con.cursor()
+    _cur.execute(
+        "CREATE TABLE results "
+        "(scenario TEXT, rep INTEGER, param_set INTEGER, compartment TEXT, kind TEXT, "
+        "day INTEGER, value REAL)"
+    )
+    _cur.execute(
+        "CREATE TABLE results_full "
+        "(scenario TEXT, rep INTEGER, param_set INTEGER, compartment TEXT, kind TEXT, "
+        "subpop TEXT, age_group INTEGER, risk_group INTEGER, day INTEGER, value REAL)"
+    )
 
-    _p = output_dir / "analysis_results_full.json"
-    _p.write_text(json.dumps({
-        "results_columns": ["scenario", "rep", "param_set", "compartment", "kind", "day", "value"],
-        "results": _results_rows,
-        "results_full_columns": [
-            "scenario", "rep", "param_set", "compartment", "kind",
-            "subpop", "age_group", "risk_group", "day", "value",
-        ],
-        "results_full": _results_full_rows,
-    }, separators=(",", ":")))
+    with mo.status.spinner("Writing full results to SQLite…"):
+        for _scen, _reps in analysis_results["scenarios"].items():
+            for _ri, _rep in enumerate(_reps):
+                _psi = _psets[_ri] if _ri < len(_psets) else None
+                _agg_by_key = {}
+                for _sp_data in _rep.values():
+                    for _key, _arr in _sp_data.items():
+                        _arr = np.asarray(_arr)
+                        _agg_by_key[_key] = _arr if _key not in _agg_by_key else _agg_by_key[_key] + _arr
+                for _key, _arr in _agg_by_key.items():
+                    _totals = _arr.sum(axis=(1, 2))  # (days,)
+                    _cur.executemany(
+                        "INSERT INTO results VALUES (?,?,?,?,?,?,?)",
+                        [(_scen, _ri, _psi, _key, _kind_of(_key), _d + 1, float(_v))
+                         for _d, _v in enumerate(_totals)],
+                    )
+                for _sp_name, _sp_data in _rep.items():
+                    for _key, _arr in _sp_data.items():
+                        _arr = np.asarray(_arr)
+                        _d_idx, _a_idx, _r_idx = np.indices(_arr.shape)
+                        _cur.executemany(
+                            "INSERT INTO results_full VALUES (?,?,?,?,?,?,?,?,?,?)",
+                            zip(
+                                itertools.repeat(_scen), itertools.repeat(_ri), itertools.repeat(_psi),
+                                itertools.repeat(_key), itertools.repeat(_kind_of(_key)),
+                                itertools.repeat(_sp_name),
+                                _a_idx.ravel().tolist(), _r_idx.ravel().tolist(),
+                                (_d_idx.ravel() + 1).tolist(), _arr.ravel().astype(float).tolist(),
+                            ),
+                        )
+
+        # Run-level metadata the rows themselves cannot carry. Without this a
+        # reader only sees day indices and 0-based age/risk indices, so it
+        # cannot plot real dates or label age bands -- and on a large .db,
+        # recovering even the scenario list by SELECT DISTINCT means a full
+        # table scan (measured at 7s on a 73M-row `results`, 49s on its
+        # `results_full`). Stored as key/value JSON so new keys can be added
+        # later without a schema migration; readers must tolerate its absence
+        # (files written before this table existed) and missing keys.
+        _age_risk = (config_dict.get("age_risk", {}) or {})
+        _meta = {
+            "schema_version": 1,
+            "source": "analysis_tab",
+            "start_date": analysis_results.get("start_date"),
+            "num_days": analysis_results.get("num_days"),
+            "timesteps_per_day": analysis_results.get("timesteps_per_day"),
+            "stochastic": analysis_results.get("stochastic"),
+            "uncertainty_source": analysis_results.get("uncertainty_source"),
+            "num_age_groups": _age_risk.get("num_age_groups"),
+            "num_risk_groups": _age_risk.get("num_risk_groups"),
+            "age_group_labels": _age_risk.get("age_groups"),
+            "subpop_names": analysis_results.get("subpop_names"),
+            # Definition order, which SELECT DISTINCT would lose -- it decides
+            # scenario colour assignment and which scenario reads as baseline.
+            "scenarios": list(analysis_results["scenarios"].keys()),
+            # Also order-bearing, for the same reason: these are the model's
+            # own compartment and transition order (the order this notebook's
+            # own metric selectors use), so a reader can offer the same list in
+            # the same order. Recovering them with SELECT DISTINCT instead
+            # yields alphabetical, which scrambles a model's natural
+            # S -> E -> I -> H -> R reading order. Keep both lists as-is; do
+            # not sort them here or on the way out.
+            "compartments": analysis_results.get("compartments"),
+            "transition_vars": analysis_results.get("tvs"),
+            "n_reps": len(_psets) or None,
+            "param_set_indices": _psets,
+        }
+        _cur.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT)")
+        _cur.executemany(
+            "INSERT INTO meta VALUES (?,?)",
+            [(_k, json.dumps(_v)) for _k, _v in _meta.items()],
+        )
+
+        # Every explorer query filters on (scenario, compartment) before
+        # aggregating, so without these each chart is a full scan.
+        _cur.execute(
+            "CREATE INDEX idx_results_scenario_compartment "
+            "ON results (scenario, compartment)"
+        )
+        _cur.execute(
+            "CREATE INDEX idx_results_full_scenario_compartment "
+            "ON results_full (scenario, compartment)"
+        )
+        _con.commit()
+        _con.close()
+
+    _size_mb = sum(
+        _f.stat().st_size for _f in output_dir.glob("analysis_results_full.db*")
+    ) / 1e6
     mo.callout(
-        mo.md(f"Full results saved to `{_p}` ({_p.stat().st_size / 1e6:.1f} MB)."),
+        mo.md(
+            f"Full results saved to `{_p}` ({_size_mb:.1f} MB).\n\n"
+            "Open it in the Results Explorer notebook "
+            "(`generic_core/examples/results_explorer_notebook.py`) to build charts."
+        ),
         kind="success",
     )
     return

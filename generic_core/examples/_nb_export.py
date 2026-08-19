@@ -132,6 +132,11 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
     _HERE = Path(__file__).parent
     sys.path.insert(0, str(_HERE.parent.parent))
 
+    # Write output next to this script, not into whatever the current working
+    # directory happens to be. An absolute OUTPUT_DIR is used as-is.
+    if not OUTPUT_DIR.is_absolute():
+        OUTPUT_DIR = _HERE / OUTPUT_DIR
+
     import clt_toolkit as clt
     import flu_core as flu
     from generic_core.config_parser import parse_model_config_from_dict
@@ -739,6 +744,64 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
                 if _n_reps > 20 and (_ri + 1) % 20 == 0:
                     print(f"  [{_si}/{len(all_results)}] {_scen}: wrote {_ri + 1}/{_n_reps} replicate(s)")
             print(f"[{_si}/{len(all_results)}] {_scen}: wrote {_n_reps} replicate(s) to {_db}")
+        # Run-level metadata the result rows themselves cannot carry: they
+        # only hold day indices and 0-based age/risk indices, so without this
+        # a reader (e.g. results_explorer_notebook.py) cannot plot real dates
+        # or label age bands. It also saves the reader from recovering the
+        # scenario/subpop lists with SELECT DISTINCT, which on a large
+        # results.db means a full table scan -- measured at 7s over a 73M-row
+        # `results` and 49s over its `results_full`, just to list values that
+        # were known here at write time.
+        #
+        # Key/value JSON so keys can be added later without migrating the
+        # schema. Readers must tolerate the table being absent (files written
+        # before it existed) and individual keys being missing.
+        _subpop_names = sorted({
+            _spname
+            for _reps_data in all_results.values()
+            for (_h, _h_full, _kinds, _psi) in _reps_data
+            for _sp_map in _h_full.values()
+            for _spname in _sp_map
+        })
+        _meta = {
+            "schema_version": 1,
+            "source": "run_simulation_script",
+            "start_date": START_DATE,
+            "num_days": NUM_DAYS,
+            "timesteps_per_day": TIMESTEPS_PER_DAY,
+            "stochastic": RUN_STOCHASTIC,
+            "uncertainty_source": UNCERTAINTY_SOURCE,
+            "num_age_groups": NUM_AGE_GROUPS,
+            "num_risk_groups": NUM_RISK_GROUPS,
+            "age_group_labels": (config_dict.get("age_risk", {}) or {}).get("age_groups"),
+            "subpop_names": _subpop_names,
+            # Definition order, which SELECT DISTINCT would lose -- it decides
+            # scenario colour assignment and which scenario reads as baseline.
+            "scenarios": list(SCENARIOS.keys()),
+            # Order-bearing too: model_config.json's compartment order followed
+            # by its transition order, matching the metric lists the Model
+            # Builder's own selectors show. SELECT DISTINCT would return these
+            # alphabetically, scrambling a model's natural S -> E -> I -> H -> R
+            # reading order. Keep as-is; do not sort.
+            "compartments": [
+                _c for _c in (
+                    list(config_dict.get("compartments", {}).keys())
+                    if isinstance(config_dict.get("compartments"), dict)
+                    else list(config_dict.get("compartments", []))
+                )
+            ],
+            "transition_vars": list(TRANSITION_VARS),
+            "n_reps": len(RUN_SCHEDULE),
+            "param_set_indices": list(RUN_SCHEDULE),
+        }
+        _cur.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)")
+        # This results.db is appended to across export runs, so replace rather
+        # than insert -- the newest run's settings describe the file.
+        _cur.executemany(
+            "INSERT OR REPLACE INTO meta VALUES (?,?)",
+            [(_k, json.dumps(_v)) for _k, _v in _meta.items()],
+        )
+
         # Downstream table-building scripts filter on (scenario, compartment)
         # for every table they build, often re-querying the same scenario
         # several times -- without this index each of those is a full

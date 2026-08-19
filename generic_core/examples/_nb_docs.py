@@ -237,10 +237,17 @@ Click **Run analysis**.
 
 Summary statistics (median + 95% interval per scenario/compartment) are
 auto-saved to `{output_dir}/analysis_results.json` after every run. Click
-**Export full results (JSON)** to additionally write the full per-
+**Export full results (SQLite)** to additionally write the full per-
 subpopulation/age/risk/replicate detail to
-`{output_dir}/analysis_results_full.json` — slower and much larger, so it's
+`{output_dir}/analysis_results_full.db` — slower and much larger, so it's
 on demand rather than automatic.
+
+That `.db` uses the same `results`/`results_full` schema as the `results.db`
+written by the Export tab's `run_simulation.py`, plus a `meta` table holding
+the run settings (start date, age-group labels, scenario order). Either file
+opens directly in the **Results Explorer** notebook
+(`generic_core/examples/results_explorer_notebook.py`), which queries it in
+place with DuckDB — no loading step, so multi-GB result sets stay usable.
 
 ---
 
