@@ -1,7 +1,7 @@
 """
 contact_matrix_fetch.py — fetch age-structured contact matrices for a geography.
 
-Reusable, importable refactor of MA_vax/download_contact_matrices.py. Given a
+Reusable, importable refactor of MA_vax_standalone/download_contact_matrices.py. Given a
 geography (US state or country) and a list of named age bands, returns the
 total / school / work contact matrices as nested Python lists, ready to drop
 into a generic_core model config's contact-matrix params.
@@ -98,7 +98,7 @@ def parse_age_bands(text: str) -> list[str]:
 def validate_age_bands(age_groups: list[str]) -> None:
     """Validate age-band formatting; raise ValueError with a clear message.
 
-    Rules (mirrors MA_vax/download_contact_matrices.check_age_groups_formatting):
+    Rules (mirrors MA_vax_standalone/download_contact_matrices.check_age_groups_formatting):
     - non-empty list of strings,
     - first band starts at 0,
     - last band is of the form 'x+' with x <= 84,

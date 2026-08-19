@@ -1,9 +1,9 @@
 """Counterfactual vaccination-impact pipeline for the generic_core-exported
 MA_vax model (model_config.json + fitted_params.json in this folder), ported
-from `MA_vax/counterfactual.py`.
+from `MA_vax_standalone/counterfactual.py`.
 
 Replicates the same table structure (PNAS 2505175122 Supplementary Tables
-S.A.1-S.A.6, decomposed by `MA_vax/counterfactual.py`'s docstring) but builds
+S.A.1-S.A.6, decomposed by `MA_vax_standalone/counterfactual.py`'s docstring) but builds
 every simulation through generic_core's `ConfigDrivenSubpopModel` /
 model_config machinery instead of the hand-written `MA_vax.model` equations
 -- i.e. this is a check that the notebook-built/exported model reproduces the
@@ -51,6 +51,7 @@ import xarray as xr
 
 _HERE = Path(__file__).parent
 sys.path.insert(0, str(_HERE.parent.parent.parent))
+sys.path.insert(0, str(_HERE))   # so `ma_vax_shared` resolves however this module is loaded
 
 import clt_toolkit as clt
 import flu_core as flu
@@ -65,8 +66,8 @@ from generic_core.fitting import (
     build_transmission_multiplier_array, prepare_param_sets,
 )
 
-from MA_vax.model import AGE_GROUP_LABELS as AGE_GROUPS, COMPARTMENTS, TRANSITIONS
-from MA_vax.counterfactual import (
+from ma_vax_shared import (
+    AGE_GROUP_LABELS as AGE_GROUPS, COMPARTMENTS, TRANSITIONS,
     _summ, averted_summary, attack_probability_curves, _rate_ratio_col,
     _matched_cohort_ratio_col, DICT_TABLES, load_saved_tables,
 )

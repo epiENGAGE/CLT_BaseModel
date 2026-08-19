@@ -75,8 +75,10 @@ _HERE = Path(__file__).parent
 sys.path.insert(0, str(_HERE.parent.parent.parent))
 sys.path.insert(0, str(_HERE))
 
-from MA_vax.model import AGE_GROUP_LABELS as AGE_GROUPS
-from MA_vax.counterfactual import averted_summary, _rate_ratio_col, _matched_cohort_ratio_col
+from ma_vax_shared import (
+    AGE_GROUP_LABELS as AGE_GROUPS,
+    averted_summary, _rate_ratio_col, _matched_cohort_ratio_col,
+)
 
 import counterfactual_generic as cf  # only for table_S_A_4, which is parameter-only (no simulation)
 

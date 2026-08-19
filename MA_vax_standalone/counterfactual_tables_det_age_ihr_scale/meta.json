@@ -1,0 +1,9 @@
+{
+  "fit_folder": "MA_vax/outputs_2026-07-30_age_ihr_scale",
+  "method": "emcee",
+  "point": "best",
+  "stochastic": false,
+  "generated_at": "2026-07-30T15:22:41.330820",
+  "n_reps": 1,
+  "seed": 0
+}

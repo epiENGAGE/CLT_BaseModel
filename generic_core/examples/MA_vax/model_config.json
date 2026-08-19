@@ -586,7 +586,7 @@
     "transition_variables_to_save": []
   },
   "input_files": {
-    "input_folder": "generic_core/examples/massachusetts_vax/data/schedules/",
+    "input_folder": "generic_core/examples/MA_vax/data/schedules/",
     "absolute_humidity_csv": "ma_absolute_humidity.csv",
     "school_work_calendar_csv": "MA_school_work_calendar.csv",
     "vaccines_csv": "MA_flu_daily_vaccinations_proportions_array.csv"

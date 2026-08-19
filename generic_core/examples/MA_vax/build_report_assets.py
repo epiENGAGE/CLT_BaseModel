@@ -30,7 +30,7 @@ import pandas as pd
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import counterfactual_generic as cf
-from MA_vax.model import DATA_FOLDER
+from ma_vax_shared import DATA_FOLDER
 
 OUT_DIR = os.path.join(HERE, "report_assets")
 os.makedirs(OUT_DIR, exist_ok=True)

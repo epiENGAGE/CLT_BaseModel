@@ -18,6 +18,42 @@ together; pipeline 2 is fully independent of both.
 - `scenario_config_MA_vax_small.json` — a saved snapshot of the notebook's
   Analysis-tab scenario configuration (historical record of what was
   configured there; not read by any pipeline below).
+- `MA_fit_config_14d_tv_w_cml.json` — the fit configuration that produced
+  `fitted_params.json` (historical record; its runner script was removed).
+- `data/` — the source data this example is built from, consolidated here
+  from the former `generic_core/examples/massachusetts_vax/`. Contains the
+  observed hospitalization time series (`hospitalizations_ts/`, plus the
+  cumulative and end-of-season derivations), the schedule CSVs the model
+  actually runs on (`schedules/`, `vaccination/`), population and contact
+  matrices (`MA_pop/`, `massachusetts_population.csv`), raw source files
+  (`original/`, the gridMET `sph_2025.nc`/`sph_2026.nc` humidity NetCDFs),
+  and the scripts that regenerate the derived CSVs from the raw ones
+  (`download_contact_matrices.py`, `extract_ma_humidity.py`,
+  `clt_get_population.R`).
+
+  Of all this, only `data/hospitalizations_ts/MA_flu_daily_hospitalizations.csv`
+  is read at runtime — by `build_report_assets.py` and the notebook's
+  baseline-fit-check section, via `ma_vax_shared.DATA_FOLDER`. The pipelines
+  themselves read schedules from `schedules.json`, not from `data/`.
+
+**Data-prep scripts (run by hand, only when regenerating inputs):**
+
+- `split_hospitalizations_by_age.py` — splits the combined daily
+  hospitalizations CSV into one file per age band.
+- `compute_cumulative_hospitalizations.py` — turns those per-age daily files
+  into cumulative series plus an end-of-season summary.
+- `plot_fit_vs_actual.py` — plots a fitted metric time series against the
+  observed data. Note: its default input
+  (`MA_fitted_14d_tv__metric_timeseries.csv`) is not in the repo, so it must
+  be pointed at a real file via its CLI arguments.
+
+**Analysis (`analysis/`):**
+
+- `analysis_ts_per_day_impact.md` — write-up of how the substep resolution
+  (`ts_per_day`) affects this model's numerics.
+- `ts_per_day_convergence.py` / `.csv` — the convergence study behind it.
+  Note: its default `--fitted-params` file is not in the repo, so it must be
+  pointed at a real fitted-params JSON via its CLI arguments.
 
 **Pipeline 1 — standalone scenario runner:**
 
@@ -42,8 +78,8 @@ together; pipeline 2 is fully independent of both.
   `coverage_70pct_scenario`, `infection_protection_only_scenario`, and the
   `named_scenarios()` registry that exposes all of them by name), and
   computes the S.A.1-S.A.6 tables plus a vaccine-efficacy mechanism check —
-  ported from `MA_vax/counterfactual.py`, but run against this generic_core
-  model instead of the hand-written `MA_vax.model` equations, as a check that
+  ported from `MA_vax_standalone/counterfactual.py`, but run against this generic_core
+  model instead of the hand-written `MA_vax_standalone/model.py` equations, as a check that
   the two agree.
 - `run_counterfactual_tables_generic.py` — CLI driver: runs
   `counterfactual_generic.py` and writes the tables to CSV in an output
