@@ -42,10 +42,10 @@ SCHEDULES_FILE = "schedules.json"
 # alongside the compartments. None = every transition in model_config.json;
 # set to a list to record only some, or [] for compartments only.
 TRANSITION_VARS = None
-OUTPUT_DIR = Path("simulation_output")
+OUTPUT_DIR = Path("simulation_output_param_set_stochastic")
 NUM_DAYS = 250
 NUM_REPS = 1
-STOCHASTIC = False
+STOCHASTIC = True
 TIMESTEPS_PER_DAY = 7
 START_DATE = "2025-09-01"
 NUM_AGE_GROUPS = 7
@@ -79,8 +79,8 @@ NUM_WORKERS = None
 # Both sampling modes require a fitted_params.json with more than one accepted
 # set, and both are ignored when STOCHASTIC is False (deterministic always runs
 # once, with the best set).
-UNCERTAINTY_SOURCE = "transitions"
-NUM_PARAM_SETS = 10
+UNCERTAINTY_SOURCE = "parameters"
+NUM_PARAM_SETS = 638
 # Whether the transition engine itself is stochastic. Derived, not a setting:
 # the "parameters" mode is stochastic in the sense that it samples the
 # posterior, but each run's transitions are deterministic.
@@ -232,26 +232,31 @@ DOSE_MULTIPLIER = {
     'Vaccinate 18-49 only': [0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0],
     'Vaccinate 50-64 only': [0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
     'Vaccinate 65+ only': [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
-    # Naive cross-product coverage multiplier (target 0.70 / baseline coverage from one
-    # deterministic run) -- see the SCENARIOS comment above and counterfactual_generic.py.
-    '70% coverage (all ages)': [1.5618042287606673, 0.7812223996432112, 1.0077209653521768, 1.2943827994844874, 1.8061652849458125, 1.2047962088514907, 0.9840824933555715],
+    # Cross-product coverage multiplier: 0.70 / the coverage the BASELINE dose
+    # SCHEDULE asks for (sum of daily_vaccines_df proportions over the sim window),
+    # clamped at 1.0 so groups already above 70% keep their schedule rather than
+    # being de-vaccinated. Schedule-based, so it is identical across parameter
+    # draws. 1-4 (90.7%), 5-12 (71.4%) and 65+ (73.2%) are already above target and
+    # so sit at 1.0 -- their '... only' scenarios are identical to baseline and give
+    # exact-zero Table S.A.3 columns. See counterfactual_generic.coverage_multiplier_for_target.
+    '70% coverage (all ages)': [1.543469, 1.0, 1.0, 1.265262, 1.727385, 1.159836, 1.0],
     # Unlike the 'Vaccinate X only' scenarios above, the untargeted age groups keep
     # their baseline schedule (multiplier 1.0, not 0.0): Table S.A.3 compares these
     # against 'baseline', so it measures the ADDITIONAL benefit of raising one age
     # group to 70%, not the net effect of also de-vaccinating everyone else. Matches
     # counterfactual_generic.py's coverage_70pct_scenario (np.ones base).
-    '70% coverage (0 only)': [1.5618042287606673, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-    '70% coverage (1-4 only)': [1.0, 0.7812223996432112, 1.0, 1.0, 1.0, 1.0, 1.0],
-    '70% coverage (5-12 only)': [1.0, 1.0, 1.0077209653521768, 1.0, 1.0, 1.0, 1.0],
-    '70% coverage (13-17 only)': [1.0, 1.0, 1.0, 1.2943827994844874, 1.0, 1.0, 1.0],
-    '70% coverage (18-49 only)': [1.0, 1.0, 1.0, 1.0, 1.8061652849458125, 1.0, 1.0],
-    '70% coverage (50-64 only)': [1.0, 1.0, 1.0, 1.0, 1.0, 1.2047962088514907, 1.0],
-    '70% coverage (65+ only)': [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.9840824933555715],
+    '70% coverage (0 only)': [1.543469, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+    '70% coverage (1-4 only)': [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+    '70% coverage (5-12 only)': [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+    '70% coverage (13-17 only)': [1.0, 1.0, 1.0, 1.265262, 1.0, 1.0, 1.0],
+    '70% coverage (18-49 only)': [1.0, 1.0, 1.0, 1.0, 1.727385, 1.0, 1.0],
+    '70% coverage (50-64 only)': [1.0, 1.0, 1.0, 1.0, 1.0, 1.159836, 1.0],
+    '70% coverage (65+ only)': [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
     # Same dose multiplier as '70% coverage (all ages)' -- coverage (S_to_SV)
     # is driven by the dose schedule, not by vax_susceptibility/IV_to_H_prop,
     # so the Low/High VE scenarios reach the same coverage target.
-    'Low VE + 70% coverage (all ages)': [1.5618042287606673, 0.7812223996432112, 1.0077209653521768, 1.2943827994844874, 1.8061652849458125, 1.2047962088514907, 0.9840824933555715],
-    'High VE + 70% coverage (all ages)': [1.5618042287606673, 0.7812223996432112, 1.0077209653521768, 1.2943827994844874, 1.8061652849458125, 1.2047962088514907, 0.9840824933555715],
+    'Low VE + 70% coverage (all ages)': [1.543469, 1.0, 1.0, 1.265262, 1.727385, 1.159836, 1.0],
+    'High VE + 70% coverage (all ages)': [1.543469, 1.0, 1.0, 1.265262, 1.727385, 1.159836, 1.0],
 }
 
 # Per-subpopulation override of DOSE_MULTIPLIER above (metapop only).

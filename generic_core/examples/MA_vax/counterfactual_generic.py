@@ -349,19 +349,87 @@ def ve_scenarios(base_inputs: dict) -> dict[str, dict]:
     }
 
 
+def scheduled_coverage(age_idx: int | None = None) -> np.ndarray | float:
+    """Cumulative coverage each age group's BASELINE dose schedule asks for
+    over the simulation window -- the sum of the daily vaccination
+    proportions in `daily_vaccines_df`, before the model's per-step S-cap
+    (§1.4) decides how many of those doses actually land.
+
+    This is the denominator `coverage_multiplier_for_target` scales against.
+    It is a property of the input schedule alone, so it is identical for
+    every parameter draw and every replicate -- unlike realized coverage
+    (`S_to_SV` summed over a run), which depends on how many susceptibles
+    the epidemic left available for the cap to hand a dose to."""
+    csvs = _load_schedule_csvs()
+    if "daily_vaccines_df" not in csvs:
+        raise ValueError("no daily_vaccines_df schedule to derive coverage from")
+    df = pd.read_csv(io.StringIO(csvs["daily_vaccines_df"]))
+    dates = pd.to_datetime(df["date"], format="mixed")
+    start = pd.Timestamp(START_DATE)
+    window = (dates >= start) & (dates < start + pd.Timedelta(days=NUM_DAYS))
+    daily = np.array([np.asarray(json.loads(v), dtype=float).ravel()
+                       for v in df.loc[window, "daily_vaccines"]])
+    cov = daily.sum(axis=0)
+    return cov if age_idx is None else float(cov[age_idx])
+
+
+def scheduled_doses(population, age_idx: int | None = None):
+    """Doses the BASELINE schedule ships to each age group over the window:
+    `scheduled_coverage() * population`.
+
+    This is the denominator the per-100K-doses panels should use, not the
+    realized `S_to_SV` count. The two differ by the doses the model's §1.4
+    cap declines to deliver because the intended recipient has already been
+    infected -- but in the real world those doses are still bought, shipped
+    and put in an arm. They are wasted, not unspent, so a cost-effectiveness
+    denominator has to count them. Ignoring them flatters every scenario in
+    proportion to how large its epidemic was, which is backwards.
+
+    Being a pure function of the input schedule, it is also identical across
+    parameter draws and replicates -- unlike realized doses, which vary by
+    1-3% across the posterior even when the schedule is byte-identical.
+    """
+    cov = scheduled_coverage()
+    doses = np.asarray(cov, dtype=float) * np.asarray(population, dtype=float)
+    return doses if age_idx is None else float(doses[age_idx])
+
+
+def additional_scheduled_doses_for_target(population, target: float = 0.70,
+                                           age_idx: int | None = None):
+    """Extra doses the `target`-coverage schedule ships relative to baseline:
+    `max(0, target - scheduled_coverage) * population`, i.e. how many more
+    people must be vaccinated to reach `target`. Zero for age groups already
+    above it, which `coverage_multiplier_for_target` leaves untouched."""
+    cov = np.asarray(scheduled_coverage(), dtype=float)
+    extra = np.maximum(0.0, target - cov) * np.asarray(population, dtype=float)
+    return extra if age_idx is None else float(extra[age_idx])
+
+
 def coverage_multiplier_for_target(base_inputs: dict, age_idx: int, target: float,
                                     seed: int = 0) -> float:
-    """Naive cross-product schedule multiplier to reach `target` cumulative
-    coverage in `age_idx` by season's end: `target / baseline_coverage`, from
-    one deterministic baseline run. No bisection refinement/verification --
-    see module docstring."""
-    ds = _run_reps(base_inputs, baseline_scenario(), n_reps=1, seed=seed, stochastic=False)
-    baseline_cov = float(ds["S_to_SV"].isel(replication=0).sum(dim="day").to_numpy()[age_idx]
-                          / base_inputs["population"][age_idx])
+    """Cross-product schedule multiplier to reach `target` cumulative coverage
+    in `age_idx`: `target / scheduled_coverage(age_idx)`. No bisection
+    refinement/verification -- see module docstring.
+
+    Two deliberate properties:
+
+    * The denominator is the SCHEDULED coverage, not the realized coverage of
+      one deterministic baseline run. Realized coverage is an output of the
+      simulation and drifts with the parameter draw; scaling against it made
+      the coverage target itself an artifact of a single run.
+    * The multiplier is clamped at 1.0, so an age group whose baseline
+      schedule already exceeds `target` is left exactly as it is rather than
+      having its uptake cut back. "Reaching 70% coverage" is a floor, not a
+      quota -- a scenario that de-vaccinates 1-4 (90.7%) or 65+ (73.2%) to
+      hit it answers a question nobody asked. Those groups then contribute a
+      row/column of exact zeros to Table S.A.3, since their scenario is
+      identical to baseline.
+    """
+    baseline_cov = scheduled_coverage(age_idx)
     if baseline_cov <= 0:
         raise ValueError(f"age group {AGE_GROUPS[age_idx]} has zero baseline vaccination; "
                           "cannot scale to a coverage target")
-    return target / baseline_cov
+    return max(1.0, target / baseline_cov)
 
 
 def coverage_70pct_scenario(base_inputs: dict, age_idx: int | None = None, seed: int = 0) -> dict:

@@ -80,7 +80,7 @@ from ma_vax_shared import (
     averted_summary, _rate_ratio_col, _matched_cohort_ratio_col,
 )
 
-import counterfactual_generic as cf  # only for table_S_A_4, which is parameter-only (no simulation)
+import counterfactual_generic as cf  # table_S_A_4 (parameter-only), plus the scheduled-dose helpers
 
 MODEL_CONFIG_FILE = _HERE / "model_config.json"
 DEFAULT_DB = _HERE / "simulation_output" / "results.db"
@@ -236,23 +236,51 @@ def scenario_daily_arrays(db: ResultsDB, scenario: str) -> dict[str, np.ndarray]
 # ── Table builders -- same structure as counterfactual_generic.py's, but
 # every array comes from results.db instead of a fresh simulation ──────────
 
+def _sched_doses(totals: dict, doses) -> dict:
+    """Copy of a `scenario_totals` dict with realized `S_to_SV` doses replaced by
+    SCHEDULED doses. Every per-100K-doses panel uses this: a dose the §1.4 cap
+    declines to deliver (because the recipient is already infected) is still
+    bought and administered in the real world, so it belongs in the denominator.
+    See counterfactual_generic.scheduled_doses."""
+    return {**totals, "doses": np.asarray(doses, dtype=float)}
+
+
 def table_S_A_1(db: ResultsDB, population: np.ndarray) -> pd.DataFrame:
     no_vax = scenario_totals(db, SCENARIO_DB_NAME["no vax"], population)
     inf_only = scenario_totals(db, SCENARIO_DB_NAME["Infection protection only"], population)
     full = scenario_totals(db, SCENARIO_DB_NAME["baseline"], population)
+    sched = cf.scheduled_doses(population)
+    no_vax = _sched_doses(no_vax, np.zeros_like(sched))
+    inf_only, full = _sched_doses(inf_only, sched), _sched_doses(full, sched)
     reduced_infection = averted_summary(no_vax, inf_only).add_suffix("_reduced_infection")
-    reduced_severity = averted_summary(inf_only, full, pct_reference=no_vax).add_suffix("_reduced_severity")
+    # `inf_only` and `full` share an identical vaccination schedule (adding back
+    # severity protection doesn't change who gets vaccinated), so their dose
+    # difference is exactly zero -- divide by the full baseline dose count
+    # instead, the same denominator the reduced-infection and total links use.
+    reduced_severity = averted_summary(inf_only, full, pct_reference=no_vax,
+                                        doses_reference=no_vax).add_suffix("_reduced_severity")
     total = averted_summary(no_vax, full).add_suffix("_total")
     return reduced_infection.join(reduced_severity).join(total)
 
 
 def table_S_A_2(db: ResultsDB, population: np.ndarray) -> dict[str, pd.DataFrame]:
     no_vax = scenario_totals(db, SCENARIO_DB_NAME["no vax"], population)
+    sched = cf.scheduled_doses(population)
+    no_vax = _sched_doses(no_vax, np.zeros_like(sched))
     cols = {}
-    for label in AGE_GROUPS:
+    for i, label in enumerate(AGE_GROUPS):
         scen = scenario_totals(db, SCENARIO_DB_NAME[f"Vaccinate {label} only"], population)
-        cols[label] = averted_summary(no_vax, scen)
-    cols["All"] = averted_summary(no_vax, scenario_totals(db, SCENARIO_DB_NAME["baseline"], population))
+        # Off-diagonal cells count hospitalizations averted in the ROW's age group
+        # per 100K doses delivered to the COLUMN's age group -- only group `i` is
+        # vaccinated in this scenario, so that denominator is its own dose count
+        # (per replicate, paired with the numerator). The diagonal and the "All"
+        # row are unchanged by this: they already used exactly that denominator.
+        cols[label] = averted_summary(no_vax, scen, doses_override=float(sched[i]))
+    # The "All vaccinated" column has no single targeted age group, so each row
+    # keeps its own age group's dose count (and the "All" row the total) -- the
+    # same convention as table S.A.1's per-dose columns, which it must match.
+    baseline = _sched_doses(scenario_totals(db, SCENARIO_DB_NAME["baseline"], population), sched)
+    cols["All"] = averted_summary(no_vax, baseline)
     return {
         "pct_reduction": pd.DataFrame({l: df["pct_averted"] for l, df in cols.items()}),
         "per_100k": pd.DataFrame({l: df["per100k_averted"] for l, df in cols.items()}),
@@ -263,16 +291,72 @@ def table_S_A_2(db: ResultsDB, population: np.ndarray) -> dict[str, pd.DataFrame
 def table_S_A_3(db: ResultsDB, population: np.ndarray) -> dict[str, pd.DataFrame]:
     baseline = scenario_totals(db, SCENARIO_DB_NAME["baseline"], population)
     cols = {}
-    for label in AGE_GROUPS:
+    for i, label in enumerate(AGE_GROUPS):
         scen = scenario_totals(db, SCENARIO_DB_NAME[f"70% coverage ({label} only)"], population)
-        cols[label] = averted_summary(baseline, scen)
+        # As in table_S_A_2, divide every row by the ADDITIONAL doses going to the
+        # COLUMN's age group -- but here take them from the SCHEDULE rather than
+        # from realized S_to_SV. Two reasons:
+        #  * Realized doses undercount: the §1.4 cap declines to vaccinate someone
+        #    already infected, but in the real world that dose is still bought and
+        #    administered. It is wasted, not unspent, and belongs in the denominator.
+        #  * Realized doses also leak across age groups. In "70% coverage (5-12
+        #    only)" the untargeted groups pick up a handful of doses (age 0: +1,
+        #    1-4: +8, 18-49: +63) purely because a milder epidemic leaves the cap
+        #    more susceptibles to reach. Dividing a real indirect effect by ~1
+        #    incidental dose produced absurd magnitudes (~9,800 per 100K doses).
+        # The scheduled figure is exact, replication-invariant, and reduces to
+        # max(0, 0.70 - baseline coverage) * population.
+        col_doses = cf.additional_scheduled_doses_for_target(population, 0.70, i)
+        cols[label] = averted_summary(baseline, scen, doses_override=col_doses)
     all_scen = scenario_totals(db, SCENARIO_DB_NAME["70% coverage (all ages)"], population)
-    cols["All"] = averted_summary(baseline, all_scen)
+    # The "All ages" column raises four groups and leaves three untouched, so a
+    # per-row denominator is undefined for those three (zero additional doses)
+    # even though they still benefit indirectly. Divide every row by the TOTAL
+    # additional doses instead: "hospitalizations averted in this age group per
+    # 100K doses of the whole 70% push". Rows then also sum to the "All" row.
+    # (Table S.A.2's "All" column keeps per-row denominators -- there every group
+    # does receive doses, and it has to match table S.A.1's per-dose columns.)
+    extra = float(cf.additional_scheduled_doses_for_target(population, 0.70).sum())
+    cols["All"] = averted_summary(baseline, all_scen, doses_override=extra)
     return {
         "pct_reduction": pd.DataFrame({l: df["pct_averted"] for l, df in cols.items()}),
         "per_100k": pd.DataFrame({l: df["per100k_averted"] for l, df in cols.items()}),
         "per_100k_doses": pd.DataFrame({l: df["per100k_doses_averted"] for l, df in cols.items()}),
     }
+
+
+def table_dose_accounting(db: ResultsDB, population: np.ndarray) -> pd.DataFrame:
+    """Scheduled vs. delivered doses under the baseline schedule, by age group.
+
+    "Scheduled" is what the vaccination schedule ships: `scheduled_coverage *
+    population`. "Delivered" is what the model records as an actual S -> SV
+    transition (median across parameter draws). The gap is the doses the §1.4
+    cap declines to hand out because the intended recipient has already been
+    infected -- real doses, bought and administered, that buy no protection.
+    This is the reconciliation between the two dose figures, and it is why the
+    per-100K-doses panels use the scheduled count as their denominator.
+    """
+    sched = cf.scheduled_doses(population)
+    delivered = np.median(scenario_totals(db, SCENARIO_DB_NAME["baseline"], population)["doses"],
+                           axis=0)
+    wasted = sched - delivered
+    rows = [{"age_group": AGE_GROUPS[i],
+             "population": f"{population[i]:,.0f}",
+             "scheduled_doses": f"{sched[i]:,.0f}",
+             "delivered_doses": f"{delivered[i]:,.0f}",
+             "wasted_doses": f"{wasted[i]:,.0f}",
+             "pct_wasted": f"{wasted[i] / sched[i] * 100:.1f}%",
+             "scheduled_coverage": f"{sched[i] / population[i] * 100:.1f}%",
+             "delivered_coverage": f"{delivered[i] / population[i] * 100:.1f}%"}
+            for i in range(len(AGE_GROUPS))]
+    rows.append({"age_group": "All", "population": f"{population.sum():,.0f}",
+                 "scheduled_doses": f"{sched.sum():,.0f}",
+                 "delivered_doses": f"{delivered.sum():,.0f}",
+                 "wasted_doses": f"{wasted.sum():,.0f}",
+                 "pct_wasted": f"{wasted.sum() / sched.sum() * 100:.1f}%",
+                 "scheduled_coverage": f"{sched.sum() / population.sum() * 100:.1f}%",
+                 "delivered_coverage": f"{delivered.sum() / population.sum() * 100:.1f}%"})
+    return pd.DataFrame(rows).set_index("age_group")
 
 
 def table_S_A_5(db: ResultsDB, population: np.ndarray) -> dict[str, pd.DataFrame]:
@@ -335,8 +419,17 @@ def main() -> None:
     parser.add_argument("--db", default=str(DEFAULT_DB),
                          help="results.db written by run_simulations_MA_vax.py")
     parser.add_argument("--out", default=str(DEFAULT_OUT),
-                         help="output folder for the CSVs counterfactual_notebook_generic.py reads")
+                         help="output folder for the CSVs counterfactual_notebook_generic.py reads "
+                              "(a relative path is taken relative to this script's folder)")
     args = parser.parse_args()
+
+    # A relative --out is interpreted relative to THIS script's folder, not to
+    # whatever the current working directory happens to be, so the tables land
+    # next to the script (and next to the results folders the notebook reads)
+    # however the script is invoked. An absolute --out is used as-is. Same
+    # convention as run_simulations_MA_vax.py's OUTPUT_DIR.
+    if not os.path.isabs(args.out):
+        args.out = str(_HERE / args.out)
 
     if not os.path.exists(args.db):
         raise SystemExit(f"{args.db} not found -- run run_simulations_MA_vax.py first.")
@@ -370,6 +463,9 @@ def main() -> None:
 
     print("[4/7] Table S.A.4 (VE sensitivity parameters) ...")
     cf.table_S_A_4(cf.load_base_inputs()).to_csv(os.path.join(args.out, "S_A_4.csv"))
+
+    print("[4b/7] Dose accounting (scheduled vs. delivered) ...")
+    table_dose_accounting(db, population).to_csv(os.path.join(args.out, "DOSE_ACCOUNTING.csv"))
 
     print("[5/7] Table S.A.5 (VE sensitivity, vs no vaccine) ...")
     for sub, df in table_S_A_5(db, population).items():

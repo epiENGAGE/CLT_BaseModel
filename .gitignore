@@ -19,8 +19,11 @@ generic_core/examples/__marimo__/
 __marimo__/
 .history/
 # Large raw gridMET NetCDFs (inputs to
-# generic_core/examples/massachusetts_vax/data/extract_ma_humidity.py)
+# generic_core/examples/MA_vax/data/extract_ma_humidity.py)
 *.nc
-MA_vax/__pycache__/
-MA_vax/outputs_*/
-MA_vax/counterfactual_tables_det_age_ihr_scale/
+MA_vax_standalone/__pycache__/
+MA_vax_standalone/outputs_*/
+MA_vax_standalone/counterfactual_tables_det_age_ihr_scale/
+# build_report_assets.py's posterior-band cache: regenerated on demand if
+# absent (see _cached_posterior_scenario_bands), ~8.5 MB each.
+generic_core/examples/MA_vax/report_assets/*.npz
