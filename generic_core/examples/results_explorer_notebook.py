@@ -77,9 +77,11 @@ def _helpers(Path, mo, rex):
         "By risk group": "risk_group",
         "All (subpop × age × risk)": "all",
     }
+    # Two modes, not three: how many scenarios a chart shows is decided by
+    # the Select multiselect, so a "single vs multiple" mode would only imply
+    # a constraint nothing enforces (and previously did nothing at all).
     MODE_OPTIONS = {
-        "Single scenario": "single",
-        "Compare scenarios": "multiple",
+        "Show levels": "levels",
         "Compare to baseline": "compare_baseline",
     }
     COMPARE_OPTIONS = {"Difference": "difference", "Ratio": "ratio"}
@@ -654,7 +656,7 @@ def _render_charts(
         if _cfg["agg_level"] != "population":
             _row_slice += [chart_hide_empty[_j], chart_shared_y[_j]]
         _row2 = [chart_mode[_j], chart_scenarios[_j]]
-        if _cfg["scenario_mode"] == "compare_baseline":
+        if rex.is_comparison(_cfg):
             _row2 += [chart_baseline[_j], chart_compare[_j], chart_pairing[_j]]
         _lo, _hi = _cfg["day_range"]
         _row3 = [chart_days[_j], mo.md(f"**{_lo} – {_hi}**")]
@@ -696,16 +698,35 @@ def _render_charts(
                 "range, and are accumulated per replicate before the median "
                 "and interval are taken.*"
             ))
-        if (_cfg["scenario_mode"] == "compare_baseline"
-                and _cfg.get("pairing", "paired") == "paired"):
+        if rex.is_comparison(_cfg):
+            # The axis says "difference from X", but it is worth stating that
+            # the baseline is gone from the chart rather than leaving the user
+            # to notice a missing box.
             _extra.append(mo.md(
-                "*Paired by replicate index — assumes replicate i of each "
-                "scenario corresponds to replicate i of the baseline. That "
-                "holds when replicates differ only by transition RNG (runs are "
-                "seeded by position), and less so once parameter sampling "
-                "varies which draw backs each index. Switch to Unpaired if in "
-                "doubt.*"
+                f"*Values are relative to **{_cfg['baseline_scenario']}**, "
+                f"which is therefore not drawn — comparing it with itself "
+                f"gives {'1' if _cfg.get('compare_metric') == 'ratio' else '0'} "
+                f"everywhere. The dashed line marks no effect.*"
             ))
+            if _cfg.get("pairing", "paired") == "paired":
+                _extra.append(mo.md(
+                    "*Paired by replicate index — assumes replicate i of each "
+                    "scenario corresponds to replicate i of the baseline. That "
+                    "holds when replicates differ only by transition RNG (runs "
+                    "are seeded by position), and less so once parameter "
+                    "sampling varies which draw backs each index. Switch to "
+                    "Unpaired if in doubt.*"
+                ))
+            elif _kind in ("boxplot", "histogram", "scatter"):
+                # Worth spelling out here specifically: unpaired turns the
+                # spread into the compared scenario's own, which is easy to
+                # misread as uncertainty about the effect.
+                _extra.append(mo.md(
+                    "*Unpaired — every replicate is measured against a single "
+                    "baseline summary, so the spread shown is the compared "
+                    "scenario's own variability, not the uncertainty in the "
+                    "effect. Pairing is what narrows this to the effect itself.*"
+                ))
 
         _blocks.append(
             mo.vstack([

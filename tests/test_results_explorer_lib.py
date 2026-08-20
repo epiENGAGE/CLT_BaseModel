@@ -842,3 +842,160 @@ def test_metric_order_follows_meta_not_the_alphabet(tmp_path):
             "S", "E", "I", "H", "R", "S_to_E", "E_to_I", "I_to_H"]
     finally:
         dcon.close()
+
+
+# ---------------------------------------------------------------------------
+# Baseline comparison for the non-timeseries chart types
+#
+# These all read `total_value` from _totals_cte, so a regression that dropped
+# the comparison would silently plot levels while the title still claimed a
+# difference -- which is worse than an error, because the chart looks fine.
+# ---------------------------------------------------------------------------
+
+def _compare_config(dims, **overrides):
+    cfg = lib.default_chart_config(0, "boxplot", dims)
+    cfg.update(metrics=["new_H"], scenarios=["baseline", "treated"],
+               agg_level="population", scenario_mode="compare_baseline",
+               baseline_scenario="baseline")
+    cfg.update(overrides)
+    return cfg
+
+
+#: Each replicate's total over the whole run, by scenario.
+_TOTAL_BASELINE = {r: v * DAYS for r, v in _POP_BASELINE.items()}
+_TOTAL_TREATED = {r: v * DAYS for r, v in _POP_TREATED.items()}
+
+
+def test_per_rep_totals_are_levels_without_a_comparison(con_meta):
+    dims = lib.discover_dims(con_meta)
+    cfg = _compare_config(dims, scenario_mode="levels")
+    df = con_meta.execute(*lib.build_per_rep_totals_query(cfg)).df()
+    treated = df[df.scenario == "treated"].set_index("rep")["total_value"]
+    assert treated.to_dict() == pytest.approx(_TOTAL_TREATED)
+
+
+def test_paired_per_rep_totals_are_differences(con_meta):
+    dims = lib.discover_dims(con_meta)
+    df = con_meta.execute(*lib.build_per_rep_totals_query(
+        _compare_config(dims))).df()
+    expected = {r: _TOTAL_TREATED[r] - _TOTAL_BASELINE[r] for r in (0, 1)}
+    assert df.set_index("rep")["total_value"].to_dict() == pytest.approx(expected)
+
+
+def test_paired_per_rep_ratios_recover_the_replicate_factors(con_meta):
+    """Pairing cancels the shared replicate scale exactly, so the ratios come
+    back as the factors the fixture was built from."""
+    dims = lib.discover_dims(con_meta)
+    df = con_meta.execute(*lib.build_per_rep_totals_query(
+        _compare_config(dims, compare_metric="ratio"))).df()
+    assert df.set_index("rep")["total_value"].to_dict() == pytest.approx(_REP_FACTOR)
+
+
+def test_unpaired_per_rep_totals_use_one_baseline_summary(con_meta):
+    dims = lib.discover_dims(con_meta)
+    df = con_meta.execute(*lib.build_per_rep_totals_query(
+        _compare_config(dims, pairing="unpaired"))).df()
+    base_median = sum(_TOTAL_BASELINE.values()) / 2
+    expected = {r: _TOTAL_TREATED[r] - base_median for r in (0, 1)}
+    assert df.set_index("rep")["total_value"].to_dict() == pytest.approx(expected)
+    # And it really is a different answer from pairing, or the test proves
+    # nothing about which code path ran.
+    paired = con_meta.execute(*lib.build_per_rep_totals_query(
+        _compare_config(dims))).df()
+    assert df["total_value"].tolist() != pytest.approx(paired["total_value"].tolist())
+
+
+def test_comparison_drops_the_baseline_from_the_chart(con_meta):
+    """The baseline against itself is a column of zeros; showing it invites
+    reading the chart as levels."""
+    dims = lib.discover_dims(con_meta)
+    df = con_meta.execute(*lib.build_per_rep_totals_query(
+        _compare_config(dims))).df()
+    assert set(df["scenario"]) == {"treated"}
+
+
+def test_comparison_holds_per_age_group(con_meta):
+    dims = lib.discover_dims(con_meta)
+    df = con_meta.execute(*lib.build_per_rep_totals_query(
+        _compare_config(dims, agg_level="age_group"))).df()
+    for (rep, age), row in df.set_index(["rep", "age_group"]).iterrows():
+        base = _BASE[age] * _REP_BASE_SCALE[rep] * DAYS
+        assert row["total_value"] == pytest.approx(base * (_REP_FACTOR[rep] - 1))
+
+
+def test_stacked_bar_comparison_is_a_median_difference(con_meta):
+    dims = lib.discover_dims(con_meta)
+    df = con_meta.execute(*lib.build_stacked_bar_query(
+        _compare_config(dims, chart_type="stacked_bar", agg_level="age_group"))).df()
+    for _, row in df.iterrows():
+        age = int(row["age_group"])
+        diffs = [_BASE[age] * _REP_BASE_SCALE[r] * DAYS * (_REP_FACTOR[r] - 1)
+                 for r in (0, 1)]
+        assert row["median_value"] == pytest.approx(sum(diffs) / 2)
+
+
+def test_scatter_comparison_differences_both_axes(con_meta):
+    dims = lib.discover_dims(con_meta)
+    cfg = _compare_config(dims, chart_type="scatter",
+                          scatter_x="new_H", scatter_y="new_H")
+    df = con_meta.execute(*lib.build_scatter_query(cfg)).df()
+    expected = {r: _TOTAL_TREATED[r] - _TOTAL_BASELINE[r] for r in (0, 1)}
+    assert df.set_index("rep")["x_value"].to_dict() == pytest.approx(expected)
+    assert df.set_index("rep")["y_value"].to_dict() == pytest.approx(expected)
+    assert set(df["scenario"]) == {"treated"}
+
+
+@pytest.mark.parametrize("chart_type", ["boxplot", "histogram", "stacked_bar", "scatter"])
+def test_comparison_charts_render_and_mark_the_no_effect_line(con_meta, chart_type):
+    dims = lib.discover_dims(con_meta)
+    cfg = _compare_config(dims, chart_type=chart_type)
+    if chart_type == "stacked_bar":
+        cfg["agg_level"] = "age_group"
+    spec = json.dumps(lib.render_chart(con_meta, dims, cfg).to_dict())
+    assert "difference from baseline" in spec
+    if chart_type != "scatter":
+        # A dashed rule at zero, so the effect is read against something.
+        assert '"strokeDash": [4, 4]' in spec
+
+
+def test_stacked_bar_groups_rather_than_stacks_a_comparison(con_meta):
+    """Stacking mixed-sign differences makes the bar heights meaningless, so
+    the groups go side by side instead."""
+    dims = lib.discover_dims(con_meta)
+    plain = json.dumps(lib.render_chart(con_meta, dims, _compare_config(
+        dims, chart_type="stacked_bar", agg_level="age_group",
+        scenario_mode="levels")).to_dict())
+    compared = json.dumps(lib.render_chart(con_meta, dims, _compare_config(
+        dims, chart_type="stacked_bar", agg_level="age_group")).to_dict())
+    assert "xOffset" not in plain
+    assert "xOffset" in compared
+
+
+def test_comparison_reference_value_follows_the_compare_metric(con_meta):
+    dims = lib.discover_dims(con_meta)
+    assert lib.comparison_reference(_compare_config(dims)) == 0.0
+    assert lib.comparison_reference(
+        _compare_config(dims, compare_metric="ratio")) == 1.0
+    assert lib.comparison_reference(
+        _compare_config(dims, scenario_mode="levels")) is None
+
+
+def test_retired_scenario_modes_still_render_as_levels(con_meta):
+    """"single" and "multiple" were identical to each other and to today's
+    "levels"; a config saved with either must keep opening rather than error."""
+    dims = lib.discover_dims(con_meta)
+    reference = json.dumps(lib.render_chart(
+        con_meta, dims, _config(dims, scenario_mode="levels")).to_dict())
+    for retired in ("single", "multiple"):
+        cfg = _config(dims, scenario_mode=retired)
+        assert lib.is_comparison(cfg) is False
+        assert json.dumps(lib.render_chart(con_meta, dims, cfg).to_dict()) == reference
+
+
+def test_default_config_does_not_depend_on_scenario_count(con_meta):
+    """The mode no longer encodes how many scenarios there are, so it must not
+    vary with the file."""
+    dims = lib.discover_dims(con_meta)
+    one = lib.default_chart_config(0, "timeseries", {**dims, "scenarios": ["a"]})
+    many = lib.default_chart_config(0, "timeseries", {**dims, "scenarios": ["a", "b"]})
+    assert one["scenario_mode"] == many["scenario_mode"] == "levels"

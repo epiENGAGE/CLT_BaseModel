@@ -4,7 +4,7 @@
 > measurements below are what motivated the SQLite-first decision. Delivered:
 > `results_explorer_notebook.py`, `_results_explorer_lib.py`, the SQLite +
 > `meta` export in `_nb_analysis.py`, the `meta` table in `_nb_export.py`'s
-> generated script, and `tests/test_results_explorer_lib.py` (40 tests).
+> generated script, and `tests/test_results_explorer_lib.py` (74 tests).
 
 ## Context
 
@@ -72,7 +72,7 @@ Replace the row-accumulation + `json.dumps` body with a `sqlite3` writer emittin
 get_charts, set_charts = mo.state([])   # list[ChartConfig dict]
 get_next_id, set_next_id = mo.state(0)  # stable id, independent of list position
 ```
-`ChartConfig`: `id`, `chart_type` (`timeseries`|`histogram`|`boxplot`|`stacked_bar`|`scatter`), `metrics: [str]` (summed when several are selected), `agg_level` (`population`|`subpop`|`age_group`|`risk_group`|`all`), `scenario_mode` (`single`|`multiple`|`compare_baseline`), `scenarios: [str]`, `baseline_scenario`, `compare_metric` (`difference`|`ratio`), `pairing` (`paired`|`unpaired`), `show_uncertainty`, `day_range`, `scatter_x`, `scatter_y`.
+`ChartConfig`: `id`, `chart_type` (`timeseries`|`histogram`|`boxplot`|`stacked_bar`|`scatter`), `metrics: [str]` (summed when several are selected), `agg_level` (`population`|`subpop`|`age_group`|`risk_group`|`all`), `scenario_mode` (`levels`|`compare_baseline`), `scenarios: [str]`, `baseline_scenario`, `compare_metric` (`difference`|`ratio`), `pairing` (`paired`|`unpaired`), `show_uncertainty`, `day_range`, `scatter_x`, `scatter_y`.
 
 Plus, added after the first round of use:
 
@@ -80,6 +80,10 @@ Plus, added after the first round of use:
 - `cumulative` — running total over days, taken **per replicate inside the CTE**, so the median and interval describe the spread of cumulative curves rather than the cumulative sum of daily medians. Rejected for compartments: a compartment is already a level, so summing it over days measures nothing. Accumulation starts at the beginning of the selected day range.
 - `hide_empty` — drop breakdown groups whose series is entirely zero, so a granular aggregation does not fill the grid with blank panels. Never drops everything: if every group is empty the frame passes through and the caller reports "no data".
 - `shared_y` — small multiples share a y scale by default (that is what makes them comparable), but one dominant group flattens every other panel against the axis until it reads as blank. Turning this off rescales each panel to its own data.
+
+`scenario_mode` originally had three values. `single` and `multiple` turned out to produce byte-identical SQL and byte-identical chart specs — nothing anywhere read them — because how many scenarios a chart shows is decided entirely by `scenarios`, not by the mode. They were collapsed into `levels`; `is_comparison()` tests positively for `compare_baseline`, so a config holding either retired value still renders.
+
+Baseline comparison applies to **every** chart type, not just the time series: `_totals_cte` is shared by the box plot, histogram and stacked bar, and `build_scatter_query` has its own comparison branch. The subtraction happens per replicate before any summary, so a box plot shows the distribution of the *effect* rather than of two levels. The baseline drops out of the chart (it would be all zeros/ones), and stacked bars switch to grouped bars when comparing, since stacking mixed-sign differences makes bar heights meaningless.
 
 The day-range readout is rendered by the notebook rather than by `mo.ui.range_slider`'s `show_value`, which prints the bare tuple — "1 to 250" comes out as `1, 250` and reads as the number 1,250.
 

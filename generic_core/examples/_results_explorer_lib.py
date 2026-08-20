@@ -37,7 +37,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Literal, Sequence
 
 import altair as alt
 import duckdb
@@ -64,6 +64,15 @@ SOFT_ROW_LIMIT = 50_000
 CHART_TYPES = ("timeseries", "histogram", "boxplot", "stacked_bar", "scatter")
 
 AGG_LEVELS = ("population", "subpop", "age_group", "risk_group", "all")
+
+#: How a chart relates its scenarios to each other. Only two modes, because
+#: only two behaviours differ: plot the values as they are, or plot them
+#: relative to a baseline. *How many* scenarios are shown is decided entirely
+#: by ``config["scenarios"]``, so a mode claiming to control that would imply a
+#: constraint nothing enforces. (Earlier versions offered "single"/"multiple",
+#: which were byte-for-byte identical; is_comparison treats any unrecognized
+#: value as "levels", so a config saved with either still opens.)
+SCENARIO_MODES = ("levels", "compare_baseline")
 
 #: agg_level -> the columns a query groups by (beyond scenario/day). The
 #: "population" level is special: it reads the pre-aggregated `results` table
@@ -374,7 +383,7 @@ def default_chart_config(chart_id: int, chart_type: str, dims: dict) -> dict:
         # flattens every other panel against the axis until they read as
         # blank. Turning this off rescales each panel to its own data.
         "shared_y": True,
-        "scenario_mode": "single" if len(scenarios) <= 1 else "multiple",
+        "scenario_mode": "levels",
         "scenarios": scenarios[:3],
         "baseline_scenario": scenarios[0] if scenarios else None,
         "compare_metric": "difference",
@@ -402,7 +411,7 @@ def _validate(config: dict, dims: dict) -> None:
             raise ResultsExplorerError("Scatter charts need both an X and a Y metric.")
     elif not config.get("metrics"):
         raise ResultsExplorerError("Select at least one metric.")
-    if config.get("scenario_mode") == "compare_baseline":
+    if is_comparison(config):
         baseline = config.get("baseline_scenario")
         if not baseline:
             raise ResultsExplorerError("Pick a baseline scenario to compare against.")
@@ -653,20 +662,136 @@ def build_comparison_query(config: dict, *, with_ci: bool) -> tuple[str, list[An
     return sql, params + [baseline, baseline]
 
 
+def is_comparison(config: dict) -> bool:
+    """Whether this chart shows scenarios relative to a baseline.
+
+    Tested positively rather than against the "levels" name, so a config
+    carrying a retired mode ("single"/"multiple", which behaved identically to
+    each other and to "levels") still renders instead of erroring.
+    """
+    return config.get("scenario_mode") == "compare_baseline"
+
+
+def comparison_reference(config: dict) -> float | None:
+    """The y value that means "no effect" -- 0 for a difference, 1 for a ratio.
+
+    None when the chart is not a comparison, so callers can skip the rule.
+    """
+    if not is_comparison(config):
+        return None
+    return 1.0 if config.get("compare_metric") == "ratio" else 0.0
+
+
+def _compare_expr(config: dict, left: str, right: str) -> str:
+    if config.get("compare_metric") == "ratio":
+        return f"{left} / NULLIF({right}, 0)"
+    return f"{left} - {right}"
+
+
+def _totals_cte(config: dict) -> tuple[str, list[Any]]:
+    """CTE chain ending in ``totals``: one row per (scenario, replicate, group).
+
+    In plain mode ``total_value`` is that replicate's total over the selected
+    day range. In comparison mode it is that replicate's total *relative to the
+    baseline* -- a difference or a ratio -- and the baseline scenario itself
+    drops out, since comparing it to itself is a column of zeros (or ones).
+
+    Getting this right at the replicate level, rather than differencing two
+    summaries afterwards, is what lets a box plot or histogram show the
+    distribution of the *effect* instead of the distribution of two levels.
+    """
+    group_cols = _AGG_GROUP_COLS[config["agg_level"]]
+    group_sql = "".join(f", {c}" for c in group_cols)
+
+    if not is_comparison(config):
+        cte, params = _per_rep_cte(config, config["metrics"])
+        sql = (
+            f"{cte},\n"
+            f"totals AS (\n"
+            f"  SELECT scenario, rep, param_set{group_sql},\n"
+            f"         SUM(value) AS total_value\n"
+            f"  FROM per_rep GROUP BY scenario, rep, param_set{group_sql}\n"
+            f")"
+        )
+        return sql, params
+
+    baseline = config["baseline_scenario"]
+    others = [s for s in config["scenarios"] if s != baseline]
+    # The baseline must be in the scan whether or not the user ticked it,
+    # since every compared row needs its counterpart.
+    cte, params = _per_rep_cte({**config, "scenarios": [baseline] + others},
+                               config["metrics"])
+    params = params + [baseline, baseline]
+
+    head = (
+        f"{cte},\n"
+        f"raw_totals AS (\n"
+        f"  SELECT scenario, rep, param_set{group_sql},\n"
+        f"         SUM(value) AS total_value\n"
+        f"  FROM per_rep GROUP BY scenario, rep, param_set{group_sql}\n"
+        f"),\n"
+        f"base AS (SELECT * FROM raw_totals WHERE scenario = ?),\n"
+        f"cmp AS (SELECT * FROM raw_totals WHERE scenario <> ?),\n"
+    )
+    select_group = "".join(f", c.{c} AS {c}" for c in group_cols)
+
+    if config.get("pairing", "paired") == "paired":
+        # Replicate i of a scenario against replicate i of the baseline, so the
+        # shared RNG/parameter draw cancels and the spread shown is the spread
+        # of the effect itself. Same assumption as the time-series comparison.
+        join = " AND ".join(
+            [f"c.{c} = b.{c}" for c in group_cols]
+            + ["c.rep = b.rep", "c.param_set IS NOT DISTINCT FROM b.param_set"]
+        )
+        expr = _compare_expr(config, "c.total_value", "b.total_value")
+        sql = (
+            f"{head}"
+            f"totals AS (\n"
+            f"  SELECT c.scenario AS scenario, c.rep AS rep,\n"
+            f"         c.param_set AS param_set{select_group},\n"
+            f"         {expr} AS total_value\n"
+            f"  FROM cmp c JOIN base b ON {join}\n"
+            f")"
+        )
+        return sql, params
+
+    # Unpaired: every replicate is measured against one baseline summary, so
+    # the spread shown is the compared scenario's own spread, not the effect's.
+    base_group_by = f"\n  GROUP BY {', '.join(group_cols)}" if group_cols else ""
+    base_select = "".join(f"{c}, " for c in group_cols)
+    join = (" AND ".join(f"c.{c} = b.{c}" for c in group_cols)
+            if group_cols else "TRUE")
+    expr = _compare_expr(config, "c.total_value", "b.base_value")
+    sql = (
+        f"{head}"
+        f"base_agg AS (\n"
+        f"  SELECT {base_select}median(total_value) AS base_value\n"
+        f"  FROM base{base_group_by}\n"
+        f"),\n"
+        f"totals AS (\n"
+        f"  SELECT c.scenario AS scenario, c.rep AS rep,\n"
+        f"         c.param_set AS param_set{select_group},\n"
+        f"         {expr} AS total_value\n"
+        f"  FROM cmp c JOIN base_agg b ON {join}\n"
+        f")"
+    )
+    return sql, params
+
+
 def build_per_rep_totals_query(config: dict) -> tuple[str, list[Any]]:
     """One total per replicate -- the basis for histograms and box plots.
 
     Sums each replicate's series over the selected day range, giving a
-    distribution across replicates (e.g. total season hospitalizations).
+    distribution across replicates (e.g. total season hospitalizations), or of
+    per-replicate differences/ratios against the baseline when comparing.
     """
     group_cols = _AGG_GROUP_COLS[config["agg_level"]]
     group_sql = "".join(f", {c}" for c in group_cols)
-    cte, params = _per_rep_cte(config, config["metrics"])
+    cte, params = _totals_cte(config)
     sql = (
         f"WITH {cte}\n"
-        f"SELECT scenario, rep, param_set{group_sql}, SUM(value) AS total_value\n"
-        f"FROM per_rep\n"
-        f"GROUP BY scenario, rep, param_set{group_sql}\n"
+        f"SELECT scenario, rep, param_set{group_sql}, total_value\n"
+        f"FROM totals\n"
         f"ORDER BY scenario, rep"
     )
     return sql, params
@@ -681,13 +806,9 @@ def build_stacked_bar_query(config: dict) -> tuple[str, list[Any]]:
             "level other than 'population' (e.g. age group)."
         )
     group_sql = "".join(f", {c}" for c in group_cols)
-    cte, params = _per_rep_cte(config, config["metrics"])
+    cte, params = _totals_cte(config)
     sql = (
-        f"WITH {cte},\n"
-        f"totals AS (\n"
-        f"  SELECT scenario, rep, param_set{group_sql}, SUM(value) AS total_value\n"
-        f"  FROM per_rep GROUP BY scenario, rep, param_set{group_sql}\n"
-        f")\n"
+        f"WITH {cte}\n"
         f"SELECT scenario{group_sql}, median(total_value) AS median_value\n"
         f"FROM totals\n"
         f"GROUP BY scenario{group_sql}\n"
@@ -696,19 +817,18 @@ def build_stacked_bar_query(config: dict) -> tuple[str, list[Any]]:
     return sql, params
 
 
-def build_scatter_query(config: dict) -> tuple[str, list[Any]]:
-    """Two metrics per replicate, as X and Y.
+def _scatter_per_rep_sql(config: dict, scenarios: Sequence[str]) -> tuple[str, list[Any]]:
+    """Per-replicate X/Y totals for ``scenarios`` -- the scatter's raw rows.
 
     Uses conditional aggregation (SUM(...) FILTER) rather than joining two
     separate queries, so it is a single pass over the filtered rows.
     """
     x_metric, y_metric = config["scatter_x"], config["scatter_y"]
-    agg_level = config["agg_level"]
     table = _source_table(config)
-    group_cols = _AGG_GROUP_COLS[agg_level]
+    group_cols = _AGG_GROUP_COLS[config["agg_level"]]
     group_sql = "".join(f", {c}" for c in group_cols)
 
-    scen_ph, params = _in_clause(config["scenarios"])
+    scen_ph, params = _in_clause(list(scenarios))
     metrics = [x_metric] if x_metric == y_metric else [x_metric, y_metric]
     metric_ph, metric_params = _in_clause(metrics)
     where = [f"scenario IN ({scen_ph})", f"compartment IN ({metric_ph})"]
@@ -723,17 +843,70 @@ def build_scatter_query(config: dict) -> tuple[str, list[Any]]:
         params += [int(day_range[0]), int(day_range[1])]
 
     sql = (
-        f"SELECT scenario, rep, param_set{group_sql},\n"
-        f"       SUM(value) FILTER (WHERE compartment = ?) AS x_value,\n"
-        f"       SUM(value) FILTER (WHERE compartment = ?) AS y_value\n"
-        f"FROM {table}\n"
-        f"WHERE {' AND '.join(where)}\n"
-        f"GROUP BY scenario, rep, param_set{group_sql}\n"
-        f"ORDER BY scenario, rep"
+        f"  SELECT scenario, rep, param_set{group_sql},\n"
+        f"         SUM(value) FILTER (WHERE compartment = ?) AS x_value,\n"
+        f"         SUM(value) FILTER (WHERE compartment = ?) AS y_value\n"
+        f"  FROM {table}\n"
+        f"  WHERE {' AND '.join(where)}\n"
+        f"  GROUP BY scenario, rep, param_set{group_sql}\n"
     )
     # The two FILTER placeholders bind before the WHERE ones in the text, so
     # they lead the parameter list.
     return sql, [x_metric, y_metric] + params
+
+
+def build_scatter_query(config: dict) -> tuple[str, list[Any]]:
+    """Two metrics per replicate, as X and Y.
+
+    When comparing, both axes become per-replicate differences (or ratios)
+    against the baseline, so the cloud sits around the no-effect point rather
+    than around the two scenarios' levels.
+    """
+    group_cols = _AGG_GROUP_COLS[config["agg_level"]]
+
+    if not is_comparison(config):
+        body, params = _scatter_per_rep_sql(config, config["scenarios"])
+        return f"{body}  ORDER BY scenario, rep", params
+
+    baseline = config["baseline_scenario"]
+    others = [s for s in config["scenarios"] if s != baseline]
+    body, params = _scatter_per_rep_sql(config, [baseline] + others)
+    params = params + [baseline, baseline]
+
+    select_group = "".join(f", c.{c} AS {c}" for c in group_cols)
+    if config.get("pairing", "paired") == "paired":
+        join = " AND ".join(
+            [f"c.{c} = b.{c}" for c in group_cols]
+            + ["c.rep = b.rep", "c.param_set IS NOT DISTINCT FROM b.param_set"]
+        )
+        x_expr = _compare_expr(config, "c.x_value", "b.x_value")
+        y_expr = _compare_expr(config, "c.y_value", "b.y_value")
+        base_rel = "base b"
+    else:
+        join = (" AND ".join(f"c.{c} = b.{c}" for c in group_cols)
+                if group_cols else "TRUE")
+        x_expr = _compare_expr(config, "c.x_value", "b.x_value")
+        y_expr = _compare_expr(config, "c.y_value", "b.y_value")
+        base_group_by = f"\n    GROUP BY {', '.join(group_cols)}" if group_cols else ""
+        base_select = "".join(f"{c}, " for c in group_cols)
+        base_rel = (
+            f"(SELECT {base_select}median(x_value) AS x_value,\n"
+            f"          median(y_value) AS y_value\n"
+            f"   FROM base{base_group_by}) b"
+        )
+
+    sql = (
+        f"WITH per_rep AS (\n{body}),\n"
+        f"base AS (SELECT * FROM per_rep WHERE scenario = ?),\n"
+        f"cmp AS (SELECT * FROM per_rep WHERE scenario <> ?)\n"
+        f"SELECT c.scenario AS scenario, c.rep AS rep,\n"
+        f"       c.param_set AS param_set{select_group},\n"
+        f"       {x_expr} AS x_value,\n"
+        f"       {y_expr} AS y_value\n"
+        f"FROM cmp c JOIN {base_rel} ON {join}\n"
+        f"ORDER BY c.scenario, c.rep"
+    )
+    return sql, params
 
 
 # ---------------------------------------------------------------------------
@@ -821,7 +994,7 @@ def _residual_group_cols(config: dict) -> list[str]:
     return [c for c in _AGG_GROUP_COLS[config["agg_level"]] if c != facet]
 
 
-def _y_resolve(config: dict) -> str:
+def _y_resolve(config: dict) -> Literal["shared", "independent"]:
     """Whether small multiples share one y scale or each get their own.
 
     Shared is the default because it is what makes panels comparable at a
@@ -879,6 +1052,26 @@ def _series_column(df: pd.DataFrame, cols: list[str]) -> tuple[pd.DataFrame, str
     return df, "_series"
 
 
+def _value_axis_title(config: dict, what: str) -> str:
+    """Axis title for a per-replicate quantity, saying what it is measured
+    against when the chart is a comparison."""
+    if not is_comparison(config):
+        return f"{what} (total per replicate)"
+    rel = "ratio to" if config.get("compare_metric") == "ratio" else "difference from"
+    return f"{what} — {rel} {config.get('baseline_scenario')} (per replicate)"
+
+
+def _reference_rule(config: dict) -> alt.Chart | None:
+    """A dashed line at the no-effect value, so a comparison is readable
+    against something rather than floating."""
+    reference = comparison_reference(config)
+    if reference is None:
+        return None
+    return (alt.Chart(pd.DataFrame({"_ref": [reference]}))
+            .mark_rule(strokeDash=[4, 4], color="grey")
+            .encode(y="_ref:Q"))
+
+
 def _metric_label(config: dict) -> str:
     """Y-axis label. Several metrics are summed, which the ``+`` states."""
     label = " + ".join(config.get("metrics") or [])
@@ -907,7 +1100,7 @@ def _slice_label(config: dict, dims: dict) -> str:
 
 
 def _build_timeseries(con, config, dims) -> AltairChart:
-    comparing = config.get("scenario_mode") == "compare_baseline"
+    comparing = is_comparison(config)
     # A single replicate has no spread to summarize; asking for percentiles
     # would just draw a zero-width band around the line.
     with_ci = bool(config.get("show_uncertainty")) and (dims.get("n_reps") or 1) > 1
@@ -929,10 +1122,9 @@ def _build_timeseries(con, config, dims) -> AltairChart:
             if is_ratio else
             f"{_metric_label(config)} — difference vs {config['baseline_scenario']}"
         )
-        reference = 1.0 if is_ratio else 0.0
     else:
         y_title = _metric_label(config)
-        reference = None
+    reference = comparison_reference(config)
 
     x_title = "Date" if x_field == "date" else "Day"
     # Any grouping dimension the facet does not absorb still splits the rows,
@@ -1013,11 +1205,17 @@ def _build_histogram(con, config, dims) -> AltairChart:
     _bins = max(5, min(30, len(df) // 2))
     chart = alt.Chart(df).mark_bar(opacity=0.7).encode(
         x=alt.X("total_value:Q", bin=alt.Bin(maxbins=_bins),
-                title=f"{_metric_label(config)} (total per replicate)"),
+                title=_value_axis_title(config, _metric_label(config))),
         y=alt.Y("count()", title="Replicates", stack=None),
         color=alt.Color("scenario:N", title="Scenario"),
         tooltip=["scenario:N", "count()"],
     )
+    reference = comparison_reference(config)
+    if reference is not None:
+        # Vertical here, since the compared quantity is on x for a histogram.
+        chart = alt.layer(chart, alt.Chart(pd.DataFrame({"_ref": [reference]}))
+                          .mark_rule(strokeDash=[4, 4], color="grey")
+                          .encode(x="_ref:Q"))
     facet = _facet_col(config)
     if facet and facet in df.columns:
         return chart.properties(width=280, height=180).facet(
@@ -1037,9 +1235,15 @@ def _build_boxplot(con, config, dims) -> AltairChart:
     chart = alt.Chart(df).mark_boxplot(extent="min-max").encode(
         x=alt.X("scenario:N", title="Scenario"),
         y=alt.Y("total_value:Q",
-                title=f"{_metric_label(config)} (total per replicate)"),
+                title=_value_axis_title(config, _metric_label(config)),
+                # A difference straddles zero, so forcing the axis through it
+                # would waste most of the range on empty space.
+                scale=alt.Scale(zero=not is_comparison(config))),
         color=alt.Color("scenario:N", title="Scenario", legend=None),
     )
+    rule = _reference_rule(config)
+    if rule is not None:
+        chart = alt.layer(chart, rule)
     facet = _facet_col(config)
     if facet and facet in df.columns:
         return chart.properties(width=220, height=200).facet(
@@ -1056,13 +1260,31 @@ def _build_stacked_bar(con, config, dims) -> AltairChart:
     df = _label_groups(df, dims)
 
     stack_col = _AGG_GROUP_COLS[config["agg_level"]][-1]
-    return alt.Chart(df).mark_bar().encode(
-        x=alt.X("scenario:N", title="Scenario"),
-        y=alt.Y("median_value:Q",
-                title=f"{_metric_label(config)} (median total)"),
-        color=alt.Color(f"{stack_col}:N", title=stack_col.replace("_", " ")),
-        tooltip=list(df.columns),
-    ).properties(width="container", height=340)
+    comparing = is_comparison(config)
+    y_title = (
+        f"{_metric_label(config)} — median "
+        f"{'ratio to' if config.get('compare_metric') == 'ratio' else 'difference from'} "
+        f"{config.get('baseline_scenario')}"
+        if comparing else f"{_metric_label(config)} (median total)"
+    )
+    encoding: dict[str, Any] = {
+        "x": alt.X("scenario:N", title="Scenario"),
+        "y": alt.Y("median_value:Q", title=y_title,
+                   scale=alt.Scale(zero=not comparing)),
+        "color": alt.Color(f"{stack_col}:N", title=stack_col.replace("_", " ")),
+        "tooltip": list(df.columns),
+    }
+    if comparing:
+        # Differences can be negative, and stacking mixed signs makes the bar
+        # heights mean nothing (Vega stacks them from wherever the running
+        # total happens to be). Group them side by side instead, so each
+        # group's effect is read against the zero rule directly.
+        encoding["xOffset"] = alt.XOffset(f"{stack_col}:N")
+    chart = alt.Chart(df).mark_bar().encode(**encoding)
+    rule = _reference_rule(config)
+    if rule is not None:
+        chart = alt.layer(chart, rule)
+    return chart.properties(width="container", height=340)
 
 
 def _build_scatter(con, config, dims) -> AltairChart:
@@ -1073,9 +1295,11 @@ def _build_scatter(con, config, dims) -> AltairChart:
     df = _label_groups(df, dims)
 
     chart = alt.Chart(df).mark_circle(size=70, opacity=0.7).encode(
-        x=alt.X("x_value:Q", title=f"{config['scatter_x']} (total per replicate)",
+        x=alt.X("x_value:Q",
+                title=_value_axis_title(config, config["scatter_x"]),
                 scale=alt.Scale(zero=False)),
-        y=alt.Y("y_value:Q", title=f"{config['scatter_y']} (total per replicate)",
+        y=alt.Y("y_value:Q",
+                title=_value_axis_title(config, config["scatter_y"]),
                 scale=alt.Scale(zero=False)),
         color=alt.Color("scenario:N", title="Scenario"),
         tooltip=list(df.columns),
@@ -1140,7 +1364,7 @@ def chart_title(config: dict, dims: dict | None = None) -> str:
     slices = _slice_label(config, dims)
     if slices:
         where = f"{slices}{', ' + where if breakdown else ''}"
-    if config.get("scenario_mode") == "compare_baseline":
+    if is_comparison(config):
         rel = "ratio" if config.get("compare_metric") == "ratio" else "difference"
         where += f" · {rel} vs {config.get('baseline_scenario')}"
     return f"{kind}: {what} ({where})"
