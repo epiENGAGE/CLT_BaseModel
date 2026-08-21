@@ -24,6 +24,11 @@ compared. Transition variables can additionally be shown as running totals.
 Nothing here is specific to any one model — every selector is built from
 whatever the results file contains, in the order its `meta` table records.
 
+Everything is downloadable: each chart offers its own rows as CSV and itself
+as an image, and a separate section at the top pulls out bulk data — any set
+of scenarios and metrics, per replicate or summarized across them, per day or
+totalled — without having to plot it first.
+
 This is a standalone notebook: unlike model_builder_notebook.py it is NOT
 assembled by build_notebook.py, so edit it directly.
 
@@ -117,10 +122,38 @@ def _helpers(Path, mo, rex):
     def file_name(path):
         return Path(path).name
 
+    def download_buttons(result, config, dims):
+        """CSV + image download buttons for one chart.
+
+        Both are lazy (marimo calls back into the kernel when the button is
+        clicked) because every chart is re-rendered on every widget change:
+        converting each one to a PNG on the way past would dominate the render
+        even though almost none of them are ever downloaded.
+
+        The CSV is the chart's own rows — already filtered, relabelled and, for
+        a comparison, differenced against the baseline — so it is what is on
+        screen rather than a fresh query that might not agree with it.
+        """
+        kind = rex.image_kind()
+        return mo.hstack([
+            mo.download(
+                data=lambda _r=result: rex.frame_to_csv(_r.data),
+                filename=rex.chart_filename(config, dims, "csv"),
+                mimetype="text/csv",
+                label="⬇ Data (CSV)",
+            ),
+            mo.download(
+                data=lambda _r=result: rex.chart_image(_r.chart)[0],
+                filename=rex.chart_filename(config, dims, kind),
+                mimetype="image/png" if kind == "png" else "text/html",
+                label=f"⬇ Chart ({kind.upper()})",
+            ),
+        ], justify="start")
+
     return (
         AGG_OPTIONS, COMPARE_OPTIONS, MAX_CHARTS, MODE_OPTIONS,
-        PAIRING_OPTIONS, default_config_for, file_name, label_for,
-        section_card,
+        PAIRING_OPTIONS, default_config_for, download_buttons, file_name,
+        label_for, section_card,
     )
 
 
@@ -291,6 +324,242 @@ def _source_summary(file_name, get_source, mo):
 
 
 @app.cell
+def _slice_options(get_source, mo):
+    # The "restrict to one slice" selectors, built once and shared by the data
+    # export and by every chart — they ask the same question of the same file,
+    # so they should offer exactly the same choices. "All" maps to None, which
+    # the query builders read as "no restriction".
+    _src = get_source()
+    mo.stop(_src is None, None)
+    _dims = _src["dims"]
+    _age_labels = _dims.get("age_group_labels") or []
+
+    SUBPOP_OPTIONS = {"All subpopulations": None,
+                      **{_s: _s for _s in _dims.get("subpops") or []}}
+    AGE_OPTIONS = {"All age groups": None,
+                   **{_lbl: _i for _i, _lbl in enumerate(_age_labels)}}
+    RISK_OPTIONS = {"All risk groups": None,
+                    **{str(_i): _i for _i in range(_dims.get("num_risk_groups") or 0)}}
+
+    # A selector for a dimension the model does not have (one subpopulation,
+    # one risk group) would offer exactly one choice besides "All", so it is
+    # left out rather than shown inert.
+    HAS_SUBPOP = len(_dims.get("subpops") or []) > 1
+    HAS_RISK = (_dims.get("num_risk_groups") or 1) > 1
+    return AGE_OPTIONS, HAS_RISK, HAS_SUBPOP, RISK_OPTIONS, SUBPOP_OPTIONS
+
+
+@app.cell
+def _export_state(mo):
+    # The prepared table, kept in state for the same reason the connection is:
+    # mo.ui.run_button resets its value to False once the cells referencing it
+    # have run, so a result computed under the click has to be stored somewhere
+    # to survive past it.
+    get_export, set_export = mo.state(None)
+    return get_export, set_export
+
+
+@app.cell
+def _export_controls(
+    AGE_OPTIONS, AGG_OPTIONS, HAS_RISK, HAS_SUBPOP, RISK_OPTIONS,
+    SUBPOP_OPTIONS, get_source, mo, rex,
+):
+    _src = get_source()
+    mo.stop(_src is None, None)
+    _dims = _src["dims"]
+    _metric_opts = [_m for _m, _ in _dims["metrics"]]
+    _day_lo = int(_dims["day_min"] or 1)
+    _day_hi = int(_dims["day_max"] or 1)
+
+    export_scenarios = mo.ui.multiselect(
+        options=list(_dims["scenarios"]), value=list(_dims["scenarios"]),
+        label="Scenarios")
+    # Metric order is the meta table's compartment order then transition order,
+    # i.e. the model's own — do not sort it.
+    export_metrics = mo.ui.multiselect(
+        options=_metric_opts, value=_metric_opts,
+        label="Compartments / transition variables")
+    export_agg = mo.ui.dropdown(
+        options=AGG_OPTIONS, value="Population total", label="Aggregation")
+    export_subpop = mo.ui.dropdown(
+        options=SUBPOP_OPTIONS, value="All subpopulations", label="Subpopulation")
+    export_age = mo.ui.dropdown(
+        options=AGE_OPTIONS, value="All age groups", label="Age group")
+    export_risk = mo.ui.dropdown(
+        options=RISK_OPTIONS, value="All risk groups", label="Risk group")
+    export_days = mo.ui.range_slider(
+        start=_day_lo, stop=max(_day_hi, _day_lo + 1),
+        value=[_day_lo, _day_hi], label="Days", show_value=False)
+    export_rows = mo.ui.radio(
+        options={"Summary across replicates": "summary",
+                 "One row per replicate": "replicates"},
+        value="Summary across replicates", label="Rows")
+    export_time = mo.ui.radio(
+        options={"One row per day": "daily",
+                 "One row for the whole day range": "total"},
+        value="One row per day", label="Time")
+    export_cumulative = mo.ui.checkbox(
+        label="Cumulative (transition variables)")
+    export_total = mo.ui.checkbox(
+        label=f"Add a combined '{rex.TOTAL_LABEL}' row")
+    export_button = mo.ui.run_button(label="Prepare table")
+    return (
+        export_age, export_agg, export_button, export_cumulative, export_days,
+        export_metrics, export_risk, export_rows, export_scenarios,
+        export_subpop, export_time, export_total,
+    )
+
+
+@app.cell
+def _export_form(
+    HAS_RISK, HAS_SUBPOP, export_age, export_agg, export_button,
+    export_cumulative, export_days, export_metrics, export_risk, export_rows,
+    export_scenarios, export_subpop, export_time, export_total, get_source, mo,
+    rex, section_card,
+):
+    mo.stop(get_source() is None, None)
+    _lo, _hi = export_days.value
+    _slice_row = ([export_subpop] if HAS_SUBPOP else []) + [export_age]
+    if HAS_RISK:
+        _slice_row.append(export_risk)
+    # Offered only where it means something: at population level the single
+    # row already is the total.
+    _flags = [export_cumulative]
+    if rex.supports_export_total({"agg_level": export_agg.value}):
+        _flags.append(export_total)
+    section_card(
+        "② Download data",
+        "Pull the numbers out as a CSV, at whatever grain you need — this is "
+        "independent of the charts below.",
+        mo.vstack([
+            export_scenarios,
+            export_metrics,
+            mo.hstack([export_agg, *_slice_row], justify="start", wrap=True),
+            mo.hstack([export_days, mo.md(f"**{_lo} – {_hi}**")],
+                      justify="start", wrap=True),
+            mo.hstack([export_rows, export_time], justify="start", wrap=True),
+            mo.hstack(_flags, justify="start", wrap=True),
+            mo.hstack([export_button], justify="start"),
+        ]),
+    )
+    return
+
+
+@app.cell
+def _export_run(
+    HAS_RISK, HAS_SUBPOP, export_age, export_agg, export_button,
+    export_cumulative, export_days, export_metrics, export_risk, export_rows,
+    export_scenarios, export_subpop, export_time, export_total, get_source, mo,
+    rex, set_export,
+):
+    # Gated on the button: the widest selection here can be a million rows, so
+    # it must not run on every twiddle of a selector.
+    mo.stop(not export_button.value, None)
+    _src = get_source()
+    mo.stop(_src is None, None)
+
+    # Dropdowns built from a {label: value} dict take the *label* as `value=`
+    # but read back the mapped value, so these are used as-is.
+    _export_cfg = {
+        "scenarios": list(export_scenarios.value or []),
+        "metrics": list(export_metrics.value or []),
+        "agg_level": export_agg.value,
+        "subpop_filter": export_subpop.value if HAS_SUBPOP else None,
+        "age_filter": export_age.value,
+        "risk_filter": export_risk.value if HAS_RISK else None,
+        "day_range": tuple(export_days.value),
+        "cumulative": bool(export_cumulative.value),
+        "show_total": bool(export_total.value),
+        "row_mode": export_rows.value,
+        "time_mode": export_time.value,
+    }
+    with mo.status.spinner("Building table…"):
+        try:
+            set_export({
+                "df": rex.run_export(_src["con"], _src["dims"], _export_cfg),
+                "config": _export_cfg,
+                "error": None,
+            })
+        except rex.ResultsExplorerError as _exc:
+            set_export({"df": None, "config": _export_cfg, "error": str(_exc)})
+    return
+
+
+@app.cell
+def _export_result(get_export, get_source, mo, rex):
+    # Deliberately separate from the form cell: this one depends only on the
+    # prepared table, so editing a selector does not re-encode the last CSV.
+    mo.stop(get_source() is None, None)
+    _state = get_export()
+    mo.stop(
+        _state is None,
+        mo.md("*Choose what you need above, then click **Prepare table**.*"),
+    )
+    mo.stop(
+        _state["error"] is not None,
+        mo.callout(mo.md(_state["error"] or ""), kind="warn"),
+    )
+
+    _df = _state["df"]
+    _cfg = _state["config"]
+    _preview_rows = 200
+    _notes = []
+    if _cfg["cumulative"] and _cfg["time_mode"] != "daily":
+        _notes.append(
+            "*Cumulative is ignored here: the days are already summed into one "
+            "row, so a running total over them has nothing left to run over.*"
+        )
+    if _cfg["time_mode"] == "total":
+        _notes.append(
+            "*Each row sums its value over the selected days. That is the "
+            "seasonal total for a transition variable (a daily flow); for a "
+            "compartment, which is already a level, it is a sum of levels and "
+            "rarely what you want.*"
+        )
+    if _cfg.get("show_total") and rex.supports_export_total(_cfg):
+        _groups = " × ".join(
+            _c.replace("_", " ") for _c in rex.group_columns(_cfg))
+        _notes.append(
+            f"*Rows marked **{rex.TOTAL_LABEL}** under `{_groups}` sum every "
+            f"group — summed per replicate before any median or percentile, so "
+            f"each is the total in its own right and not the total of the other "
+            f"rows' summaries. **They overlap the rows they sum**, so filter "
+            f"them out before totalling a column yourself.*"
+        )
+    if _cfg["row_mode"] == "summary":
+        _notes.append(
+            "*Summary columns are taken across replicates, per row — so "
+            "`median_value` is the median of the replicate values for that "
+            "scenario/metric/day, not a median of anything already summarized.*"
+        )
+    if len(_df) > _preview_rows:
+        _notes.append(
+            f"*Preview shows the first {_preview_rows:,} of "
+            f"{len(_df):,} rows — the download has all of them.*"
+        )
+
+    mo.vstack([
+        mo.hstack([
+            mo.md(f"**{len(_df):,} rows × {len(_df.columns)} columns**"),
+            mo.download(
+                data=rex.frame_to_csv(_df),
+                filename=rex.export_filename(_cfg),
+                mimetype="text/csv",
+                label="⬇ Download CSV",
+            ),
+        ], justify="start"),
+        mo.ui.table(_df.head(_preview_rows), selection=None, pagination=True),
+        *[mo.md(_n) for _n in _notes],
+    ]).style({
+        "border": "1px solid #e3e3e3",
+        "border-radius": "8px",
+        "padding": "0.8rem 1rem",
+        "margin-bottom": "1rem",
+    })
+    return
+
+
+@app.cell
 def _charts_state(mo):
     # Two pieces of state, deliberately separate:
     #
@@ -334,7 +603,7 @@ def _add_chart_ui(
     mo.stop(get_source() is None, None)
     _full = len(get_chart_specs()) >= MAX_CHARTS
     section_card(
-        "② Charts",
+        "③ Charts",
         "Add as many as you need — each keeps its own settings. "
         "Remove one with the ✕ on its card.",
         mo.vstack([
@@ -366,9 +635,10 @@ def _add_chart(
 
 @app.cell
 def _chart_widgets(
-    AGG_OPTIONS, COMPARE_OPTIONS, MAX_CHARTS, MODE_OPTIONS, PAIRING_OPTIONS,
-    default_config_for, get_chart_specs, get_chart_values, get_source,
-    label_for, mo, set_chart_specs, set_chart_values,
+    AGE_OPTIONS, AGG_OPTIONS, COMPARE_OPTIONS, MAX_CHARTS, MODE_OPTIONS,
+    PAIRING_OPTIONS, RISK_OPTIONS, SUBPOP_OPTIONS, default_config_for,
+    get_chart_specs, get_chart_values, get_source, label_for, mo,
+    set_chart_specs, set_chart_values,
 ):
     # Every control for every chart slot is built here, bound to a module-level
     # name, and wrapped in mo.ui.array. That combination is what makes them
@@ -395,18 +665,9 @@ def _chart_widgets(
     _day_lo = int(_dims["day_min"] or 1)
     _day_hi = int(_dims["day_max"] or 1)
 
-    # Slice selectors. "All" maps to None, which the query builders read as
-    # "no restriction". These are independent of the Aggregation dropdown:
-    # pinning one age group while still showing the population total across
-    # risk groups and subpops is a normal thing to want.
-    _age_labels = _dims.get("age_group_labels") or []
-    _subpop_opts = {"All subpopulations": None,
-                    **{_s: _s for _s in _dims.get("subpops") or []}}
-    _age_opts = {"All age groups": None,
-                 **{_lbl: _i for _i, _lbl in enumerate(_age_labels)}}
-    _risk_opts = {"All risk groups": None,
-                  **{str(_i): _i for _i in range(_dims.get("num_risk_groups") or 0)}}
-
+    # Slice selectors come from _slice_options; they are independent of the
+    # Aggregation dropdown, since pinning one age group while still showing the
+    # population total across risk groups and subpops is a normal thing to want.
     def _cb(key):
         def _inner(v):
             set_chart_values(lambda d: {**d, key: v})
@@ -501,24 +762,24 @@ def _chart_widgets(
     ])
     chart_subpop = mo.ui.array([
         mo.ui.dropdown(
-            options=_subpop_opts,
-            value=label_for(_subpop_opts, _val(j, "subpop_filter", None)),
+            options=SUBPOP_OPTIONS,
+            value=label_for(SUBPOP_OPTIONS, _val(j, "subpop_filter", None)),
             label="Subpopulation", on_change=_cb(f"subpop_filter::{_slot(j)[0]}"),
         )
         for j in range(MAX_CHARTS)
     ])
     chart_age = mo.ui.array([
         mo.ui.dropdown(
-            options=_age_opts,
-            value=label_for(_age_opts, _val(j, "age_filter", None)),
+            options=AGE_OPTIONS,
+            value=label_for(AGE_OPTIONS, _val(j, "age_filter", None)),
             label="Age group", on_change=_cb(f"age_filter::{_slot(j)[0]}"),
         )
         for j in range(MAX_CHARTS)
     ])
     chart_risk = mo.ui.array([
         mo.ui.dropdown(
-            options=_risk_opts,
-            value=label_for(_risk_opts, _val(j, "risk_filter", None)),
+            options=RISK_OPTIONS,
+            value=label_for(RISK_OPTIONS, _val(j, "risk_filter", None)),
             label="Risk group", on_change=_cb(f"risk_filter::{_slot(j)[0]}"),
         )
         for j in range(MAX_CHARTS)
@@ -527,6 +788,13 @@ def _chart_widgets(
         mo.ui.checkbox(
             value=bool(_val(j, "cumulative", False)),
             label="Cumulative", on_change=_cb(f"cumulative::{_slot(j)[0]}"),
+        )
+        for j in range(MAX_CHARTS)
+    ])
+    chart_total = mo.ui.array([
+        mo.ui.checkbox(
+            value=bool(_val(j, "show_total", True)),
+            label="Total panel", on_change=_cb(f"show_total::{_slot(j)[0]}"),
         )
         for j in range(MAX_CHARTS)
     ])
@@ -581,16 +849,17 @@ def _chart_widgets(
         chart_age, chart_agg, chart_baseline, chart_ci, chart_compare,
         chart_cumulative, chart_days, chart_hide_empty, chart_metrics,
         chart_mode, chart_pairing, chart_remove, chart_risk, chart_scenarios,
-        chart_shared_y, chart_subpop, chart_x, chart_y,
+        chart_shared_y, chart_subpop, chart_total, chart_x, chart_y,
     )
 
 
 @app.cell
 def _render_charts(
-    chart_age, chart_agg, chart_baseline, chart_ci, chart_compare,
-    chart_cumulative, chart_days, chart_hide_empty, chart_metrics, chart_mode,
-    chart_pairing, chart_remove, chart_risk, chart_scenarios, chart_shared_y,
-    chart_subpop, chart_x, chart_y, default_config_for, get_chart_specs,
+    HAS_RISK, HAS_SUBPOP, chart_age, chart_agg, chart_baseline, chart_ci,
+    chart_compare, chart_cumulative, chart_days, chart_hide_empty,
+    chart_metrics, chart_mode, chart_pairing, chart_remove, chart_risk,
+    chart_scenarios, chart_shared_y, chart_subpop, chart_total, chart_x,
+    chart_y, default_config_for, download_buttons, get_chart_specs,
     get_source, mo, rex, traceback,
 ):
     _src = get_source()
@@ -601,11 +870,7 @@ def _render_charts(
         mo.callout(mo.md("No charts yet — add one above."), kind="info"),
     )
     _con, _dims = _src["con"], _src["dims"]
-    # A slice selector for a dimension the model does not have (one
-    # subpopulation, one risk group) would offer exactly one choice besides
-    # "All", so it is left out rather than shown inert.
-    _has_subpop = len(_dims.get("subpops") or []) > 1
-    _has_risk = (_dims.get("num_risk_groups") or 1) > 1
+    _has_subpop, _has_risk = HAS_SUBPOP, HAS_RISK
     _kinds = dict(_dims.get("metrics") or [])
 
     def _config(j, spec):
@@ -634,6 +899,7 @@ def _render_charts(
             age_filter=chart_age[j].value,
             risk_filter=chart_risk[j].value if _has_risk else None,
             cumulative=bool(chart_cumulative[j].value),
+            show_total=bool(chart_total[j].value),
             hide_empty=bool(chart_hide_empty[j].value),
             shared_y=bool(chart_shared_y[j].value),
         )
@@ -652,9 +918,12 @@ def _render_charts(
         _row_slice = ([chart_subpop[_j]] if _has_subpop else []) + [chart_age[_j]]
         if _has_risk:
             _row_slice.append(chart_risk[_j])
-        # Both only bite once the chart is broken into small multiples.
+        # These only bite once the chart is broken into small multiples.
         if _cfg["agg_level"] != "population":
             _row_slice += [chart_hide_empty[_j], chart_shared_y[_j]]
+        # Offered only where it means something — see rex.supports_total.
+        if rex.supports_total(_cfg):
+            _row_slice.append(chart_total[_j])
         _row2 = [chart_mode[_j], chart_scenarios[_j]]
         if rex.is_comparison(_cfg):
             _row2 += [chart_baseline[_j], chart_compare[_j], chart_pairing[_j]]
@@ -671,15 +940,19 @@ def _render_charts(
         ):
             _row3.insert(0, chart_cumulative[_j])
 
+        # No downloads when the chart did not build: there would be nothing
+        # behind them but the error message.
+        _downloads = None
         try:
-            _chart = rex.render_chart(_con, _dims, _cfg)
+            _result = rex.build_chart(_con, _dims, _cfg)
+            _downloads = download_buttons(_result, _cfg, _dims)
             try:
                 _view = mo.ui.altair_chart(
-                    _chart, chart_selection=False, legend_selection=False)
+                    _result.chart, chart_selection=False, legend_selection=False)
             except Exception:
                 # Faceted charts cannot carry marimo's selection wrapper; show
                 # the chart itself rather than losing it.
-                _view = _chart
+                _view = _result.chart
         except rex.ResultsExplorerError as _exc:
             _view = mo.callout(mo.md(str(_exc)), kind="warn")
         except Exception:
@@ -691,6 +964,13 @@ def _render_charts(
             _extra.append(mo.md(
                 f"*Metrics are **summed**: this shows "
                 f"{' + '.join(_cfg['metrics'])} as one series.*"
+            ))
+        if rex.supports_total(_cfg) and _cfg.get("show_total"):
+            _extra.append(mo.md(
+                f"*The last panel, **{rex.TOTAL_LABEL}**, sums every group — "
+                f"it is summed per replicate before any median, interval or "
+                f"baseline comparison, so it is the total in its own right and "
+                f"not the sum of the other panels' summaries.*"
             ))
         if _cfg.get("cumulative"):
             _extra.append(mo.md(
@@ -739,6 +1019,7 @@ def _render_charts(
                 mo.hstack(_row2, justify="start", wrap=True),
                 mo.hstack(_row3, justify="start", wrap=True),
                 _view,
+                *([_downloads] if _downloads is not None else []),
                 *_extra,
             ]).style({
                 "border": "1px solid #e3e3e3",

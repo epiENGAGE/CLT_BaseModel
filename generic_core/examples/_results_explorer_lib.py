@@ -35,9 +35,11 @@ down into it, so only the aggregated chart data is ever materialized.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
+import textwrap
 from pathlib import Path
-from typing import Any, Literal, Sequence
+from typing import Any, Literal, NamedTuple, Sequence
 
 import altair as alt
 import duckdb
@@ -60,6 +62,11 @@ alt.data_transformers.enable("default", max_rows=None)
 #: selection. Well above anything a sensible chart needs, low enough that the
 #: payload embedded in the page stays a few MB.
 SOFT_ROW_LIMIT = 50_000
+
+#: Row cap for the bulk data export, which is downloaded rather than drawn and
+#: so can be far larger than a chart -- but is still materialized in memory as
+#: a DataFrame before being written out, hence a cap at all.
+EXPORT_ROW_LIMIT = 1_000_000
 
 CHART_TYPES = ("timeseries", "histogram", "boxplot", "stacked_bar", "scatter")
 
@@ -94,6 +101,42 @@ _FILTER_COLS: tuple[tuple[str, str], ...] = (
     ("age_group", "age_filter"),
     ("risk_group", "risk_filter"),
 )
+
+#: Name shown for the extra "every group combined" slice.
+TOTAL_LABEL = "Total"
+
+#: The combined slice is carried as an ordinary value *inside* the group
+#: column rather than as a separate result set, so every downstream join,
+#: GROUP BY and baseline comparison treats it exactly like a real group and
+#: needs no special case. That requires a value the data cannot itself
+#: contain, and one of the right SQL type -- the `*_group` columns are
+#: INTEGER, subpop is TEXT.
+_TOTAL_SQL_LITERAL: dict[str, str] = {
+    "subpop": "'__total__'", "age_group": "-1", "risk_group": "-1",
+}
+_TOTAL_VALUE: dict[str, Any] = {
+    "subpop": "__total__", "age_group": -1, "risk_group": -1,
+}
+
+
+#: Columns that exist only so a chart can render -- a wrapped axis label, a
+#: synthesized legend key. They are presentation, not results, so they are
+#: stripped before the chart's data is handed to a download button.
+_DISPLAY_ONLY_COLS = ("scenario_label", "_series")
+
+
+class ChartResult(NamedTuple):
+    """A built chart together with the rows it was built from.
+
+    The two travel together because the data is not recoverable from the chart:
+    by the time Altair has it, the frame has been filtered, relabelled and (for
+    a comparison) differenced against the baseline. Re-running the query to
+    offer a CSV would be both wasteful and, if it diverged, wrong -- what the
+    user downloads has to be what they are looking at.
+    """
+
+    chart: AltairChart
+    data: pd.DataFrame
 
 
 class ResultsExplorerError(Exception):
@@ -377,6 +420,10 @@ def default_chart_config(chart_id: int, chart_type: str, dims: dict) -> dict:
         # (flows); a compartment series is already a level, so summing it over
         # days measures nothing. Enforced in _validate.
         "cumulative": False,
+        # An extra panel summing every group, so the breakdown does not cost
+        # sight of the overall number. Ignored unless exactly one dimension is
+        # broken out -- see _total_group_col.
+        "show_total": True,
         "hide_empty": True,
         # Small multiples share a y axis by default, which is what makes them
         # comparable -- but one dominant group (a peak age band, say) then
@@ -471,6 +518,66 @@ def _filter_clauses(config: dict) -> tuple[list[str], list[Any]]:
     return where, params
 
 
+def _total_group_col(config: dict) -> str | None:
+    """The group column that gets an extra combined-over-everything slice.
+
+    Breaking a chart into small multiples answers "how is this split up?" but
+    loses "and how much is it altogether?", which is usually the number the
+    reader wants to anchor on. Adding the total as one more panel puts both on
+    the same page, at the same scale.
+
+    None unless there is exactly one breakdown dimension: at agg_level "all"
+    three dimensions are broken out at once, and a single extra slice could
+    not say which of them it totals over. Also None for a stacked bar, where
+    the parts are already drawn on top of each other and a total segment would
+    stack on top of its own components, doubling the bar.
+    """
+    if not config.get("show_total"):
+        return None
+    if config.get("chart_type") == "stacked_bar":
+        return None
+    cols = _AGG_GROUP_COLS[config["agg_level"]]
+    if len(cols) != 1:
+        return None
+    col = cols[0]
+    # Pinned to one slice, the "total" would be a copy of the only panel.
+    if col in {c for c, _ in _active_filters(config)}:
+        return None
+    return col
+
+
+def supports_total(config: dict) -> bool:
+    """Whether the combined-total panel is meaningful for this chart at all.
+
+    Independent of whether it is currently switched on, so the UI can decide
+    whether to *offer* the toggle.
+    """
+    return _total_group_col({**config, "show_total": True}) is not None
+
+
+def _total_union_sql(
+    source: str, cols: Sequence[str], keys: Sequence[str],
+    value_cols: Sequence[str],
+) -> str:
+    """``source`` plus one extra row per key, holding the sum over ``cols``.
+
+    With several columns the extra row is the combined total over all of them
+    at once -- every one of them reads as the total marker -- rather than a
+    marginal total per column, which would need a row set per column and no
+    way to say which is which.
+    """
+    key_sql = ", ".join(keys)
+    all_cols = ", ".join([*keys, *cols, *value_cols])
+    totals = ", ".join(f"{_TOTAL_SQL_LITERAL[c]} AS {c}" for c in cols)
+    sums = ", ".join(f"SUM({v}) AS {v}" for v in value_cols)
+    return (
+        f"  SELECT {all_cols} FROM {source}\n"
+        f"  UNION ALL\n"
+        f"  SELECT {key_sql}, {totals}, {sums}\n"
+        f"  FROM {source} GROUP BY {key_sql}\n"
+    )
+
+
 def _per_rep_cte(
     config: dict, metrics: Sequence[str], *, alias: str = "per_rep",
 ) -> tuple[str, list[Any]]:
@@ -515,22 +622,31 @@ def _per_rep_cte(
         f"  WHERE {' AND '.join(where)}\n"
         f"  GROUP BY scenario, rep, param_set, day{group_sql}\n"
     )
-    if not config.get("cumulative"):
-        return f"{alias} AS (\n{body})", params
 
-    part_sql = "".join(f", {c}" for c in group_cols)
-    sql = (
-        f"{alias}_daily AS (\n{body}),\n"
-        f"{alias} AS (\n"
-        f"  SELECT scenario, rep, param_set, day{group_sql},\n"
-        f"         SUM(value) OVER (\n"
-        f"           PARTITION BY scenario, rep, param_set{part_sql}\n"
-        f"           ORDER BY day ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW\n"
-        f"         ) AS value\n"
-        f"  FROM {alias}_daily\n"
-        f")"
-    )
-    return sql, params
+    # A chain of CTEs, each reading the one before: slice -> combined total
+    # -> running total. Order matters: the total must be summed across groups
+    # before it is accumulated over days, and both must happen per replicate,
+    # ahead of any median or percentile.
+    keys = ["scenario", "rep", "param_set", "day"]
+    stages = [body]
+    total_col = _total_group_col(config)
+    if total_col:
+        stages.append(_total_union_sql(
+            f"{alias}_{len(stages) - 1}", [total_col], keys, ["value"]))
+    if config.get("cumulative"):
+        part_sql = "".join(f", {c}" for c in group_cols)
+        stages.append(
+            f"  SELECT scenario, rep, param_set, day{group_sql},\n"
+            f"         SUM(value) OVER (\n"
+            f"           PARTITION BY scenario, rep, param_set{part_sql}\n"
+            f"           ORDER BY day ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW\n"
+            f"         ) AS value\n"
+            f"  FROM {alias}_{len(stages) - 1}\n"
+        )
+    # The last stage carries the name the caller expects; the rest are
+    # intermediate and numbered.
+    names = [f"{alias}_{i}" for i in range(len(stages) - 1)] + [alias]
+    return ",\n".join(f"{n} AS (\n{s})" for n, s in zip(names, stages)), params
 
 
 def build_timeseries_query(config: dict, *, with_ci: bool) -> tuple[str, list[Any]]:
@@ -855,6 +971,22 @@ def _scatter_per_rep_sql(config: dict, scenarios: Sequence[str]) -> tuple[str, l
     return sql, [x_metric, y_metric] + params
 
 
+def _scatter_body(config: dict, scenarios: Sequence[str]) -> tuple[str, list[Any]]:
+    """:func:`_scatter_per_rep_sql` with the combined-total slice folded in.
+
+    Emitted as a leading CTE rather than inline, since the total needs a second
+    pass over the same rows.
+    """
+    body, params = _scatter_per_rep_sql(config, scenarios)
+    total_col = _total_group_col(config)
+    if not total_col:
+        return body, params
+    union = _total_union_sql(
+        "scatter_slice", [total_col],
+        ["scenario", "rep", "param_set"], ["x_value", "y_value"])
+    return f"  WITH scatter_slice AS (\n{body})\n{union}", params
+
+
 def build_scatter_query(config: dict) -> tuple[str, list[Any]]:
     """Two metrics per replicate, as X and Y.
 
@@ -865,12 +997,12 @@ def build_scatter_query(config: dict) -> tuple[str, list[Any]]:
     group_cols = _AGG_GROUP_COLS[config["agg_level"]]
 
     if not is_comparison(config):
-        body, params = _scatter_per_rep_sql(config, config["scenarios"])
+        body, params = _scatter_body(config, config["scenarios"])
         return f"{body}  ORDER BY scenario, rep", params
 
     baseline = config["baseline_scenario"]
     others = [s for s in config["scenarios"] if s != baseline]
-    body, params = _scatter_per_rep_sql(config, [baseline] + others)
+    body, params = _scatter_body(config, [baseline] + others)
     params = params + [baseline, baseline]
 
     select_group = "".join(f", c.{c} AS {c}" for c in group_cols)
@@ -948,8 +1080,28 @@ def _add_date(df: pd.DataFrame, dims: dict) -> tuple[pd.DataFrame, str, str]:
     return df, "day", "Q"
 
 
-def _label_groups(df: pd.DataFrame, dims: dict) -> pd.DataFrame:
-    """Swap 0-based age indices for real band labels where available."""
+def _label_total_slices(df: pd.DataFrame, cols: Sequence[str]) -> pd.DataFrame:
+    """Swap the combined-slice sentinel for :data:`TOTAL_LABEL` in ``cols``."""
+    for col in cols:
+        if col not in df.columns:
+            continue
+        df = df.copy()
+        # Cast the whole column, not just the renamed row: a mix of ints and
+        # one string makes the facet's explicit sort order heterogeneous,
+        # which Altair rejects against its schema.
+        df[col] = df[col].astype(str).mask(
+            df[col] == _TOTAL_VALUE[col], TOTAL_LABEL)
+    return df
+
+
+def _label_groups(df: pd.DataFrame, dims: dict, config: dict | None = None) -> pd.DataFrame:
+    """Swap raw group keys for readable labels: 0-based age indices for real
+    band labels where available, and the combined-slice sentinel for
+    :data:`TOTAL_LABEL`."""
+    total_col = _total_group_col(config) if config else None
+    if total_col:
+        df = _label_total_slices(df, [total_col])
+
     if "age_group" not in df.columns:
         return df
     labels = dims.get("age_group_labels") or []
@@ -957,7 +1109,8 @@ def _label_groups(df: pd.DataFrame, dims: dict) -> pd.DataFrame:
         return df
     df = df.copy()
     df["age_group"] = df["age_group"].map(
-        lambda i: labels[int(i)] if 0 <= int(i) < len(labels) else str(i)
+        lambda i: i if i == TOTAL_LABEL else
+        labels[int(i)] if 0 <= int(i) < len(labels) else str(i)
     )
     return df
 
@@ -1061,15 +1214,135 @@ def _value_axis_title(config: dict, what: str) -> str:
     return f"{what} — {rel} {config.get('baseline_scenario')} (per replicate)"
 
 
-def _reference_rule(config: dict) -> alt.Chart | None:
+def _reference_rule(config: dict, channel: str = "y") -> alt.Chart | None:
     """A dashed line at the no-effect value, so a comparison is readable
-    against something rather than floating."""
+    against something rather than floating.
+
+    Encoded with ``alt.datum`` rather than its own one-row frame: a layer
+    whose subcharts carry different data sources cannot be faceted (Altair
+    rejects it outright), and every comparison chart here may be faceted.
+    """
     reference = comparison_reference(config)
     if reference is None:
         return None
-    return (alt.Chart(pd.DataFrame({"_ref": [reference]}))
+    return (alt.Chart()
             .mark_rule(strokeDash=[4, 4], color="grey")
-            .encode(y="_ref:Q"))
+            .encode(**{channel: alt.datum(reference)}))
+
+
+def _panel_order(df: pd.DataFrame, col: str, dims: dict) -> list:
+    """The order small multiples should be laid out in.
+
+    Row order out of the query is whatever the GROUP BY hash happened to
+    produce, so panels arrive shuffled ("0, 5, 4, 1, 3, 6, 2"). Age groups
+    follow the label list from the file's metadata, which is the model's own
+    ordering and the only thing that can order bands like "0-4"/"5-12"
+    correctly; anything else sorts numerically where it can and
+    alphabetically where it cannot. The combined total goes last, after the
+    parts it sums.
+    """
+    values = df[col].drop_duplicates().tolist()
+    rank = {}
+    if col == "age_group":
+        rank = {str(label): i for i, label in enumerate(dims.get("age_group_labels") or [])}
+
+    def key(value: Any) -> tuple[int, float, str]:
+        text = str(value)
+        if text in rank:
+            return (0, rank[text], "")
+        try:
+            return (0, float(text), "")
+        except ValueError:
+            return (1, 0.0, text)
+
+    order = sorted((v for v in values if v != TOTAL_LABEL), key=key)
+    return order + ([TOTAL_LABEL] if TOTAL_LABEL in values else [])
+
+
+def _order_panels(df: pd.DataFrame, config: dict, dims: dict) -> pd.DataFrame:
+    """Put the rows in panel order, which is how the facet grid reads them.
+
+    The obvious spelling -- handing Vega-Lite the order as ``Facet(sort=[...])``
+    -- does not survive a composite mark: for a box plot it compiles the order
+    into a ``facet_<field>_sort_index`` column that the box plot's own
+    aggregate then drops, leaving the cell sort comparing nulls and the panels
+    in whatever order the hash aggregation produced. Ordering the rows here and
+    telling the facet to use data order (``sort=None``) works for every mark,
+    composite or not. The sort is stable, so within-panel row order (day
+    sequence, scenario order) is untouched.
+    """
+    col = _facet_col(config)
+    if not col or col not in df.columns:
+        return df
+    rank = {value: i for i, value in enumerate(_panel_order(df, col, dims))}
+    return df.sort_values(col, key=lambda s: s.map(rank), kind="stable")
+
+
+#: Roughly how many characters of a categorical axis label fit on one line
+#: before it crowds its neighbours.
+_LABEL_WRAP_WIDTH = 16
+
+
+def _wrapped_scenario_x(
+    df: pd.DataFrame, title: str = "Scenario",
+) -> tuple[pd.DataFrame, Any]:
+    """A horizontal, line-wrapped scenario axis instead of a rotated one.
+
+    Scenario names here are sentences ("High VE + 70% coverage (all ages)"),
+    and rotated vertically they are slow to read and eat most of the chart's
+    height. Vega's expression language has no loop, so a greedy wrap cannot be
+    written as a ``labelExpr``; wrap in pandas into a display-only column
+    instead and let ``labelExpr`` split it back into the string array Vega
+    renders as separate lines. ``scenario`` itself is left untouched, so
+    colour, sort order and baseline matching keep working on the real names.
+    """
+    wrapped = {
+        s: "\n".join(textwrap.wrap(str(s), _LABEL_WRAP_WIDTH)) or str(s)
+        for s in df["scenario"].drop_duplicates()
+    }
+    df = df.copy()
+    df["scenario_label"] = df["scenario"].map(lambda s: wrapped[s])
+    axis = alt.X(
+        "scenario_label:N",
+        title=title,
+        # Keep the query's scenario order rather than re-sorting the wrapped text.
+        sort=list(wrapped.values()),
+        axis=alt.Axis(
+            labelAngle=0, labelLimit=0, labelPadding=6, labelFontSize=11,
+            labelExpr="split(datum.label, '\\n')",
+        ),
+    )
+    return df, axis
+
+
+def _facet_grid(
+    chart: Any, df: pd.DataFrame, config: dict, *, width: int, height: int,
+) -> AltairChart:
+    """Turn one chart into small multiples over the breakdown dimension.
+
+    Returns ``chart`` unchanged when there is nothing to facet on, so callers
+    can hand back whatever this gives them.
+    """
+    col = _facet_col(config)
+    if not col or col not in df.columns:
+        return chart
+
+    n_panels = df[col].nunique()
+    columns = 3
+    faceted = chart.properties(width=width, height=height).facet(
+        # Data order, laid down by _order_panels -- see the note there for why
+        # this is not an explicit sort list.
+        facet=alt.Facet(f"{col}:N", title=col.replace("_", " "), sort=None),
+        columns=columns,
+    ).resolve_scale(y=_y_resolve(config))
+
+    if n_panels % columns:
+        # A ragged last row leaves empty cells, and with the default shared
+        # axis resolution Vega-Lite still draws each column's x axis at the
+        # bottom of the grid -- so the blanks come out as bare axes that read
+        # as empty plots. Per-panel axes put each one under its own chart.
+        faceted = faceted.resolve_axis(x="independent")
+    return faceted
 
 
 def _metric_label(config: dict) -> str:
@@ -1095,11 +1368,80 @@ def _slice_label(config: dict, dims: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Downloads
+# ---------------------------------------------------------------------------
+
+
+def _export_frame(df: pd.DataFrame) -> pd.DataFrame:
+    """The rows behind a chart, without the columns that only draw it."""
+    return df.drop(columns=[c for c in _DISPLAY_ONLY_COLS if c in df.columns])
+
+
+def frame_to_csv(df: pd.DataFrame) -> bytes:
+    """CSV bytes for a download button.
+
+    Encoded here rather than at the call site so every download in the notebook
+    is written the same way -- UTF-8, no index column (the index is a positional
+    artifact of the query, not data).
+    """
+    return df.to_csv(index=False).encode("utf-8")
+
+
+def slugify(text: str, *, max_len: int = 60) -> str:
+    """A filename-safe stub of ``text``.
+
+    Chart titles carry punctuation that browsers and shells both dislike
+    ("Time series: IV_to_H + I_to_H (by age)"), so runs of anything that is not
+    a word character collapse to a single underscore.
+    """
+    slug = re.sub(r"[^0-9A-Za-z]+", "_", str(text)).strip("_")
+    return (slug[:max_len].rstrip("_") or "chart").lower()
+
+
+def image_kind() -> str:
+    """Which image format a chart can be downloaded as: ``"png"`` or ``"html"``.
+
+    PNG rendering needs ``vl-convert-python``, which compiles the Vega-Lite
+    spec with an embedded browser-free renderer. It is a large wheel and not
+    every environment will have it, so the fallback is Altair's own standalone
+    HTML: no extra dependency, still a single self-contained file, and
+    interactive into the bargain -- it just needs a browser (and, for the Vega
+    runtime it loads from a CDN, a network connection) to view.
+    """
+    try:
+        import vl_convert  # noqa: F401
+    except ImportError:
+        return "html"
+    return "png"
+
+
+def chart_image(chart: AltairChart) -> tuple[bytes, str, str]:
+    """Render ``chart`` for download: ``(payload, extension, mimetype)``.
+
+    Deliberately not called until a download button is actually clicked -- PNG
+    conversion takes appreciable time per chart, and the notebook re-renders
+    every chart on every widget change.
+    """
+    spec = chart.to_json()  # type: ignore[attr-defined]
+    if image_kind() == "png":
+        import vl_convert as vlc
+
+        # scale=2 so the PNG is usable in a slide or a paper rather than only
+        # on screen.
+        return vlc.vegalite_to_png(spec, scale=2), "png", "image/png"
+    return (
+        chart.to_html().encode("utf-8"),  # type: ignore[attr-defined]
+        "html",
+        "text/html",
+    )
+
+
+# ---------------------------------------------------------------------------
 # Chart builders
 # ---------------------------------------------------------------------------
 
 
-def _build_timeseries(con, config, dims) -> AltairChart:
+def _build_timeseries(con, config, dims) -> ChartResult:
     comparing = is_comparison(config)
     # A single replicate has no spread to summarize; asking for percentiles
     # would just draw a zero-width band around the line.
@@ -1112,7 +1454,8 @@ def _build_timeseries(con, config, dims) -> AltairChart:
     df = _run(con, sql, params)
     _guard_size(df)
     df = _drop_empty_groups(df, config)
-    df = _label_groups(df, dims)
+    df = _label_groups(df, dims, config)
+    df = _order_panels(df, config, dims)
     df, x_field, x_type = _add_date(df, dims)
 
     if comparing:
@@ -1124,7 +1467,6 @@ def _build_timeseries(con, config, dims) -> AltairChart:
         )
     else:
         y_title = _metric_label(config)
-    reference = comparison_reference(config)
 
     x_title = "Date" if x_field == "date" else "Day"
     # Any grouping dimension the facet does not absorb still splits the rows,
@@ -1155,22 +1497,19 @@ def _build_timeseries(con, config, dims) -> AltairChart:
     if series_col:
         _line["strokeDash"] = alt.StrokeDash(f"{series_col}:N", title="Series")
     layers.append(base.mark_line().encode(**_line))
-    if reference is not None:
-        layers.append(
-            alt.Chart(pd.DataFrame({"_ref": [reference]}))
-            .mark_rule(strokeDash=[4, 4], color="grey")
-            .encode(y="_ref:Q")
-        )
+    rule = _reference_rule(config)
+    if rule is not None:
+        layers.append(rule)
 
-    chart = alt.layer(*layers)
-    facet = _facet_col(config)
-    if facet and facet in df.columns:
-        chart = chart.properties(width=320, height=180).facet(
-            facet=alt.Facet(f"{facet}:N", title=facet.replace("_", " ")), columns=3
-        )
+    # Data at the layer level, not only on the subcharts: the reference rule
+    # has none of its own, and a facet needs its child's data at the top.
+    chart = alt.layer(*layers, data=df)
+    if _facet_col(config) in df.columns:
+        built = _facet_grid(chart, df, config, width=320, height=180)
     else:
-        chart = chart.properties(width="container", height=320)
-    return chart.resolve_scale(y=_y_resolve(config))
+        built = chart.properties(width="container", height=320).resolve_scale(
+            y=_y_resolve(config))
+    return ChartResult(built, _export_frame(df))
 
 
 def _needs_replicates(config: dict, dims: dict) -> None:
@@ -1192,13 +1531,14 @@ def _needs_replicates(config: dict, dims: dict) -> None:
     )
 
 
-def _build_histogram(con, config, dims) -> AltairChart:
+def _build_histogram(con, config, dims) -> ChartResult:
     _needs_replicates(config, dims)
     sql, params = build_per_rep_totals_query(config)
     df = _run(con, sql, params)
     _guard_size(df)
     df = _drop_empty_groups(df, config)
-    df = _label_groups(df, dims)
+    df = _label_groups(df, dims, config)
+    df = _order_panels(df, config, dims)
 
     # Bin count follows the sample size: 30 bins over a handful of replicates
     # leaves single-count bars too thin to see.
@@ -1210,30 +1550,34 @@ def _build_histogram(con, config, dims) -> AltairChart:
         color=alt.Color("scenario:N", title="Scenario"),
         tooltip=["scenario:N", "count()"],
     )
-    reference = comparison_reference(config)
-    if reference is not None:
-        # Vertical here, since the compared quantity is on x for a histogram.
-        chart = alt.layer(chart, alt.Chart(pd.DataFrame({"_ref": [reference]}))
-                          .mark_rule(strokeDash=[4, 4], color="grey")
-                          .encode(x="_ref:Q"))
-    facet = _facet_col(config)
-    if facet and facet in df.columns:
-        return chart.properties(width=280, height=180).facet(
-            facet=alt.Facet(f"{facet}:N", title=facet.replace("_", " ")), columns=3
-        ).resolve_scale(y=_y_resolve(config))
-    return chart.properties(width="container", height=320)
+    # Vertical here, since the compared quantity is on x for a histogram.
+    rule = _reference_rule(config, "x")
+    if rule is not None:
+        chart = alt.layer(chart, rule, data=df)
+    if _facet_col(config) in df.columns:
+        built = _facet_grid(chart, df, config, width=280, height=180)
+    else:
+        built = chart.properties(width="container", height=320)
+    return ChartResult(built, _export_frame(df))
 
 
-def _build_boxplot(con, config, dims) -> AltairChart:
+def _build_boxplot(con, config, dims) -> ChartResult:
     _needs_replicates(config, dims)
     sql, params = build_per_rep_totals_query(config)
     df = _run(con, sql, params)
     _guard_size(df)
     df = _drop_empty_groups(df, config)
-    df = _label_groups(df, dims)
+    df = _label_groups(df, dims, config)
+    df = _order_panels(df, config, dims)
 
-    chart = alt.Chart(df).mark_boxplot(extent="min-max").encode(
-        x=alt.X("scenario:N", title="Scenario"),
+    df, x = _wrapped_scenario_x(df)
+    # Vega sizes a box plot's box from the band width, which a faceted panel
+    # makes narrow enough that the box reads as a bare tick. Pin it instead.
+    chart = alt.Chart(df).mark_boxplot(
+        extent="min-max", size=34, median=alt.MarkConfig(strokeWidth=3),
+        rule=alt.MarkConfig(strokeWidth=2),
+    ).encode(
+        x=x,
         y=alt.Y("total_value:Q",
                 title=_value_axis_title(config, _metric_label(config)),
                 # A difference straddles zero, so forcing the axis through it
@@ -1243,21 +1587,23 @@ def _build_boxplot(con, config, dims) -> AltairChart:
     )
     rule = _reference_rule(config)
     if rule is not None:
-        chart = alt.layer(chart, rule)
-    facet = _facet_col(config)
-    if facet and facet in df.columns:
-        return chart.properties(width=220, height=200).facet(
-            facet=alt.Facet(f"{facet}:N", title=facet.replace("_", " ")), columns=3
-        ).resolve_scale(y=_y_resolve(config))
-    return chart.properties(width="container", height=320)
+        chart = alt.layer(chart, rule, data=df)
+    if _facet_col(config) in df.columns:
+        # Wider than the other grids: horizontal labels need the room that
+        # rotated ones did not.
+        built = _facet_grid(chart, df, config, width=300, height=200)
+    else:
+        built = chart.properties(width="container", height=320)
+    return ChartResult(built, _export_frame(df))
 
 
-def _build_stacked_bar(con, config, dims) -> AltairChart:
+def _build_stacked_bar(con, config, dims) -> ChartResult:
     sql, params = build_stacked_bar_query(config)
     df = _run(con, sql, params)
     _guard_size(df)
     df = _drop_empty_groups(df, config)
-    df = _label_groups(df, dims)
+    df = _label_groups(df, dims, config)
+    df = _order_panels(df, config, dims)
 
     stack_col = _AGG_GROUP_COLS[config["agg_level"]][-1]
     comparing = is_comparison(config)
@@ -1267,12 +1613,15 @@ def _build_stacked_bar(con, config, dims) -> AltairChart:
         f"{config.get('baseline_scenario')}"
         if comparing else f"{_metric_label(config)} (median total)"
     )
+    tooltip = list(df.columns)
+    df, x = _wrapped_scenario_x(df)
     encoding: dict[str, Any] = {
-        "x": alt.X("scenario:N", title="Scenario"),
+        "x": x,
         "y": alt.Y("median_value:Q", title=y_title,
                    scale=alt.Scale(zero=not comparing)),
         "color": alt.Color(f"{stack_col}:N", title=stack_col.replace("_", " ")),
-        "tooltip": list(df.columns),
+        # The wrapped display column is an axis-rendering detail, not data.
+        "tooltip": tooltip,
     }
     if comparing:
         # Differences can be negative, and stacking mixed signs makes the bar
@@ -1283,16 +1632,18 @@ def _build_stacked_bar(con, config, dims) -> AltairChart:
     chart = alt.Chart(df).mark_bar().encode(**encoding)
     rule = _reference_rule(config)
     if rule is not None:
-        chart = alt.layer(chart, rule)
-    return chart.properties(width="container", height=340)
+        chart = alt.layer(chart, rule, data=df)
+    return ChartResult(chart.properties(width="container", height=340),
+                       _export_frame(df))
 
 
-def _build_scatter(con, config, dims) -> AltairChart:
+def _build_scatter(con, config, dims) -> ChartResult:
     sql, params = build_scatter_query(config)
     df = _run(con, sql, params)
     _guard_size(df)
     df = _drop_empty_groups(df, config)
-    df = _label_groups(df, dims)
+    df = _label_groups(df, dims, config)
+    df = _order_panels(df, config, dims)
 
     chart = alt.Chart(df).mark_circle(size=70, opacity=0.7).encode(
         x=alt.X("x_value:Q",
@@ -1304,12 +1655,11 @@ def _build_scatter(con, config, dims) -> AltairChart:
         color=alt.Color("scenario:N", title="Scenario"),
         tooltip=list(df.columns),
     )
-    facet = _facet_col(config)
-    if facet and facet in df.columns:
-        return chart.properties(width=260, height=200).facet(
-            facet=alt.Facet(f"{facet}:N", title=facet.replace("_", " ")), columns=3
-        ).resolve_scale(y=_y_resolve(config))
-    return chart.properties(width="container", height=340)
+    if _facet_col(config) in df.columns:
+        built = _facet_grid(chart, df, config, width=260, height=200)
+    else:
+        built = chart.properties(width="container", height=340)
+    return ChartResult(built, _export_frame(df))
 
 
 _BUILDERS = {
@@ -1321,8 +1671,10 @@ _BUILDERS = {
 }
 
 
-def render_chart(con: duckdb.DuckDBPyConnection, dims: dict, config: dict) -> AltairChart:
-    """Query and build one chart from its config.
+def build_chart(
+    con: duckdb.DuckDBPyConnection, dims: dict, config: dict,
+) -> ChartResult:
+    """Query and build one chart, keeping the rows behind it.
 
     Raises :class:`ResultsExplorerError` for anything the user can fix (an
     incomplete config, an over-broad selection, an empty result) so the
@@ -1331,6 +1683,12 @@ def render_chart(con: duckdb.DuckDBPyConnection, dims: dict, config: dict) -> Al
     """
     _validate(config, dims)
     return _BUILDERS[config["chart_type"]](con, config, dims)
+
+
+def render_chart(con: duckdb.DuckDBPyConnection, dims: dict, config: dict) -> AltairChart:
+    """Just the chart from :func:`build_chart`, for callers that do not need
+    its data."""
+    return build_chart(con, dims, config).chart
 
 
 def chart_title(config: dict, dims: dict | None = None) -> str:
@@ -1368,3 +1726,283 @@ def chart_title(config: dict, dims: dict | None = None) -> str:
         rel = "ratio" if config.get("compare_metric") == "ratio" else "difference"
         where += f" · {rel} vs {config.get('baseline_scenario')}"
     return f"{kind}: {what} ({where})"
+
+
+def chart_filename(config: dict, dims: dict | None = None, ext: str = "csv") -> str:
+    """Download name for a chart, derived from the title it is shown under.
+
+    Titles are what distinguishes one chart from another on screen, so naming
+    the file after the title is what makes eight downloads in a row tellable
+    apart afterwards.
+    """
+    return f"{slugify(chart_title(config, dims))}.{ext}"
+
+
+# ---------------------------------------------------------------------------
+# Bulk data export
+# ---------------------------------------------------------------------------
+
+#: What one exported row represents.
+EXPORT_ROW_MODES = ("summary", "replicates")
+
+#: Whether the day dimension is kept or summed away.
+EXPORT_TIME_MODES = ("daily", "total")
+
+
+def default_export_config(dims: dict) -> dict:
+    """A selection that downloads something useful without any adjusting.
+
+    Every scenario and every metric, per day, summarized across replicates --
+    the shape people usually want to hand to a spreadsheet or another tool.
+    """
+    return {
+        "scenarios": list(dims.get("scenarios") or []),
+        "metrics": [m for m, _ in dims.get("metrics") or []],
+        "agg_level": "population",
+        "subpop_filter": None,
+        "age_filter": None,
+        "risk_filter": None,
+        "day_range": None,
+        "cumulative": False,
+        # Off by default, unlike the charts' equivalent panel. A chart's total
+        # panel sits beside the others and cannot be mistaken for one of them;
+        # a Total *row* in a CSV is one more row in the same column, and
+        # summing that column would double-count. Opt in, having read the note.
+        "show_total": False,
+        "row_mode": "summary",
+        "time_mode": "daily",
+    }
+
+
+def group_columns(config: dict) -> tuple[str, ...]:
+    """The dimensions this config breaks out into their own rows/panels."""
+    return _AGG_GROUP_COLS.get(config.get("agg_level", "population"), ())
+
+
+def supports_export_total(config: dict) -> bool:
+    """Whether a combined-total row means anything at this aggregation level.
+
+    Nothing to total at population level: the single row already is the total.
+    """
+    return bool(group_columns(config))
+
+
+def _validate_export(config: dict) -> None:
+    if not config.get("scenarios"):
+        raise ResultsExplorerError("Select at least one scenario.")
+    if not config.get("metrics"):
+        raise ResultsExplorerError(
+            "Select at least one compartment or transition variable.")
+    if config.get("agg_level") not in AGG_LEVELS:
+        raise ResultsExplorerError(
+            f"Unknown aggregation level {config.get('agg_level')!r}")
+    if config.get("row_mode", "summary") not in EXPORT_ROW_MODES:
+        raise ResultsExplorerError(f"Unknown row mode {config.get('row_mode')!r}")
+    if config.get("time_mode", "daily") not in EXPORT_TIME_MODES:
+        raise ResultsExplorerError(f"Unknown time mode {config.get('time_mode')!r}")
+
+
+def export_is_cumulative(config: dict, dims: dict) -> bool:
+    """Whether a running total actually applies to this export.
+
+    Cumulative is a running total over days, so it means nothing once the days
+    have already been summed away -- and nothing for a compartment, which is a
+    level rather than a flow. Both are handled by silently not applying it
+    rather than by refusing the export, since here (unlike a chart, which draws
+    exactly one series) the selection may legitimately mix flows and levels.
+    """
+    if not config.get("cumulative"):
+        return False
+    if config.get("time_mode", "daily") != "daily":
+        return False
+    kinds = dict(dims.get("metrics") or [])
+    return any(kinds.get(m) == "transition" for m in config.get("metrics") or [])
+
+
+def build_export_query(config: dict, dims: dict) -> tuple[str, list[Any]]:
+    """Tidy rows for download, one per (scenario, metric, ...) combination.
+
+    Differs from every chart query in one important way: metrics stay in their
+    own rows instead of being summed together. A chart draws a single series,
+    so summing "IV_to_H + I_to_H" is the point; a downloaded table is something
+    the user will pivot themselves, and a sum they cannot undo is a loss.
+    """
+    _validate_export(config)
+    group_cols = _AGG_GROUP_COLS[config["agg_level"]]
+    group_sql = "".join(f", {c}" for c in group_cols)
+    daily = config.get("time_mode", "daily") == "daily"
+    cumulative = export_is_cumulative(config, dims)
+
+    table = _source_table(config)
+    scen_ph, params = _in_clause(config["scenarios"])
+    metric_ph, metric_params = _in_clause(list(config["metrics"]))
+    params += metric_params
+    where = [f"scenario IN ({scen_ph})", f"compartment IN ({metric_ph})"]
+    filter_where, filter_params = _filter_clauses(config)
+    where += filter_where
+    params += filter_params
+    day_range = config.get("day_range")
+    if day_range:
+        where.append("day BETWEEN ? AND ?")
+        params += [int(day_range[0]), int(day_range[1])]
+
+    keys = f"scenario, compartment AS metric, rep, param_set, day{group_sql}"
+    stages = [
+        f"  SELECT {keys}, SUM(value) AS value\n"
+        f"  FROM {table}\n"
+        f"  WHERE {' AND '.join(where)}\n"
+        f"  GROUP BY scenario, compartment, rep, param_set, day{group_sql}\n"
+    ]
+
+    if group_cols and config.get("show_total"):
+        # Summed across groups per replicate, here at the head of the chain, so
+        # every later stage -- running total, day total, median across
+        # replicates -- treats it exactly like a real group. That makes it the
+        # total in its own right rather than the total of the other rows'
+        # summaries, which for a median is not the same number.
+        stages.append(_total_union_sql(
+            f"export_{len(stages) - 1}", group_cols,
+            ["scenario", "metric", "rep", "param_set", "day"], ["value"]))
+
+    if cumulative:
+        # Applied per metric and only to the flows: a mixed selection keeps its
+        # compartments as the levels they are, so one export can carry both.
+        tvs = [m for m, k in dims.get("metrics") or [] if k == "transition"]
+        tv_ph, tv_params = _in_clause(tvs)
+        part = "".join(f", {c}" for c in group_cols)
+        stages.append(
+            f"  SELECT scenario, metric, rep, param_set, day{group_sql},\n"
+            f"         CASE WHEN metric IN ({tv_ph}) THEN SUM(value) OVER (\n"
+            f"           PARTITION BY scenario, metric, rep, param_set{part}\n"
+            f"           ORDER BY day ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW\n"
+            f"         ) ELSE value END AS value\n"
+            f"  FROM export_{len(stages) - 1}\n"
+        )
+        params += tv_params
+
+    if not daily:
+        # One number per replicate for the whole selected window, summed before
+        # any median so the summary describes replicate totals rather than the
+        # total of daily medians.
+        stages.append(
+            f"  SELECT scenario, metric, rep, param_set{group_sql},\n"
+            f"         SUM(value) AS value\n"
+            f"  FROM export_{len(stages) - 1}\n"
+            f"  GROUP BY scenario, metric, rep, param_set{group_sql}\n"
+        )
+
+    names = [f"export_{i}" for i in range(len(stages) - 1)] + ["export_rows"]
+    cte = ",\n".join(f"{n} AS (\n{s})" for n, s in zip(names, stages))
+
+    day_sql = ", day" if daily else ""
+    if config.get("row_mode", "summary") == "replicates":
+        sql = (
+            f"WITH {cte}\n"
+            f"SELECT scenario, metric, rep, param_set{day_sql}{group_sql}, value\n"
+            f"FROM export_rows\n"
+            f"ORDER BY scenario, metric, rep{day_sql}{group_sql}"
+        )
+        return sql, params
+
+    # Summary across replicates. Percentiles are dropped for a single-replicate
+    # file, where they would be three more columns all equal to the median.
+    stats = ["median(value) AS median_value", "AVG(value) AS mean_value"]
+    if (dims.get("n_reps") or 1) > 1:
+        stats += [
+            "quantile_cont(value, 0.025) AS p2_5",
+            "quantile_cont(value, 0.975) AS p97_5",
+            "MIN(value) AS min_value",
+            "MAX(value) AS max_value",
+            "COUNT(*) AS n_reps",
+        ]
+    stats_sql = ",\n       ".join(stats)
+    sql = (
+        f"WITH {cte}\n"
+        f"SELECT scenario, metric{day_sql}{group_sql},\n"
+        f"       {stats_sql}\n"
+        f"FROM export_rows\n"
+        f"GROUP BY scenario, metric{day_sql}{group_sql}\n"
+        f"ORDER BY scenario, metric{day_sql}{group_sql}"
+    )
+    return sql, params
+
+
+#: Column order for a downloaded table: what each row *is*, then what it
+#: measures. Anything unlisted (the value columns) keeps its query order at the
+#: end.
+_EXPORT_LEAD_COLS = (
+    "scenario", "metric", "day", "date", "subpop", "age_group", "risk_group",
+    "rep", "param_set",
+)
+
+
+def run_export(
+    con: duckdb.DuckDBPyConnection, dims: dict, config: dict,
+) -> pd.DataFrame:
+    """Run :func:`build_export_query` and dress the result for download.
+
+    Applies the same labelling the charts use -- real age bands, real dates --
+    so a downloaded table reads the same way the plots above it do.
+    """
+    sql, params = build_export_query(config, dims)
+    # One row past the cap, so an over-broad selection is caught by the row
+    # count rather than by the machine running out of memory building it.
+    df = _run(con, f"SELECT * FROM (\n{sql}\n) LIMIT {EXPORT_ROW_LIMIT + 1}", params)
+    if len(df) > EXPORT_ROW_LIMIT:
+        raise ResultsExplorerError(
+            f"This selection exceeds {EXPORT_ROW_LIMIT:,} rows. Narrow it — "
+            f"fewer metrics or scenarios, a shorter day range, a coarser "
+            f"aggregation level, or summary rows instead of every replicate."
+        )
+    if df.empty:
+        raise ResultsExplorerError(
+            "No data for this selection. Check the metric and scenario "
+            "choices — a transition variable may not have been recorded."
+        )
+    group_cols = [c for c in _AGG_GROUP_COLS[config["agg_level"]] if c in df.columns]
+    if config.get("show_total"):
+        df = _label_total_slices(df, group_cols)
+    df = _label_groups(df, dims)
+    df, _, _ = _add_date(df, dims)
+    df = _order_export_rows(df, group_cols, dims)
+    lead = [c for c in _EXPORT_LEAD_COLS if c in df.columns]
+    return df.reindex(columns=lead + [c for c in df.columns if c not in lead])
+
+
+def _order_export_rows(
+    df: pd.DataFrame, group_cols: Sequence[str], dims: dict,
+) -> pd.DataFrame:
+    """Sort the table the way the charts order their small multiples.
+
+    SQL orders the group columns by their raw keys, which puts the combined
+    total wherever its sentinel happens to sort -- first for the integer
+    ``*_group`` columns (-1), mid-alphabet for ``subpop``. :func:`_panel_order`
+    is the same ranking the facet grids use: the model's own age-band order,
+    numeric where it can be, alphabetical where it cannot, total last.
+    """
+    if not group_cols:
+        return df
+    ranks = {str(c): {v: i for i, v in enumerate(_panel_order(df, c, dims))}
+             for c in group_cols}
+    keys = [c for c in ("scenario", "metric", "day") if c in df.columns]
+    keys += list(group_cols)
+    return df.sort_values(
+        keys,
+        key=lambda s: s.map(ranks[str(s.name)]) if str(s.name) in ranks else s,
+        kind="stable",
+    ).reset_index(drop=True)
+
+
+def export_filename(config: dict) -> str:
+    """Download name describing the selection, so several exports stay apart."""
+    parts = [
+        "results",
+        config.get("agg_level", "population"),
+        config.get("row_mode", "summary"),
+        "total" if config.get("time_mode", "daily") == "total" else "daily",
+    ]
+    if config.get("cumulative"):
+        parts.append("cumulative")
+    if config.get("show_total") and supports_export_total(config):
+        parts.append("with_total")
+    return f"{slugify('_'.join(parts))}.csv"
