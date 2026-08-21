@@ -1014,6 +1014,90 @@ def _analysis_param_subpop_controls(
 
 
 @app.cell
+def _analysis_scenario_delete_ui(
+    mo,
+    get_scenario_controls_state, set_scenario_controls_state,
+    get_scenario_agescale_state, set_scenario_agescale_state,
+    get_scenario_dose_state, set_scenario_dose_state,
+    get_scenario_subpop_state, set_scenario_subpop_state,
+    get_scenario_sched_state, set_scenario_sched_state,
+):
+    # Deletes scenario slot `deleted_j` and shifts every later slot's data
+    # down by one, across all five scenario-state dicts -- as opposed to
+    # decreasing "Number of scenarios", which only hides the trailing slot
+    # and leaves its data in state, so raising the count again brings it
+    # right back. Every widget in the Scenario sub-tab rebuilds itself from
+    # these state dicts on each rerun (`value=_st.get(key, default)` -- see
+    # _analysis_scenario_state), so remapping the keys here is enough to
+    # make the widgets reflect the shift; no direct widget mutation needed.
+    #
+    # The scenario index `j` sits at a different "::"-split position
+    # depending on the key's prefix (e.g. "dose::{j}::{age}" vs
+    # "scalar_subpop::{pname}::{sp}::{j}"), so each prefix that carries a
+    # scenario index is listed here with that position. Prefixes not listed
+    # (toggles, selections) aren't per-scenario and are left untouched.
+    _SCENARIO_INDEX_POS = {
+        "name": 1,
+        "scalar": 2,
+        "array": 2,
+        "age_scale": 3,
+        "dose": 1,
+        "dose_subpop": 2,
+        "sched": 1,
+        "sched_subpop": 2,
+        "scalar_subpop": 3,
+        "array_subpop": 3,
+    }
+
+    def _shift_state(state_dict, deleted_j):
+        _new = {}
+        for _key, _val in state_dict.items():
+            _parts = _key.split("::")
+            _pos = _SCENARIO_INDEX_POS.get(_parts[0])
+            if _pos is None or _pos >= len(_parts):
+                _new[_key] = _val
+                continue
+            try:
+                _j = int(_parts[_pos])
+            except ValueError:
+                _new[_key] = _val
+                continue
+            if _j == deleted_j:
+                continue
+            if _j > deleted_j:
+                _parts[_pos] = str(_j - 1)
+                _new["::".join(_parts)] = _val
+            else:
+                _new[_key] = _val
+        return _new
+
+    def _delete_scenario(deleted_j):
+        def _inner(_):
+            _cur_n = get_scenario_controls_state().get("n_scenarios", 2)
+            if _cur_n <= 1:
+                return
+            _shifted = _shift_state(get_scenario_controls_state(), deleted_j)
+            _shifted["n_scenarios"] = _cur_n - 1
+            set_scenario_controls_state(_shifted)
+            set_scenario_agescale_state(_shift_state(get_scenario_agescale_state(), deleted_j))
+            set_scenario_dose_state(_shift_state(get_scenario_dose_state(), deleted_j))
+            set_scenario_subpop_state(_shift_state(get_scenario_subpop_state(), deleted_j))
+            set_scenario_sched_state(_shift_state(get_scenario_sched_state(), deleted_j))
+        return _inner
+
+    _MAX_SC = 5
+    analysis_scenario_delete_btn = mo.ui.array([
+        mo.ui.button(
+            label="✕ Delete",
+            tooltip="Delete this scenario (later scenarios shift left)",
+            on_click=_delete_scenario(_j),
+        )
+        for _j in range(_MAX_SC)
+    ])
+    return (analysis_scenario_delete_btn,)
+
+
+@app.cell
 def _analysis_shared_controls(mo, num_age_groups, is_metapop, metapop_folder_input, Path, json):
     _sp_opts = ["all subpops"]
     if is_metapop and metapop_folder_input.value.strip():
@@ -1103,7 +1187,7 @@ def _analysis_display(
     mo, main_tab, analysis_sub_tab,
     analysis_param_type, analysis_scalar_param_sel, analysis_array_param_sel,
     analysis_n_values, analysis_sens_sliders, ANALYSIS_NO_SWEEP,
-    analysis_n_scenarios, analysis_scenario_names,
+    analysis_n_scenarios, analysis_scenario_names, analysis_scenario_delete_btn,
     analysis_scenario_scalar_inputs, analysis_scenario_array_scales,
     analysis_sim_days, analysis_n_reps, analysis_timesteps, analysis_stochastic,
     analysis_uncertainty_source, analysis_n_param_sets, analysis_keep_full_detail,
@@ -1133,10 +1217,15 @@ def _analysis_display(
     mo.stop(main_tab.value != "Analysis", None)
     _ACC = CLT_ACCENT["analysis"]
     _n_sc = int(analysis_n_scenarios.value)
-    # "Scenario i" above the name box (rather than marimo's default inline
-    # label, which wraps awkwardly in these narrow grid columns).
+    # "Scenario i" + a delete button above the name box (rather than
+    # marimo's default inline label, which wraps awkwardly in these narrow
+    # grid columns). The delete button is omitted when only one scenario is
+    # left, since at least one scenario must remain.
     _scenario_name_cells = [
-        mo.vstack([mo.md(f"**Scenario {j + 1}**"), analysis_scenario_names[j]])
+        mo.vstack(
+            [mo.md(f"**Scenario {j + 1}**"), analysis_scenario_names[j]]
+            + ([analysis_scenario_delete_btn[j]] if _n_sc > 1 else [])
+        )
         for j in range(_n_sc)
     ]
     # Read-only echo of each scenario's name, for grids below the top-level
