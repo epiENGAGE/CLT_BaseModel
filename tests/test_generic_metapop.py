@@ -11,7 +11,9 @@ subpopulations.  This is the highest-risk test: any dict-lookup bug in the
 travel functions will surface here.
 """
 
+import json
 import numpy as np
+import pandas as pd
 import pytest
 import sys
 from pathlib import Path
@@ -187,3 +189,136 @@ def test_population_conserved(both_models):
         assert abs(day_total - total_ref_pop) < 1e-3, (
             f"Population not conserved on day {day_idx}: {day_total:.2f} != {total_ref_pop:.2f}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Upload-a-CSV schedule override (make_metapop_from_folder's
+# schedule_df_overrides / schedule_df_overrides_per_subpop kwargs) — see
+# generic_core/examples/schedule_upload_plan.md.
+# ---------------------------------------------------------------------------
+
+EXAMPLE_METAPOP_FOLDER = clt.utils.PROJECT_ROOT / "generic_core" / "examples" / "example_metapop_inputs"
+
+
+def _vax_metapop_config():
+    """example_metapop_inputs' config plus a scheduled_exact transition
+    (S -> R, standing in for vaccination) driven by the folder's existing
+    vaccines_<subpop>.csv files, so schedule replacement/scaling can be
+    exercised end-to-end without inventing a new input folder. Also returns
+    the model-level travel_config ConfigDrivenMetapopModel requires (lifted
+    from the existing S_to_E force_of_infection_travel transition, mirroring
+    how the Model Builder derives metapop_travel_config)."""
+    import copy
+    with open(EXAMPLE_METAPOP_FOLDER / "model_config.json") as f:
+        cfg = json.load(f)
+    cfg = copy.deepcopy(cfg)
+    travel_config = next(
+        t["rate_config"]["travel_config"] for t in cfg["transitions"]
+        if t["rate_template"] == "force_of_infection_travel"
+    )
+    cfg["schedules"].append({
+        "name": "vax_sched",
+        "schedule_template": "vaccine_schedule",
+        "schedule_config": {"df_attribute": "daily_vaccines_df"},
+    })
+    cfg["transitions"].append({
+        "name": "S_to_R_vax",
+        "origin": "S",
+        "destination": "R",
+        "rate_template": "scheduled_exact",
+        "rate_config": {"schedule": "vax_sched"},
+    })
+    return cfg, travel_config
+
+
+def test_schedule_df_overrides_per_subpop_replaces_only_that_subpop():
+    from generic_core.model_factory import (
+        make_metapop_from_folder, extract_history_full, scale_dose_schedule_df,
+    )
+
+    cfg, travel_config = _vax_metapop_config()
+    comps = list(cfg["compartments"])
+    num_days = 5
+
+    def _build(**kwargs):
+        m, _ = make_metapop_from_folder(
+            EXAMPLE_METAPOP_FOLDER, cfg, "2024-01-01", num_days, comps,
+            seed_base=0, ts_per_day=1, stochastic=False, tvs=["S_to_R_vax"],
+            save_daily=True, num_age_groups=3, num_risk_groups=2,
+            travel_config=travel_config,
+            **kwargs,
+        )
+        m.simulate_until_day(num_days)
+        return extract_history_full(m, comps, tvs=["S_to_R_vax"])
+
+    hist_plain = _build()
+    assert not np.allclose(hist_plain["S_to_R_vax"]["SubpopA"], 0.0), (
+        "test setup: baseline SubpopA vaccination should be nonzero"
+    )
+
+    # Zero out SubpopA's daily_vaccines_df via a per-subpop override; SubpopB
+    # is left alone (None entry falls back to no override).
+    vax_a = pd.read_csv(EXAMPLE_METAPOP_FOLDER / "vaccines_SubpopA.csv")
+    zero_vax_a = scale_dose_schedule_df(vax_a, [0.0, 0.0, 0.0])
+    hist_override = _build(
+        schedule_df_overrides_per_subpop=[{"daily_vaccines_df": zero_vax_a}, None],
+    )
+
+    assert np.allclose(hist_override["S_to_R_vax"]["SubpopA"], 0.0), (
+        "SubpopA's scheduled transfer should be zero after the override replaced its schedule"
+    )
+    # SubpopB should be unaffected by a per-subpop override targeting only SubpopA.
+    np.testing.assert_allclose(
+        hist_override["S_to_R_vax"]["SubpopB"], hist_plain["S_to_R_vax"]["SubpopB"],
+    )
+
+
+def test_schedule_df_overrides_composes_with_dose_mult():
+    # An uploaded schedule REPLACEMENT and a dose_mult SCALE target the same
+    # schedule; dose_mult must apply on top of the replacement, not the
+    # original folder-derived schedule (see make_metapop_from_folder's
+    # docstring on schedule_df_overrides precedence).
+    from generic_core.model_factory import (
+        make_metapop_from_folder, extract_history_full, scale_dose_schedule_df,
+    )
+
+    cfg, travel_config = _vax_metapop_config()
+    comps = list(cfg["compartments"])
+    num_days = 5
+
+    # A shared override (same for every subpop): double SubpopA's original
+    # vaccine schedule to make an easily-distinguished replacement.
+    vax_a = pd.read_csv(EXAMPLE_METAPOP_FOLDER / "vaccines_SubpopA.csv")
+    doubled_vax_a = scale_dose_schedule_df(vax_a, [2.0, 2.0, 2.0])
+
+    def _build(**kwargs):
+        m, _ = make_metapop_from_folder(
+            EXAMPLE_METAPOP_FOLDER, cfg, "2024-01-01", num_days, comps,
+            seed_base=0, ts_per_day=1, stochastic=False, tvs=["S_to_R_vax"],
+            save_daily=True, num_age_groups=3, num_risk_groups=2,
+            travel_config=travel_config,
+            **kwargs,
+        )
+        m.simulate_until_day(num_days)
+        return extract_history_full(m, comps, tvs=["S_to_R_vax"])
+
+    hist_original = _build()
+    hist_doubled = _build(
+        schedule_df_overrides_per_subpop=[{"daily_vaccines_df": doubled_vax_a}, None],
+    )
+    # Halving the doubled replacement's dose_mult should reproduce the
+    # original (un-replaced, unscaled) schedule's transfer counts exactly --
+    # confirms dose_mult scales the REPLACEMENT, not the original folder df.
+    hist_doubled_then_halved = _build(
+        schedule_df_overrides_per_subpop=[{"daily_vaccines_df": doubled_vax_a}, None],
+        dose_mult=[0.5, 0.5, 0.5],
+    )
+
+    assert not np.allclose(
+        hist_doubled["S_to_R_vax"]["SubpopA"], hist_original["S_to_R_vax"]["SubpopA"],
+    ), "doubling the replacement should change SubpopA's scheduled transfer"
+    np.testing.assert_allclose(
+        hist_doubled_then_halved["S_to_R_vax"]["SubpopA"],
+        hist_original["S_to_R_vax"]["SubpopA"],
+        rtol=1e-9,
+    )

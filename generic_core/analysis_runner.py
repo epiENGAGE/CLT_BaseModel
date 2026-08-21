@@ -89,6 +89,8 @@ def _analysis_setup(
     analysis_fitted_num_days,
     analysis_fitted_tv_spacing,
     keep_full_detail,
+    schedule_overrides_by_scenario=None,
+    schedule_overrides_per_subpop_by_scenario=None,
 ) -> SimpleNamespace:
     """Rebuild, from plain data, the per-run helpers the Analysis cell used to
     nest as closures. Called once per worker process (via the Pool
@@ -131,6 +133,10 @@ def _analysis_setup(
                           "mobility_df", "daily_vaccines_df")
             },
             transmission_multiplier_df=m_df,
+            # Carry extra scheduled_exact schedules through too -- omitting
+            # this silently zeroed out any such schedule whenever fitted m(t)
+            # was in use (this rebuild only listed the four base attributes).
+            extra_scheduled_dfs=getattr(loaded_schedule_dfs, "extra_scheduled_dfs", None),
         )
 
     def get_ci(pset_idx):
@@ -147,6 +153,41 @@ def _analysis_setup(
             incrs = pset_increments(psets[pset_idx])
             sched_cache[pset_idx] = schedule_dfs_for(incrs) if incrs else schedule_dfs_best
         return sched_cache[pset_idx]
+
+    _sched_overrides_by_scen = schedule_overrides_by_scenario or {}
+    _sched_overrides_per_sp_by_scen = schedule_overrides_per_subpop_by_scenario or {}
+    _base_attrs = ("absolute_humidity_df", "school_work_calendar_df",
+                   "mobility_df", "daily_vaccines_df")
+
+    def apply_schedule_overrides(sched_dfs, scenario_name):
+        # Merges a scenario's uploaded schedule-replacement CSVs (see the
+        # Analysis tab's "Replace schedules from uploaded CSVs" control) into
+        # `sched_dfs`, a schedule_dfs namespace as produced by
+        # build_notebook_schedules_input / schedule_dfs_for. The upload
+        # REPLACES the base schedule; dose_mult scaling (applied separately,
+        # after this) still lands on top of the replacement. Extra
+        # scheduled_exact schedules live in the `extra_scheduled_dfs` dict
+        # rather than as flat attributes (see make_single_pop_metapop's
+        # precedence between the two shapes), so overrides for those must be
+        # merged into that dict, not just set as a flat attribute.
+        overrides = _sched_overrides_by_scen.get(scenario_name)
+        if not overrides:
+            return sched_dfs
+        kwargs = {f: getattr(sched_dfs, f, None) for f in _base_attrs}
+        kwargs["transmission_multiplier_df"] = getattr(sched_dfs, "transmission_multiplier_df", None)
+        extra = dict(getattr(sched_dfs, "extra_scheduled_dfs", None) or {})
+        for attr, df in overrides.items():
+            if attr in _base_attrs:
+                kwargs[attr] = df
+            else:
+                extra[attr] = df
+        kwargs["extra_scheduled_dfs"] = extra or None
+        return SimpleNamespace(**kwargs)
+
+    def schedule_overrides_per_subpop(scenario_name):
+        # [{attr: df} | None, ...] indexed by subpop order, for
+        # make_metapop_from_folder's schedule_df_overrides_per_subpop kwarg.
+        return _sched_overrides_per_sp_by_scen.get(scenario_name)
 
     def apply_pset(overrides, pset_idx, designed, ratios=None):
         if pset_idx is None:
@@ -169,12 +210,13 @@ def _analysis_setup(
         return ov
 
     def run_one(task):
-        (_scenario_name, overrides, per_subpop, designed, dose_mult,
+        (scenario_name, overrides, per_subpop, designed, dose_mult,
          dose_mult_per_subpop, ratios, pset_idx, run_i, _rep) = task
         run_ov = apply_pset(overrides, pset_idx, designed, ratios)
         run_sched = get_schedule_dfs(pset_idx)
         base_dose_mult, extra_dose_mult = _split_dose_mult(dose_mult)
         if not is_metapop:
+            run_sched = apply_schedule_overrides(run_sched, scenario_name)
             m, _, _ = make_single_pop_metapop(
                 config_dict, start_date, num_days, get_ci(pset_idx),
                 seed_offset=run_i, seed_base=seed_base, ts_per_day=ts_per_day,
@@ -207,6 +249,8 @@ def _analysis_setup(
                 dose_mult_per_subpop=base_dm_per_sp,
                 extra_dose_mult=extra_dose_mult,
                 extra_dose_mult_per_subpop=extra_dm_per_sp,
+                schedule_df_overrides=_sched_overrides_by_scen.get(scenario_name),
+                schedule_df_overrides_per_subpop=schedule_overrides_per_subpop(scenario_name),
             )
         m.simulate_until_day(num_days)
         if keep_full_detail:
@@ -300,6 +344,13 @@ def run_analysis_scenarios(
     """
     tasks: list[tuple] = []
     task_scenarios: list[str] = []
+    # Uploaded schedule-replacement CSVs are per-scenario but not per-task
+    # (every replicate of a scenario uses the same override), so they ship
+    # once via `payload` -- keyed by scenario name -- rather than being
+    # repeated (and re-pickled) in every task tuple. See
+    # _analysis_setup/apply_schedule_overrides.
+    schedule_overrides_by_scenario: dict[str, dict] = {}
+    schedule_overrides_per_subpop_by_scenario: dict[str, list] = {}
     for scen_tuple in analysis_scenarios:
         scen_name, overrides = scen_tuple[0], scen_tuple[1]
         per_subpop = scen_tuple[2] if len(scen_tuple) > 2 else None
@@ -307,6 +358,12 @@ def run_analysis_scenarios(
         dose_mult = scen_tuple[4] if len(scen_tuple) > 4 else None
         dose_mult_per_subpop = scen_tuple[5] if len(scen_tuple) > 5 else None
         ratios = scen_tuple[6] if len(scen_tuple) > 6 else {}
+        sched_ov = scen_tuple[7] if len(scen_tuple) > 7 else None
+        sched_ov_per_subpop = scen_tuple[8] if len(scen_tuple) > 8 else None
+        if sched_ov:
+            schedule_overrides_by_scenario[scen_name] = sched_ov
+        if sched_ov_per_subpop:
+            schedule_overrides_per_subpop_by_scenario[scen_name] = sched_ov_per_subpop
         for run_i, (pset_idx, rep) in enumerate(run_schedule):
             tasks.append((
                 scen_name, overrides, per_subpop, designed, dose_mult,
@@ -325,6 +382,8 @@ def run_analysis_scenarios(
         analysis_fitted_num_days=analysis_fitted_num_days,
         analysis_fitted_tv_spacing=analysis_fitted_tv_spacing,
         keep_full_detail=keep_full_detail,
+        schedule_overrides_by_scenario=schedule_overrides_by_scenario,
+        schedule_overrides_per_subpop_by_scenario=schedule_overrides_per_subpop_by_scenario,
     )
 
     n_workers = _analysis_worker_count(len(tasks))

@@ -160,7 +160,7 @@ def _imports():
 
 
 @app.cell
-def _helpers(Path, SimpleNamespace, json, np, pd):
+def _helpers(Path, SimpleNamespace, json, np, pd, io):
     from generic_core.model_factory import (
         build_scalar_array,
         build_notebook_schedules_input,
@@ -187,6 +187,17 @@ def _helpers(Path, SimpleNamespace, json, np, pd):
         _slug = _re.sub(r"[^a-z0-9]+", "_", (name or "").strip().lower()).strip("_")
         return _slug or "schedule"
 
+    def _validate_csv_df(_df, required_columns) -> tuple:
+        """Strip stray ``Unnamed:`` index columns and validate required
+        columns are present. Returns (df, error_str) — error_str is None on
+        success. Shared by the path-based and upload-based CSV loaders below
+        so both validate identically."""
+        _df = _df.loc[:, ~_df.columns.str.match(r"^Unnamed")]
+        _missing = set(required_columns) - set(_df.columns)
+        if _missing:
+            return None, f"Missing columns: {_missing}. Found: {list(_df.columns)}"
+        return _df, None
+
     def load_csv_validated(path_str: str, required_columns) -> tuple:
         """Load a CSV from path_str and validate column names.
         Returns (df, error_str) — error_str is None on success."""
@@ -199,13 +210,75 @@ def _helpers(Path, SimpleNamespace, json, np, pd):
             return None, f"Not a file: {_p}"
         try:
             _df = pd.read_csv(_p)
-            _df = _df.loc[:, ~_df.columns.str.match(r"^Unnamed")]
-            _missing = set(required_columns) - set(_df.columns)
-            if _missing:
-                return None, f"Missing columns: {_missing}. Found: {list(_df.columns)}"
-            return _df, None
+            return _validate_csv_df(_df, required_columns)
         except Exception as _exc:
             return None, f"CSV read error: {_exc}"
+
+    def load_csv_bytes_validated(contents: bytes, required_columns) -> tuple:
+        """Load a CSV from raw uploaded bytes (``mo.ui.file`` contents) and
+        validate column names. Returns (df, error_str) — error_str is None on
+        success. Mirrors ``load_csv_validated`` exactly, but for an uploaded
+        file's in-memory contents rather than a path on disk."""
+        if not contents:
+            return None, "No file uploaded"
+        try:
+            _df = pd.read_csv(io.BytesIO(contents))
+            return _validate_csv_df(_df, required_columns)
+        except Exception as _exc:
+            return None, f"CSV read error: {_exc}"
+
+    def schedule_upload_specs(config_dict) -> list:
+        """Every schedule in ``config_dict["schedules"]`` that can be replaced
+        by an uploaded CSV, as ``(display_name, df_attribute,
+        required_columns)`` tuples -- one per distinct ``df_attribute`` (two
+        schedules sharing an attribute, e.g. the school/work calendar shared
+        with a contact-matrix schedule, are only listed once).
+        ``display_name`` is usually just the schedule's own config name, but
+        for ``contact_matrix`` it's always "School/work calendar" -- the
+        schedule's own name (e.g. "flu_contact_matrix") otherwise gives no
+        hint that selecting it uploads the CALENDAR csv (is_school_day /
+        is_work_day), not the (static, non-schedule) contact matrices
+        themselves. Used to build the Analysis tab's per-scenario
+        schedule-upload controls."""
+        _seen_attrs = set()
+        _specs = []
+        for _sc in config_dict.get("schedules", []) or []:
+            _template = (_sc or {}).get("schedule_template")
+            _cfg = (_sc or {}).get("schedule_config", {}) or {}
+            _name = (_sc or {}).get("name", "")
+            _display_name = _name
+            if _template == "timeseries_lookup":
+                _attr = _cfg.get("df_attribute")
+                _cols = ["date", _cfg.get("value_column", "value")]
+            elif _template == "contact_matrix":
+                _attr = _cfg.get("school_work_day_df_attribute")
+                _cols = ["date", "is_school_day", "is_work_day"]
+                _display_name = "School/work calendar"
+            elif _template == "vaccine_schedule":
+                _attr = _cfg.get("df_attribute")
+                _cols = ["date", "daily_vaccines"]
+            elif _template == "mobility":
+                _attr = _cfg.get("df_attribute")
+                _cols = ["mobility_modifier"]
+            else:
+                continue
+            if not _attr or _attr in _seen_attrs:
+                continue
+            _seen_attrs.add(_attr)
+            _specs.append((_display_name, _attr, _cols))
+        # Disambiguate in the rare case of more than one distinct
+        # school/work calendar schedule (e.g. separate school vs. workplace
+        # contact-matrix schedules) -- the plain "School/work calendar" label
+        # is only safe when there's just one, since analysis_sched_upload_sel
+        # keys its options by this display name and a collision would
+        # silently drop one option.
+        _calendar_count = sum(1 for _dn, _a, _c in _specs if _dn == "School/work calendar")
+        if _calendar_count > 1:
+            _specs = [
+                (f"School/work calendar ({_a})" if _dn == "School/work calendar" else _dn, _a, _c)
+                for _dn, _a, _c in _specs
+            ]
+        return _specs
 
     def load_contact_matrix_csv(path_str: str, expected_size: int) -> tuple:
         """Load an A×A contact matrix CSV (plain floats).
@@ -378,8 +451,8 @@ def _helpers(Path, SimpleNamespace, json, np, pd):
         return _new_slots, _new_data
 
     def scenario_state_group(key: str) -> str:
-        """Which of the Analysis Scenario sub-tab's four split mo.state
-        dicts (see _nb_analysis.py's _analysis_scenario_state and its four
+        """Which of the Analysis Scenario sub-tab's five split mo.state
+        dicts (see _nb_analysis.py's _analysis_scenario_state and its
         *_controls cells) a given scenario-config key belongs to. Used to
         partition an uploaded/imported flat scenario_config.json across
         them (see partition_scenario_state, and _nb_import.py's shared
@@ -397,13 +470,17 @@ def _helpers(Path, SimpleNamespace, json, np, pd):
             "array_subpop_sel::", "array_subpop::",
         )):
             return "subpop"
+        if key in ("sched_toggle", "sched_sel", "sched_per_subpop_toggle") or key.startswith(
+            ("sched::", "sched_subpop::")
+        ):
+            return "sched"
         return "controls"  # unrecognized key: harmless default bucket
 
     def partition_scenario_state(flat: dict) -> dict:
         """Split a flat scenario-config dict (the shape scenario_config.json
-        is saved/restored in) into the four group dicts consumed by
+        is saved/restored in) into the five group dicts consumed by
         _nb_analysis.py's per-cell scenario state."""
-        _out = {"controls": {}, "agescale": {}, "dose": {}, "subpop": {}}
+        _out = {"controls": {}, "agescale": {}, "dose": {}, "subpop": {}, "sched": {}}
         for _k, _v in (flat or {}).items():
             _out[scenario_state_group(_k)][_k] = _v
         return _out
@@ -562,6 +639,8 @@ def _helpers(Path, SimpleNamespace, json, np, pd):
         rel_inf_param_name,
         slugify_schedule_name,
         load_csv_validated,
+        load_csv_bytes_validated,
+        schedule_upload_specs,
         load_contact_matrix_csv,
         load_config_json,
         resolve_input_path,
@@ -8660,6 +8739,8 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
 
     # <<<DOSE_MULTIPLIER_SUBPOP_BLOCK>>>
 
+    # <<<SCHEDULE_OVERRIDES_BLOCK>>>
+
     # ---- Setup ----
     _HERE = Path(__file__).parent
     sys.path.insert(0, str(_HERE.parent.parent))
@@ -8838,20 +8919,62 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
         return dose_mult
 
 
-    def _build_schedules(start_date, num_days, tv_increments=None, dose_mult=None):
+    def _schedule_overrides_from_json(scenario_name):
+        # {df_attribute: csv_text} of uploaded schedule-REPLACEMENT CSVs for
+        # this scenario (see the Analysis tab's "Replace schedules from
+        # uploaded CSVs" control), read from schedules.json's reserved
+        # "__scenario_overrides__" key. Only the attributes SCHEDULE_OVERRIDES
+        # names for this scenario are pulled out, so a schedules.json missing
+        # an entry (e.g. re-downloaded before that upload was added) degrades
+        # to "no override" instead of raising. Returns None if this scenario
+        # has no schedule overrides.
+        _attrs = SCHEDULE_OVERRIDES.get(scenario_name)
+        if not _attrs:
+            return None
+        _csvs = _load_schedule_csvs()
+        _entry = (_csvs.get("__scenario_overrides__", {}) or {}).get("per_scenario", {}).get(scenario_name, {})
+        return {_a: _entry[_a] for _a in _attrs if _a in _entry} or None
+
+
+    def _schedule_overrides_per_subpop_from_json(scenario_name):
+        # [{df_attribute: csv_text} | None, ...] indexed by subpop order --
+        # the per-subpop companion to _schedule_overrides_from_json above.
+        _lists = SCHEDULE_OVERRIDES_PER_SUBPOP.get(scenario_name)
+        if not _lists:
+            return None
+        _csvs = _load_schedule_csvs()
+        _entries = (_csvs.get("__scenario_overrides__", {}) or {}).get("per_subpop", {}).get(scenario_name, [])
+        _out = []
+        for _si, _attrs in enumerate(_lists):
+            if not _attrs:
+                _out.append(None)
+                continue
+            _sp_entry = _entries[_si] if _si < len(_entries) else {}
+            _out.append({_a: _sp_entry[_a] for _a in _attrs if _a in _sp_entry} or None)
+        return _out if any(_out) else None
+
+
+    def _build_schedules(start_date, num_days, tv_increments=None, dose_mult=None, schedule_overrides=None):
         # dose_mult: per-age-group multiplier on the `vaccine_schedule`-template
         # schedules (see scale_dose_schedule_df and _dose_mult_for above) -- e.g.
         # 0 to zero out an age group for a no-dose / single-age-only scenario.
         # Despite the "daily_vaccines" naming (fixed by the model config schema),
         # this isn't vaccine-specific -- it scales whatever `scheduled_exact`
         # represents (antiviral prophylaxis courses, etc.).
+        # schedule_overrides: {df_attribute: csv_text} -- REPLACES the named
+        # schedule outright (see _schedule_overrides_from_json above), checked
+        # before the notebook's own uploaded schedules.json so a scenario's
+        # replacement wins; dose_mult scaling above still applies on top of it.
         _h = max(num_days + 14, 370)
         _dates = pd.date_range(start=start_date, periods=_h, freq="D").date
         _mob = json.dumps(np.ones((NUM_AGE_GROUPS, NUM_RISK_GROUPS)).tolist())
         _vax = json.dumps(np.zeros((NUM_AGE_GROUPS, NUM_RISK_GROUPS)).tolist())
         _csvs = _load_schedule_csvs()
+        _overrides = schedule_overrides or {}
 
         def _real_or(_name, _fallback):
+            if _name in _overrides:
+                return pd.read_csv(io.StringIO(_overrides[_name]))
             if _name in _csvs:
                 return pd.read_csv(io.StringIO(_csvs[_name]))
             return _fallback
@@ -8895,7 +9018,8 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
 
     def build_model(cfg, param_overrides, rep, subpop_overrides=None,
                     seed_scales=None, tv_increments=None,
-                    dose_mult=None, dose_mult_per_subpop=None):
+                    dose_mult=None, dose_mult_per_subpop=None,
+                    schedule_overrides=None, schedule_overrides_per_subpop=None):
         # subpop_overrides: list of {param: value} indexed by subpop order (metapop only)
         # seed_scales / tv_increments default to the fitted best set's; a sampled
         # param set passes its own so each run reproduces that draw's initial
@@ -8950,6 +9074,21 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
                      if (_extra_attrs and _dm is not None) else None)
                     for _dm in dose_mult_per_subpop
                 ]
+            # Uploaded schedule REPLACEMENTS (as opposed to dose_mult, which
+            # scales a schedule in place): csv_text -> DataFrame, since
+            # make_metapop_from_folder's schedule_df_overrides kwarg takes
+            # actual DataFrames, not raw CSV text.
+            _sched_ov_dfs = (
+                {_a: pd.read_csv(io.StringIO(_t)) for _a, _t in schedule_overrides.items()}
+                if schedule_overrides else None
+            )
+            _sched_ov_dfs_per_sp = (
+                [
+                    ({_a: pd.read_csv(io.StringIO(_t)) for _a, _t in _d.items()} if _d else None)
+                    for _d in schedule_overrides_per_subpop
+                ]
+                if schedule_overrides_per_subpop else None
+            )
             _m, _ = make_metapop_from_folder(
                 METAPOP_FOLDER, _cfg, START_DATE, NUM_DAYS, _comps,
                 seed_offset=rep, seed_base=SEED_BASE, ts_per_day=TIMESTEPS_PER_DAY,
@@ -8961,10 +9100,11 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
                 transmission_multiplier_df=_build_tvm_df(START_DATE, NUM_DAYS, _tv_incr),
                 dose_mult=_base_dose_mult, dose_mult_per_subpop=_base_dm_per_sp,
                 extra_dose_mult=_extra_dose_mult, extra_dose_mult_per_subpop=_extra_dm_per_sp,
+                schedule_df_overrides=_sched_ov_dfs, schedule_df_overrides_per_subpop=_sched_ov_dfs_per_sp,
             )
             return _m
 
-        _sched = _build_schedules(START_DATE, NUM_DAYS, _tv_incr, dose_mult)
+        _sched = _build_schedules(START_DATE, NUM_DAYS, _tv_incr, dose_mult, schedule_overrides=schedule_overrides)
         _mc = parse_model_config_from_dict(_cfg, schedules_input=_sched)
         _A, _R = NUM_AGE_GROUPS, NUM_RISK_GROUPS
         _comps = list(_cfg.get("compartments", {}).keys()) if isinstance(_cfg.get("compartments"), dict) else list(_cfg.get("compartments", ["S"]))
@@ -9109,6 +9249,8 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
             config_dict, _run_ov, rep, subpop_overrides=sp_overrides,
             seed_scales=_run_scales, tv_increments=_run_incr,
             dose_mult=dose_mult, dose_mult_per_subpop=dose_mult_per_subpop,
+            schedule_overrides=_schedule_overrides_from_json(scenario_name),
+            schedule_overrides_per_subpop=_schedule_overrides_per_subpop_from_json(scenario_name),
         )
         _m.simulate_until_day(NUM_DAYS)
         _sps = list(_m.subpop_models.values())
@@ -9403,11 +9545,29 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
         "# dict keyed by df_attribute).",
         "DOSE_MULTIPLIER_PER_SUBPOP = {",
     ]
+    _sched_ov_lines = [
+        "# Schedules REPLACED outright by an uploaded CSV, per scenario (as",
+        "# opposed to DOSE_MULTIPLIER, which scales a schedule in place). Names",
+        "# the df_attribute(s) overridden; the actual CSV data lives in",
+        "# schedules.json under \"__scenario_overrides__\" (see",
+        "# _schedule_overrides_from_json) -- download it from the Export tab",
+        "# alongside this script.",
+        "# Format: {scenario_name: {df_attribute: df_attribute}}",
+        "SCHEDULE_OVERRIDES = {",
+    ]
+    _sched_ov_subpop_lines = [
+        "# Per-subpopulation override of SCHEDULE_OVERRIDES above (metapop only).",
+        "# Format: {scenario_name: [{df_attribute: df_attribute} | None, ...]}",
+        "# indexed by subpop order.",
+        "SCHEDULE_OVERRIDES_PER_SUBPOP = {",
+    ]
     for _scen_tuple in analysis_scenarios:
         _sn, _ov = _scen_tuple[0], _scen_tuple[1]
         _sp_list = _scen_tuple[2] if len(_scen_tuple) > 2 else None
         _dm = _scen_tuple[4] if len(_scen_tuple) > 4 else None
         _dm_sp = _scen_tuple[5] if len(_scen_tuple) > 5 else None
+        _sched_ov = _scen_tuple[7] if len(_scen_tuple) > 7 else None
+        _sched_ov_sp = _scen_tuple[8] if len(_scen_tuple) > 8 else None
         if _ov:
             _inner = ", ".join(f'"{_k}": {repr(_v)}' for _k, _v in _ov.items())
             _scen_lines.append(f"    {repr(_sn)}: {{{_inner}}},")
@@ -9428,14 +9588,26 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
             _dose_mult_subpop_lines.append(
                 f"    {repr(_sn)}: [{', '.join(_dm_repr(_x) for _x in _dm_sp)}],"
             )
+        if _sched_ov:
+            _attr_dict = repr({_a: _a for _a in _sched_ov})
+            _sched_ov_lines.append(f"    {repr(_sn)}: {_attr_dict},")
+        if _sched_ov_sp:
+            _per_sp_repr = ", ".join(
+                repr({_a: _a for _a in _d}) if _d else "None" for _d in _sched_ov_sp
+            )
+            _sched_ov_subpop_lines.append(f"    {repr(_sn)}: [{_per_sp_repr}],")
     _scen_lines.append("}")
     _subpop_lines.append("}")
     _dose_mult_lines.append("}")
     _dose_mult_subpop_lines.append("}")
+    _sched_ov_lines.append("}")
+    _sched_ov_subpop_lines.append("}")
     _scenarios_block = "\n".join(_scen_lines)
     _subpop_block = "\n".join(_subpop_lines)
     _dose_mult_block = "\n".join(_dose_mult_lines)
     _dose_mult_subpop_block = "\n".join(_dose_mult_subpop_lines)
+    _sched_overrides_block = "\n".join(_sched_ov_lines)
+    _sched_overrides_subpop_block = "\n".join(_sched_ov_subpop_lines)
 
     # Params each scenario deliberately set (the swept param in Sensitivity, or a
     # scenario cell edited away from the baseline). A sampled parameter set
@@ -9556,6 +9728,9 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
     ).replace(
         "# <<<DOSE_MULTIPLIER_SUBPOP_BLOCK>>>", _dose_mult_subpop_block,
     ).replace(
+        "# <<<SCHEDULE_OVERRIDES_BLOCK>>>",
+        _sched_overrides_block + "\n\n" + _sched_overrides_subpop_block,
+    ).replace(
         # Run settings come from the Analysis tab, the same place SCENARIOS and
         # DESIGNED_PARAMS do, so the script reproduces the Analysis run as-is.
         "NUM_DAYS = 100\n",
@@ -9603,8 +9778,12 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
     )
     # The real uploaded schedule CSVs, so run_simulation.py reproduces the
     # notebook's model instead of flat constants (mirrors the Fitting tab's
-    # `schedule_csvs` field in fit_config.json). Metapop reads its own per-subpop
-    # CSVs from METAPOP_FOLDER, so this is single-population only.
+    # `schedule_csvs` field in fit_config.json). Metapop reads its own base
+    # per-subpop CSVs from METAPOP_FOLDER at run time, so the BASE schedules
+    # below are single-population only -- but a scenario's uploaded schedule
+    # REPLACEMENT CSVs (see the Analysis tab's schedule-upload control) are
+    # bundled under the reserved "__scenario_overrides__" key regardless of
+    # is_metapop, since those aren't available anywhere else at run time.
     _schedules_payload = {} if is_metapop else {
         _name: _df.to_csv(index=False)
         for _name, _df in (
@@ -9616,6 +9795,23 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
         )
         if _df is not None
     }
+    _sched_override_payload = {"per_scenario": {}, "per_subpop": {}}
+    for _scen_tuple in analysis_scenarios:
+        _osn = _scen_tuple[0]
+        _osched_ov = _scen_tuple[7] if len(_scen_tuple) > 7 else None
+        _osched_ov_sp = _scen_tuple[8] if len(_scen_tuple) > 8 else None
+        if _osched_ov:
+            _sched_override_payload["per_scenario"][_osn] = {
+                _a: _df.to_csv(index=False) for _a, _df in _osched_ov.items()
+            }
+        if _osched_ov_sp:
+            _sched_override_payload["per_subpop"][_osn] = [
+                ({_a: _df.to_csv(index=False) for _a, _df in _d.items()} if _d else None)
+                for _d in _osched_ov_sp
+            ]
+    if _sched_override_payload["per_scenario"] or _sched_override_payload["per_subpop"]:
+        _schedules_payload["__scenario_overrides__"] = _sched_override_payload
+    _base_sched_keys = sorted(_k for _k in _schedules_payload if _k != "__scenario_overrides__")
     _schedules_str = json.dumps(_schedules_payload, indent=2)
     _schedules_dl = mo.download(
         data=_schedules_str.encode(), filename="schedules.json",
@@ -9666,11 +9862,17 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
 
     _metapop_note = (
         "\n\n**Metapopulation:** this is a metapop model, so the script sets "
-        "`IS_METAPOP = True` and reads its inputs (per-subpop schedules / initial "
-        "conditions, travel matrix) from `METAPOP_FOLDER` at run time. That folder "
-        "is **not** bundled into the download — keep it in place, or edit "
-        "`METAPOP_FOLDER` to point at it. A fitted m(t) is reconstructed and "
-        "broadcast uniformly to every subpopulation."
+        "`IS_METAPOP = True` and reads its base inputs (per-subpop schedules / "
+        "initial conditions, travel matrix) from `METAPOP_FOLDER` at run time. "
+        "That folder is **not** bundled into the download — keep it in place, "
+        "or edit `METAPOP_FOLDER` to point at it. A fitted m(t) is reconstructed "
+        "and broadcast uniformly to every subpopulation."
+        + (
+            " Any scenario's uploaded schedule-replacement CSV(s), however, "
+            "*are* bundled in `schedules.json` — download it alongside "
+            "`run_simulation.py`."
+            if _schedules_payload.get("__scenario_overrides__") else ""
+        )
         if (is_metapop and metapop_folder_input.value.strip()) else ""
     )
     _how_to = mo.callout(
@@ -9732,10 +9934,23 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
                 ),
                 (
                     mo.md(
-                        "*`schedules.json` carries the uploaded "
-                        f"{', '.join(f'`{_k}`' for _k in sorted(_schedules_payload))} — "
-                        "keep it next to `run_simulation.py` or the run falls back to flat "
-                        "constants (no seasonal forcing, no vaccination).*"
+                        "*`schedules.json` "
+                        + (
+                            (
+                                "carries the uploaded "
+                                f"{', '.join(f'`{_k}`' for _k in sorted(_base_sched_keys))} — keep "
+                                "it next to `run_simulation.py` or the run falls back to flat "
+                                "constants (no seasonal forcing, no vaccination)."
+                            ) if _base_sched_keys else ""
+                        )
+                        + (
+                            " Also carries per-scenario schedule-replacement CSV(s) uploaded "
+                            "in the Analysis tab (see SCHEDULE_OVERRIDES in the script) — keep "
+                            "it next to `run_simulation.py` or those scenarios fall back to "
+                            "the unreplaced schedule."
+                            if _schedules_payload.get("__scenario_overrides__") else ""
+                        )
+                        + "*"
                     )
                     if _schedules_payload else mo.md("")
                 ),
@@ -10119,12 +10334,14 @@ def _analysis_scenario_state(mo):
     get_scenario_agescale_state, set_scenario_agescale_state = mo.state({})
     get_scenario_dose_state, set_scenario_dose_state = mo.state({})
     get_scenario_subpop_state, set_scenario_subpop_state = mo.state({})
+    get_scenario_sched_state, set_scenario_sched_state = mo.state({})
     get_scenario_restore_error, set_scenario_restore_error = mo.state(None)
     return (
         get_scenario_controls_state, set_scenario_controls_state,
         get_scenario_agescale_state, set_scenario_agescale_state,
         get_scenario_dose_state, set_scenario_dose_state,
         get_scenario_subpop_state, set_scenario_subpop_state,
+        get_scenario_sched_state, set_scenario_sched_state,
         get_scenario_restore_error, set_scenario_restore_error,
     )
 
@@ -10134,6 +10351,7 @@ def _analysis_scenario_config_upload_ui(
     mo, json, partition_scenario_state,
     set_scenario_controls_state, set_scenario_agescale_state,
     set_scenario_dose_state, set_scenario_subpop_state,
+    set_scenario_sched_state,
     set_scenario_restore_error,
 ):
     def _on_scenario_config_upload(_files):
@@ -10148,16 +10366,17 @@ def _analysis_scenario_config_upload_ui(
             set_scenario_restore_error(str(_exc))
             return
         # Restoring replaces the whole scenario design (names, overrides,
-        # subpop selections, dose multipliers) rather than merging it, so a
-        # restore always reflects exactly the uploaded file -- same as the
-        # Fitting tab's "Restore a saved configuration". The flat uploaded
-        # dict is split back across the four per-cell states it came from
-        # (see partition_scenario_state).
+        # subpop selections, dose multipliers, uploaded schedule CSVs)
+        # rather than merging it, so a restore always reflects exactly the
+        # uploaded file -- same as the Fitting tab's "Restore a saved
+        # configuration". The flat uploaded dict is split back across the
+        # five per-cell states it came from (see partition_scenario_state).
         _groups = partition_scenario_state(_raw)
         set_scenario_controls_state(_groups["controls"])
         set_scenario_agescale_state(_groups["agescale"])
         set_scenario_dose_state(_groups["dose"])
         set_scenario_subpop_state(_groups["subpop"])
+        set_scenario_sched_state(_groups["sched"])
         set_scenario_restore_error(None)
 
     analysis_scenario_config_upload = mo.ui.file(
@@ -10174,12 +10393,14 @@ def _analysis_scenario_config_download_ui(
     mo, json,
     get_scenario_controls_state, get_scenario_agescale_state,
     get_scenario_dose_state, get_scenario_subpop_state,
+    get_scenario_sched_state,
 ):
     _merged = {
         **get_scenario_controls_state(),
         **get_scenario_agescale_state(),
         **get_scenario_dose_state(),
         **get_scenario_subpop_state(),
+        **get_scenario_sched_state(),
     }
     analysis_scenario_config_download = mo.download(
         data=json.dumps(_merged, indent=2).encode(),
@@ -10442,6 +10663,208 @@ def _analysis_dose_mult_controls(
 
 
 @app.cell
+def _analysis_schedule_upload_controls(
+    mo, config_dict, is_metapop, analysis_sp_names, schedule_upload_specs,
+    load_csv_bytes_validated,
+    get_scenario_sched_state, set_scenario_sched_state,
+):
+    # Per-scenario replacement of any schedule (humidity, school/work
+    # calendar, mobility, daily vaccines, or an extra scheduled_exact
+    # schedule) with an uploaded CSV -- e.g. compare the config's current
+    # vaccination rollout against a different one within the same analysis
+    # run, rather than editing the Model Builder CSV path and rebuilding.
+    #
+    # This is a schedule REPLACEMENT, not a scale (see the dose-multiplier
+    # controls above, which scale an existing vaccine_schedule in place);
+    # the two compose -- an uploaded replacement is scaled by the dose
+    # multiplier on top of it, same as any other schedule.
+    #
+    # `mo.ui.file` widgets hold their own uploaded bytes and can't be
+    # assigned a value from Python (so a fresh mo.ui.file() always renders
+    # as "no file chosen", even right after a successful upload, once this
+    # cell reruns -- e.g. from switching tabs, which changes config_dict's
+    # upstream dependencies). To survive that, each file's on_change
+    # callback below parses+validates immediately and stores the CSV's own
+    # TEXT (not the widget) in get/set_scenario_sched_state, exactly like
+    # every other Scenario-tab control -- so the uploaded schedule (and the
+    # toggle/multiselect enabling it) persists across reruns AND round-trips
+    # through scenario_config.json and the Export tab, even though the file
+    # widget itself visually resets. _analysis_schedule_upload_parse (below)
+    # reads from this state, not from the file widgets' .value.
+    _MAX_SC = 5
+    analysis_sched_specs = schedule_upload_specs(config_dict)
+    analysis_sched_names = [_n for _n, _a, _c in analysis_sched_specs]
+    analysis_sched_attrs = [_a for _n, _a, _c in analysis_sched_specs]
+    analysis_sched_cols = [_c for _n, _a, _c in analysis_sched_specs]
+    _n_sched = len(analysis_sched_specs)
+    analysis_sched_upload_enabled = bool(analysis_sched_specs)
+    _sp_opts = list(analysis_sp_names) if (is_metapop and analysis_sp_names) else []
+
+    _st = get_scenario_sched_state()
+
+    def _cb(key):
+        # Functional update -- see _analysis_scenario_controls's _cb.
+        def _inner(v):
+            set_scenario_sched_state(lambda d: {**d, key: v})
+        return _inner
+
+    def _sched_key(j, k):
+        return f"sched::{j}::{analysis_sched_attrs[k]}"
+
+    def _sched_sp_key(sp, j, k):
+        return f"sched_subpop::{sp}::{j}::{analysis_sched_attrs[k]}"
+
+    def _file_cb(key, cols):
+        # Parses+validates an uploaded CSV immediately and stores its raw
+        # text (JSON-serializable, unlike a DataFrame) in state on success;
+        # an invalid upload is reported under a parallel "<key>::err" key and
+        # does NOT clear any previously-good value at <key>, so a bad
+        # re-upload attempt doesn't silently discard a working schedule.
+        def _inner(files):
+            files = files or ()
+            if not files:
+                return
+            _text = files[0].contents.decode("utf-8")
+            _df, _err = load_csv_bytes_validated(files[0].contents, cols)
+            if _err:
+                set_scenario_sched_state(lambda d: {**d, f"{key}::err": _err})
+            else:
+                set_scenario_sched_state(lambda d: {
+                    **{_k: _v for _k, _v in d.items() if _k not in (key, f"{key}::err")},
+                    key: _text,
+                })
+        return _inner
+
+    analysis_sched_upload_toggle = mo.ui.switch(
+        label="Replace schedules from uploaded CSVs (per scenario)",
+        value=_st.get("sched_toggle", False),
+        on_change=_cb("sched_toggle"),
+    )
+    analysis_sched_upload_sel = mo.ui.multiselect(
+        options={_n: _n for _n in analysis_sched_names},
+        value=[_n for _n in _st.get("sched_sel", []) if _n in analysis_sched_names],
+        label="Schedule(s) to replace",
+        on_change=_cb("sched_sel"),
+    )
+
+    # Indexed [scenario][schedule].
+    analysis_sched_upload_files = mo.ui.array([
+        mo.ui.array([
+            mo.ui.file(
+                filetypes=[".csv"], multiple=False,
+                on_change=_file_cb(_sched_key(_j, _k), analysis_sched_cols[_k]),
+            )
+            for _k in range(_n_sched)
+        ])
+        for _j in range(_MAX_SC)
+    ])
+
+    # Metapop only: whether the scenario's schedule replacement applies
+    # identically to every subpop (shared file above) or is uploaded
+    # independently per subpop.
+    analysis_sched_upload_per_subpop_toggle = mo.ui.switch(
+        label="Upload independently per subpopulation (instead of the same file everywhere)",
+        value=_st.get("sched_per_subpop_toggle", False),
+        on_change=_cb("sched_per_subpop_toggle"),
+    ) if is_metapop else None
+    # Indexed [subpop][scenario][schedule].
+    analysis_sched_upload_subpop_files = mo.ui.array([
+        mo.ui.array([
+            mo.ui.array([
+                mo.ui.file(
+                    filetypes=[".csv"], multiple=False,
+                    on_change=_file_cb(_sched_sp_key(_sp, _j, _k), analysis_sched_cols[_k]),
+                )
+                for _k in range(_n_sched)
+            ])
+            for _j in range(_MAX_SC)
+        ])
+        for _sp in _sp_opts
+    ]) if is_metapop and _sp_opts else mo.ui.array([])
+
+    return (
+        analysis_sched_specs, analysis_sched_names, analysis_sched_attrs, analysis_sched_cols,
+        analysis_sched_upload_enabled, analysis_sched_upload_toggle, analysis_sched_upload_sel,
+        analysis_sched_upload_files,
+        analysis_sched_upload_per_subpop_toggle, analysis_sched_upload_subpop_files,
+    )
+
+
+@app.cell
+def _analysis_schedule_upload_parse(
+    analysis_sched_upload_enabled, analysis_sched_upload_toggle, analysis_sched_upload_sel,
+    analysis_sched_attrs, analysis_sched_cols, analysis_sched_names,
+    is_metapop, analysis_sp_names, load_csv_bytes_validated,
+    get_scenario_sched_state,
+):
+    # Builds the override DataFrames from get_scenario_sched_state() (NOT
+    # from the file widgets' .value -- see _analysis_schedule_upload_controls
+    # for why), producing:
+    #   analysis_sched_override_dfs: {scenario_idx: {df_attribute: df}}
+    #   analysis_sched_override_dfs_per_subpop: {scenario_idx: {subpop_idx: {df_attribute: df}}}
+    # plus a flat list of (scenario_label, schedule_name, subpop_name_or_None,
+    # error_str) for any stored upload that failed validation, rendered as
+    # callouts in the Scenario section card. Only schedules currently
+    # selected in analysis_sched_upload_sel are used -- a schedule uploaded
+    # earlier but since deselected is left in state (so re-selecting it
+    # brings it right back) but not applied.
+    analysis_sched_override_dfs = {}
+    analysis_sched_override_dfs_per_subpop = {}
+    analysis_sched_upload_errors = []
+
+    if analysis_sched_upload_enabled and analysis_sched_upload_toggle.value:
+        _st = get_scenario_sched_state()
+        _sel = set(analysis_sched_upload_sel.value or [])
+        _sel_idx = [_k for _k, _n in enumerate(analysis_sched_names) if _n in _sel]
+        _per_sp_active = bool(
+            is_metapop and analysis_sp_names
+            and _st.get("sched_per_subpop_toggle", False)
+        )
+        _MAX_SC = 5
+        for _j in range(_MAX_SC):
+            for _k in _sel_idx:
+                _attr = analysis_sched_attrs[_k]
+                _name = analysis_sched_names[_k]
+                _cols = analysis_sched_cols[_k]
+
+                _key = f"sched::{_j}::{_attr}"
+                _text = _st.get(_key)
+                _upload_err = _st.get(f"{_key}::err")
+                if _text:
+                    _df, _err = load_csv_bytes_validated(_text.encode("utf-8"), _cols)
+                    if _err:
+                        analysis_sched_upload_errors.append((f"Scenario {_j + 1}", _name, None, _err))
+                    else:
+                        analysis_sched_override_dfs.setdefault(_j, {})[_attr] = _df
+                elif _upload_err:
+                    # The most recent upload attempt for this slot failed
+                    # validation and left no usable text behind (see
+                    # _file_cb) -- surface that, distinct from a slot that
+                    # was simply never uploaded to.
+                    analysis_sched_upload_errors.append((f"Scenario {_j + 1}", _name, None, _upload_err))
+
+                if _per_sp_active and analysis_sp_names:
+                    for _si, _sp in enumerate(analysis_sp_names):
+                        _sp_key = f"sched_subpop::{_sp}::{_j}::{_attr}"
+                        _sp_text = _st.get(_sp_key)
+                        _sp_upload_err = _st.get(f"{_sp_key}::err")
+                        if _sp_text:
+                            _sp_df, _sp_err = load_csv_bytes_validated(_sp_text.encode("utf-8"), _cols)
+                            if _sp_err:
+                                analysis_sched_upload_errors.append((f"Scenario {_j + 1}", _name, _sp, _sp_err))
+                            else:
+                                (analysis_sched_override_dfs_per_subpop
+                                 .setdefault(_j, {}).setdefault(_si, {})[_attr]) = _sp_df
+                        elif _sp_upload_err:
+                            analysis_sched_upload_errors.append((f"Scenario {_j + 1}", _name, _sp, _sp_upload_err))
+
+    return (
+        analysis_sched_override_dfs, analysis_sched_override_dfs_per_subpop,
+        analysis_sched_upload_errors,
+    )
+
+
+@app.cell
 def _analysis_param_subpop_controls(
     mo, is_metapop, analysis_sp_names,
     ANALYSIS_SCALAR_PARAMS, ANALYSIS_ARRAY_PARAMS, ANALYSIS_SCALAR_RANGES,
@@ -10659,6 +11082,11 @@ def _analysis_display(
     analysis_dose_mult_enabled, analysis_dose_mult_toggle, analysis_dose_mult_inputs,
     analysis_dose_mult_per_subpop_toggle, analysis_dose_mult_subpop_inputs,
     analysis_dose_schedule_desc, analysis_dose_schedule_names,
+    analysis_sched_upload_enabled, analysis_sched_upload_toggle, analysis_sched_upload_sel,
+    analysis_sched_upload_files,
+    analysis_sched_upload_per_subpop_toggle, analysis_sched_upload_subpop_files,
+    analysis_sched_names, analysis_sched_attrs, analysis_sched_upload_errors,
+    analysis_sched_override_dfs, analysis_sched_override_dfs_per_subpop,
     analysis_array_age_scale_toggles, analysis_array_age_scale_inputs,
     age_groups, num_age_groups, param_grid_columns,
     analysis_scenario_config_upload, analysis_scenario_config_download,
@@ -10928,6 +11356,80 @@ def _analysis_display(
                             ],
                             justify="start", widths=_row_widths_no_sp,
                         ))
+    if analysis_sched_upload_enabled:
+        _scen_body.append(mo.md(
+            "*Replace a schedule outright with an uploaded CSV, per scenario "
+            "(e.g. compare the current vaccine rollout against a different "
+            "one) — a replacement, not a scale; any dose multiplier above for "
+            "the same schedule is applied on top of the replacement.*"
+        ))
+        _scen_body.append(mo.hstack(
+            [analysis_sched_upload_toggle, analysis_sched_upload_sel], justify="start",
+        ))
+        if analysis_sched_upload_toggle.value:
+            _sel_sched_idx = [
+                _k for _k, _n in enumerate(analysis_sched_names)
+                if _n in set(analysis_sched_upload_sel.value or [])
+            ]
+            if not _sel_sched_idx:
+                _scen_body.append(mo.callout(
+                    mo.md("Select at least one schedule above to upload replacement CSV(s) for it."),
+                    kind="info",
+                ))
+            _per_sp_sched_active = bool(
+                is_metapop and analysis_sched_upload_per_subpop_toggle is not None
+                and analysis_sched_upload_per_subpop_toggle.value
+            )
+            if is_metapop and analysis_sched_upload_per_subpop_toggle is not None and _sel_sched_idx:
+                _scen_body.append(analysis_sched_upload_per_subpop_toggle)
+            _sched_attr_for_idx = {_k: analysis_sched_attrs[_k] for _k in _sel_sched_idx}
+            for _k in _sel_sched_idx:
+                _scen_body.append(mo.md(f"↳ schedule `{analysis_sched_names[_k]}`:"))
+                _scen_body.append(mo.hstack(
+                    [mo.md("**Upload**")] + _scenario_name_labels,
+                    justify="start", widths=_row_widths_no_sp,
+                ))
+                _scen_body.append(mo.hstack(
+                    [mo.md("")] + [analysis_sched_upload_files[j][_k] for j in range(_n_sc)],
+                    justify="start", widths=_row_widths_no_sp,
+                ))
+                # The file widget itself always shows "no file chosen" once
+                # this cell reruns (mo.ui.file can't carry a value across a
+                # rerun) even though the upload is still in effect via
+                # get_scenario_sched_state -- so surface that here instead of
+                # leaving it looking like the upload was lost.
+                _attr = _sched_attr_for_idx[_k]
+                _scen_body.append(mo.hstack(
+                    [mo.md("")] + [
+                        mo.md("✓ *saved*") if analysis_sched_override_dfs.get(j, {}).get(_attr) is not None
+                        else mo.md("")
+                        for j in range(_n_sc)
+                    ],
+                    justify="start", widths=_row_widths_no_sp,
+                ))
+                if _per_sp_sched_active and analysis_sp_names:
+                    for _si, _sp in enumerate(analysis_sp_names):
+                        if _si >= len(analysis_sched_upload_subpop_files):
+                            break
+                        _scen_body.append(mo.md(f"&nbsp;&nbsp;↳ **{_sp}** (overrides the shared upload above):"))
+                        _scen_body.append(mo.hstack(
+                            [mo.md("")] + [
+                                analysis_sched_upload_subpop_files[_si][j][_k] for j in range(_n_sc)
+                            ],
+                            justify="start", widths=_row_widths_no_sp,
+                        ))
+                        _scen_body.append(mo.hstack(
+                            [mo.md("")] + [
+                                mo.md("✓ *saved*")
+                                if analysis_sched_override_dfs_per_subpop.get(j, {}).get(_si, {}).get(_attr) is not None
+                                else mo.md("")
+                                for j in range(_n_sc)
+                            ],
+                            justify="start", widths=_row_widths_no_sp,
+                        ))
+            for _scen_label, _sched_name, _sp_name, _err in analysis_sched_upload_errors:
+                _where = f"{_scen_label} / `{_sched_name}`" + (f" / {_sp_name}" if _sp_name else "")
+                _scen_body.append(mo.callout(mo.md(f"**{_where}:** {_err}"), kind="danger"))
     _scen_ui = mo.vstack(_scen_body)
 
     # --- Uncertainty-source controls (Run settings) ---
@@ -11092,12 +11594,15 @@ def _analysis_define_scenarios(
     analysis_dose_mult_per_subpop_toggle, analysis_dose_mult_subpop_inputs,
     analysis_dose_schedule_attrs,
     analysis_array_age_scale_toggles, analysis_array_age_scale_inputs,
+    analysis_sched_upload_enabled, analysis_sched_upload_toggle,
+    analysis_sched_override_dfs, analysis_sched_override_dfs_per_subpop,
 ):
     _scalar_names = list(ANALYSIS_SCALAR_PARAMS.keys())
     _array_names = list(ANALYSIS_ARRAY_PARAMS.keys())
     _use_subpop = is_metapop and bool(analysis_sp_names)
     # Each entry is (name, global_overrides, per_subpop_overrides, designed,
-    # dose_multiplier, dose_multiplier_per_subpop). `designed` names the params
+    # dose_multiplier, dose_multiplier_per_subpop, ratios, schedule_df_overrides,
+    # schedule_df_overrides_per_subpop). `designed` names the params
     # this scenario deliberately sets — the swept param in Sensitivity, or a
     # cell edited away from the catalog baseline in Scenario. _run_analysis
     # lets a sampled fitted param set overwrite every *other* param, so
@@ -11111,6 +11616,14 @@ def _analysis_define_scenarios(
     # vectors indexed by subpop, overriding `dose_multiplier` for subpops set
     # independently. Both only ever set in the Scenario sub-tab (Sensitivity
     # sweeps a param, not the dose schedule).
+    # `schedule_df_overrides` is a {df_attribute: DataFrame} dict of uploaded
+    # CSVs that REPLACE a schedule outright (as opposed to `dose_multiplier`,
+    # which scales one in place) -- e.g. a whole different vaccination
+    # rollout. `schedule_df_overrides_per_subpop` (metapop only) is a list of
+    # such dicts (or None) indexed by subpop, overriding the shared upload for
+    # subpops set independently. Both only ever set in the Scenario sub-tab,
+    # and a dose multiplier for the same schedule still applies on top of an
+    # uploaded replacement.
     def _designed_ratio(_pname, _override_val):
         # Ratio of a designed override to the catalog baseline, elementwise.
         # Lets a sampled posterior draw be scaled by the same factor the
@@ -11152,6 +11665,7 @@ def _analysis_define_scenarios(
             # parameter sets apply in full (see _apply_pset in _run_analysis).
             analysis_scenarios.append((
                 "baseline", {**ANALYSIS_SCALAR_PARAMS, **ANALYSIS_ARRAY_PARAMS}, None, set(), None, None, {},
+                None, None,
             ))
         elif _is_array:
             _pname = analysis_array_param_sel.value
@@ -11171,7 +11685,7 @@ def _analysis_define_scenarios(
                                 _sp_scale = float(_sp_vals[_sp_idx][_i])
                                 _sp_ov[_sp] = {_pname: (_base_arr * _sp_scale).tolist()}
                     _per_subpop = _make_per_subpop_list(analysis_sp_names, _sp_ov)
-                analysis_scenarios.append((f"{_pname} ×{_v:.3g}", _global_ov, _per_subpop, {_pname}, None, None, {_pname: float(_v)}))
+                analysis_scenarios.append((f"{_pname} ×{_v:.3g}", _global_ov, _per_subpop, {_pname}, None, None, {_pname: float(_v)}, None, None))
         else:
             _pname = analysis_scalar_param_sel.value
             for _i, _v in enumerate(list(dict.fromkeys(analysis_sens_sliders.value))):
@@ -11190,7 +11704,7 @@ def _analysis_define_scenarios(
                     _per_subpop = _make_per_subpop_list(analysis_sp_names, _sp_ov)
                 _ratio = _designed_ratio(_pname, _v)
                 _ratios = {_pname: _ratio} if _ratio is not None else {}
-                analysis_scenarios.append((f"{_pname}={_v:.4g}", _global_ov, _per_subpop, {_pname}, None, None, _ratios))
+                analysis_scenarios.append((f"{_pname}={_v:.4g}", _global_ov, _per_subpop, {_pname}, None, None, _ratios, None, None))
     else:
         _n = int(analysis_n_scenarios.value)
         for j in range(_n):
@@ -11289,7 +11803,21 @@ def _analysis_define_scenarios(
                         _sp_dicts.append(_sp_by_attr or None)
                     if any(_v is not None for _v in _sp_dicts):
                         _dose_mult_per_subpop = _sp_dicts
-            analysis_scenarios.append((_name, _overrides, _per_subpop, _designed, _dose_mult, _dose_mult_per_subpop, _ratios))
+            _sched_ov = None
+            _sched_ov_per_subpop = None
+            if analysis_sched_upload_enabled and analysis_sched_upload_toggle.value:
+                _sched_ov = analysis_sched_override_dfs.get(j) or None
+                _sp_sched = analysis_sched_override_dfs_per_subpop.get(j)
+                if _sp_sched and _use_subpop:
+                    _sched_ov_per_subpop = [
+                        _sp_sched.get(_si) for _si in range(len(analysis_sp_names))
+                    ]
+                    if not any(_sched_ov_per_subpop):
+                        _sched_ov_per_subpop = None
+            analysis_scenarios.append((
+                _name, _overrides, _per_subpop, _designed, _dose_mult, _dose_mult_per_subpop, _ratios,
+                _sched_ov, _sched_ov_per_subpop,
+            ))
 
     return (analysis_scenarios,)
 
@@ -11459,6 +11987,11 @@ def _run_analysis(
                                "mobility_df", "daily_vaccines_df")
                 },
                 transmission_multiplier_df=_m_df,
+                # Carry extra scheduled_exact schedules through too -- omitting
+                # this silently zeroed out any such schedule whenever fitted
+                # m(t) was in use (see the matching fix in
+                # generic_core.analysis_runner.schedule_dfs_for).
+                extra_scheduled_dfs=getattr(loaded_schedule_dfs, "extra_scheduled_dfs", None),
             )
 
     _spin = (

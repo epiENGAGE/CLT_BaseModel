@@ -358,6 +358,7 @@ def make_metapop_from_folder(
     transmission_multiplier_df=None,
     dose_mult=None, dose_mult_per_subpop=None,
     extra_dose_mult=None, extra_dose_mult_per_subpop=None,
+    schedule_df_overrides=None, schedule_df_overrides_per_subpop=None,
 ):
     """Build a multi-subpopulation ConfigDrivenMetapopModel from a metapop
     input folder (``metapop_config.json`` + per-subpop schedule/IC files).
@@ -382,7 +383,18 @@ def make_metapop_from_folder(
     ``scheduled_exact`` schedules beyond the default-named one, keyed by
     their ``df_attribute`` name. Each schedule's per-subpop CSV is expected
     at ``<folder>/<df_attribute>_<subpop>.csv`` (mirroring the default
-    ``vaccines_<subpop>.csv`` convention)."""
+    ``vaccines_<subpop>.csv`` convention).
+
+    ``schedule_df_overrides`` (optional): a ``{df_attribute: DataFrame}``
+    dict that REPLACES the folder-derived schedule for that attribute,
+    identically for every subpop -- e.g. a whole different vaccination
+    rollout uploaded in the Analysis tab, as opposed to ``dose_mult`` which
+    only scales the folder-derived schedule in place. Applied before
+    ``dose_mult``/``extra_dose_mult`` scaling, so those still apply on top of
+    the replacement. ``schedule_df_overrides_per_subpop`` (optional): a list
+    indexed by subpop order, each entry a ``{df_attribute: DataFrame}`` dict
+    (or ``None``) that overrides ``schedule_df_overrides`` for that specific
+    subpop -- mirrors ``dose_mult_per_subpop``'s precedence."""
     _A, _R = num_age_groups, num_risk_groups
     _folder = Path(folder_path)
     with open(_folder / "metapop_config.json") as _f:
@@ -417,6 +429,31 @@ def make_metapop_from_folder(
         if _vax_p.exists():
             _vax_df = pd.read_csv(_vax_p)
             _vax_df = _vax_df.loc[:, ~_vax_df.columns.str.match(r"^Unnamed")]
+
+        # Uploaded schedule REPLACEMENTS (Analysis tab), applied before
+        # dose_mult/extra_dose_mult SCALING below so scaling still lands on
+        # top of a replacement. Per-subpop entries take precedence over the
+        # shared dict, matching dose_mult_per_subpop's precedence.
+        _sp_sched_override = (
+            schedule_df_overrides_per_subpop[_si]
+            if schedule_df_overrides_per_subpop and _si < len(schedule_df_overrides_per_subpop)
+            and schedule_df_overrides_per_subpop[_si]
+            else {}
+        )
+        _shared_sched_override = schedule_df_overrides or {}
+
+        def _override_for(_attr, _base_df):
+            if _attr in _sp_sched_override:
+                return _sp_sched_override[_attr]
+            if _attr in _shared_sched_override:
+                return _shared_sched_override[_attr]
+            return _base_df
+
+        _ah_df_sp = _override_for("absolute_humidity_df", _shared_ah)
+        _cal_df = _override_for("school_work_calendar_df", _cal_df)
+        _mob_df_sp = _override_for("mobility_df", _shared_mob)
+        _vax_df = _override_for("daily_vaccines_df", _vax_df)
+
         _sp_dose_mult = dose_mult
         if dose_mult_per_subpop and _si < len(dose_mult_per_subpop) and dose_mult_per_subpop[_si] is not None:
             _sp_dose_mult = dose_mult_per_subpop[_si]
@@ -429,6 +466,7 @@ def make_metapop_from_folder(
             if _p.exists():
                 _df = pd.read_csv(_p)
                 _df = _df.loc[:, ~_df.columns.str.match(r"^Unnamed")]
+            _df = _override_for(_attr, _df)
             _attr_mult = (extra_dose_mult or {}).get(_attr)
             if (
                 extra_dose_mult_per_subpop
@@ -440,8 +478,8 @@ def make_metapop_from_folder(
             _extra_dfs[_attr] = scale_dose_schedule_df(_df, _attr_mult)
 
         _sched_dfs_for_warn = SimpleNamespace(
-            absolute_humidity_df=_shared_ah, school_work_calendar_df=_cal_df,
-            mobility_df=_shared_mob, daily_vaccines_df=_vax_df,
+            absolute_humidity_df=_ah_df_sp, school_work_calendar_df=_cal_df,
+            mobility_df=_mob_df_sp, daily_vaccines_df=_vax_df,
             transmission_multiplier_df=transmission_multiplier_df,
         )
         for _attr, _df in _extra_dfs.items():
@@ -456,8 +494,8 @@ def make_metapop_from_folder(
             absolute_humidity=0.0, mobility_value=mobility_value,
             daily_vaccines_value=daily_vaccines_value,
             num_age_groups=_A, num_risk_groups=_R,
-            absolute_humidity_df=_shared_ah, school_work_calendar_df=_cal_df,
-            mobility_df=_shared_mob, daily_vaccines_df=_vax_df,
+            absolute_humidity_df=_ah_df_sp, school_work_calendar_df=_cal_df,
+            mobility_df=_mob_df_sp, daily_vaccines_df=_vax_df,
             transmission_multiplier_df=transmission_multiplier_df,
             extra_scheduled_dfs=_extra_dfs or None,
         )

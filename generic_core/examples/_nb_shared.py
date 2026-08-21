@@ -88,7 +88,7 @@ def _imports():
 
 
 @app.cell
-def _helpers(Path, SimpleNamespace, json, np, pd):
+def _helpers(Path, SimpleNamespace, json, np, pd, io):
     from generic_core.model_factory import (
         build_scalar_array,
         build_notebook_schedules_input,
@@ -115,6 +115,17 @@ def _helpers(Path, SimpleNamespace, json, np, pd):
         _slug = _re.sub(r"[^a-z0-9]+", "_", (name or "").strip().lower()).strip("_")
         return _slug or "schedule"
 
+    def _validate_csv_df(_df, required_columns) -> tuple:
+        """Strip stray ``Unnamed:`` index columns and validate required
+        columns are present. Returns (df, error_str) — error_str is None on
+        success. Shared by the path-based and upload-based CSV loaders below
+        so both validate identically."""
+        _df = _df.loc[:, ~_df.columns.str.match(r"^Unnamed")]
+        _missing = set(required_columns) - set(_df.columns)
+        if _missing:
+            return None, f"Missing columns: {_missing}. Found: {list(_df.columns)}"
+        return _df, None
+
     def load_csv_validated(path_str: str, required_columns) -> tuple:
         """Load a CSV from path_str and validate column names.
         Returns (df, error_str) — error_str is None on success."""
@@ -127,13 +138,75 @@ def _helpers(Path, SimpleNamespace, json, np, pd):
             return None, f"Not a file: {_p}"
         try:
             _df = pd.read_csv(_p)
-            _df = _df.loc[:, ~_df.columns.str.match(r"^Unnamed")]
-            _missing = set(required_columns) - set(_df.columns)
-            if _missing:
-                return None, f"Missing columns: {_missing}. Found: {list(_df.columns)}"
-            return _df, None
+            return _validate_csv_df(_df, required_columns)
         except Exception as _exc:
             return None, f"CSV read error: {_exc}"
+
+    def load_csv_bytes_validated(contents: bytes, required_columns) -> tuple:
+        """Load a CSV from raw uploaded bytes (``mo.ui.file`` contents) and
+        validate column names. Returns (df, error_str) — error_str is None on
+        success. Mirrors ``load_csv_validated`` exactly, but for an uploaded
+        file's in-memory contents rather than a path on disk."""
+        if not contents:
+            return None, "No file uploaded"
+        try:
+            _df = pd.read_csv(io.BytesIO(contents))
+            return _validate_csv_df(_df, required_columns)
+        except Exception as _exc:
+            return None, f"CSV read error: {_exc}"
+
+    def schedule_upload_specs(config_dict) -> list:
+        """Every schedule in ``config_dict["schedules"]`` that can be replaced
+        by an uploaded CSV, as ``(display_name, df_attribute,
+        required_columns)`` tuples -- one per distinct ``df_attribute`` (two
+        schedules sharing an attribute, e.g. the school/work calendar shared
+        with a contact-matrix schedule, are only listed once).
+        ``display_name`` is usually just the schedule's own config name, but
+        for ``contact_matrix`` it's always "School/work calendar" -- the
+        schedule's own name (e.g. "flu_contact_matrix") otherwise gives no
+        hint that selecting it uploads the CALENDAR csv (is_school_day /
+        is_work_day), not the (static, non-schedule) contact matrices
+        themselves. Used to build the Analysis tab's per-scenario
+        schedule-upload controls."""
+        _seen_attrs = set()
+        _specs = []
+        for _sc in config_dict.get("schedules", []) or []:
+            _template = (_sc or {}).get("schedule_template")
+            _cfg = (_sc or {}).get("schedule_config", {}) or {}
+            _name = (_sc or {}).get("name", "")
+            _display_name = _name
+            if _template == "timeseries_lookup":
+                _attr = _cfg.get("df_attribute")
+                _cols = ["date", _cfg.get("value_column", "value")]
+            elif _template == "contact_matrix":
+                _attr = _cfg.get("school_work_day_df_attribute")
+                _cols = ["date", "is_school_day", "is_work_day"]
+                _display_name = "School/work calendar"
+            elif _template == "vaccine_schedule":
+                _attr = _cfg.get("df_attribute")
+                _cols = ["date", "daily_vaccines"]
+            elif _template == "mobility":
+                _attr = _cfg.get("df_attribute")
+                _cols = ["mobility_modifier"]
+            else:
+                continue
+            if not _attr or _attr in _seen_attrs:
+                continue
+            _seen_attrs.add(_attr)
+            _specs.append((_display_name, _attr, _cols))
+        # Disambiguate in the rare case of more than one distinct
+        # school/work calendar schedule (e.g. separate school vs. workplace
+        # contact-matrix schedules) -- the plain "School/work calendar" label
+        # is only safe when there's just one, since analysis_sched_upload_sel
+        # keys its options by this display name and a collision would
+        # silently drop one option.
+        _calendar_count = sum(1 for _dn, _a, _c in _specs if _dn == "School/work calendar")
+        if _calendar_count > 1:
+            _specs = [
+                (f"School/work calendar ({_a})" if _dn == "School/work calendar" else _dn, _a, _c)
+                for _dn, _a, _c in _specs
+            ]
+        return _specs
 
     def load_contact_matrix_csv(path_str: str, expected_size: int) -> tuple:
         """Load an A×A contact matrix CSV (plain floats).
@@ -306,8 +379,8 @@ def _helpers(Path, SimpleNamespace, json, np, pd):
         return _new_slots, _new_data
 
     def scenario_state_group(key: str) -> str:
-        """Which of the Analysis Scenario sub-tab's four split mo.state
-        dicts (see _nb_analysis.py's _analysis_scenario_state and its four
+        """Which of the Analysis Scenario sub-tab's five split mo.state
+        dicts (see _nb_analysis.py's _analysis_scenario_state and its
         *_controls cells) a given scenario-config key belongs to. Used to
         partition an uploaded/imported flat scenario_config.json across
         them (see partition_scenario_state, and _nb_import.py's shared
@@ -325,13 +398,17 @@ def _helpers(Path, SimpleNamespace, json, np, pd):
             "array_subpop_sel::", "array_subpop::",
         )):
             return "subpop"
+        if key in ("sched_toggle", "sched_sel", "sched_per_subpop_toggle") or key.startswith(
+            ("sched::", "sched_subpop::")
+        ):
+            return "sched"
         return "controls"  # unrecognized key: harmless default bucket
 
     def partition_scenario_state(flat: dict) -> dict:
         """Split a flat scenario-config dict (the shape scenario_config.json
-        is saved/restored in) into the four group dicts consumed by
+        is saved/restored in) into the five group dicts consumed by
         _nb_analysis.py's per-cell scenario state."""
-        _out = {"controls": {}, "agescale": {}, "dose": {}, "subpop": {}}
+        _out = {"controls": {}, "agescale": {}, "dose": {}, "subpop": {}, "sched": {}}
         for _k, _v in (flat or {}).items():
             _out[scenario_state_group(_k)][_k] = _v
         return _out
@@ -490,6 +567,8 @@ def _helpers(Path, SimpleNamespace, json, np, pd):
         rel_inf_param_name,
         slugify_schedule_name,
         load_csv_validated,
+        load_csv_bytes_validated,
+        schedule_upload_specs,
         load_contact_matrix_csv,
         load_config_json,
         resolve_input_path,
