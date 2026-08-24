@@ -27,3 +27,7 @@ MA_vax_standalone/counterfactual_tables_det_age_ihr_scale/
 # build_report_assets.py's posterior-band cache: regenerated on demand if
 # absent (see _cached_posterior_scenario_bands), ~8.5 MB each.
 generic_core/examples/MA_vax/report_assets/*.npz
+generic_core/examples/MA_vax/presentation_2026_08_24/
+generic_core/examples/MA_vax/MA_scenario_config_VE_hosp_only.json
+generic_core/examples/MA_vax/analysis/VE hosp expected vs simulated.xlsx
+.tmp/

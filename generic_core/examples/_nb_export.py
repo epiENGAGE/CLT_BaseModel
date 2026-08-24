@@ -53,6 +53,7 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
     import numpy as np
     import pandas as pd
     import sqlite3
+    from datetime import datetime
     from pathlib import Path
     from types import SimpleNamespace
     from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -724,15 +725,30 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
                 for (_rep, _h, _h_full, _kinds, _psi) in sorted(all_results[_scen], key=lambda _r: _r[0])
             ]
 
+        # Every run of this script writes a FRESH database, never appends to
+        # one already on disk: two runs sharing a file would both write
+        # rep=0, rep=1, ... under the same scenario names, and a reader
+        # grouping by (scenario, rep, day) would silently blend the two
+        # runs' rows together into nonsense (this bit a real user: a stale
+        # results.db from an earlier, differently-configured run stayed on
+        # disk and got averaged in with a later correct run). So results.db
+        # is used only while that exact name is free; once it exists, a
+        # timestamped results_{timestamp}.db is used instead (with a
+        # numeric suffix in the unlikely case two runs start in the same
+        # second), so nothing already on disk is ever appended to.
         _db = OUTPUT_DIR / "results.db"
+        if _db.exists():
+            _stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            _db = OUTPUT_DIR / f"results_{_stamp}.db"
+            _suffix = 1
+            while _db.exists():
+                _db = OUTPUT_DIR / f"results_{_stamp}_{_suffix}.db"
+                _suffix += 1
+            print(f"{OUTPUT_DIR / 'results.db'} already exists -- writing to {_db} instead")
         _con = sqlite3.connect(_db)
-        # Unlike a from-scratch batch script, this results.db is appended to
-        # across export runs (see the column check below), so a full
-        # durability trade-off (synchronous=OFF) risks corrupting rows from
-        # earlier runs too, not just this one. WAL + synchronous=NORMAL is
-        # the standard safer middle ground -- it skips most of the per-write
-        # fsync cost (the dominant cost for stochastic runs with hundreds of
-        # replicates x days x age/risk groups) while staying safe against an
+        # WAL + synchronous=NORMAL: skips most of the per-write fsync cost
+        # (the dominant cost for stochastic runs with hundreds of replicates
+        # x days x age/risk groups) while staying safe against an
         # application crash; only a concurrent OS crash/power loss could
         # still corrupt data.
         _con.execute("PRAGMA journal_mode = WAL")
@@ -741,9 +757,11 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
         # `compartment` keeps its name (so existing queries still work) but now holds
         # transition-variable names too; `kind` distinguishes them. `param_set` is the
         # index into the sampled parameter sets (NULL when parameter uncertainty is
-        # off), so replicates can be grouped by draw. A results.db from an older
-        # export lacks these columns, so fail loudly rather than silently dropping the
-        # new rows or corrupting the old table.
+        # off), so replicates can be grouped by draw. This table only exists already
+        # if _db somehow predates this run (e.g. a hand-picked OUTPUT_DIR reusing an
+        # old file) -- guard against a stale schema from an older version of this
+        # script rather than silently dropping the new rows or corrupting the old
+        # table.
         _existing = _cur.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='results'"
         ).fetchone()
@@ -858,8 +876,10 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
             "param_set_indices": list(RUN_SCHEDULE),
         }
         _cur.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)")
-        # This results.db is appended to across export runs, so replace rather
-        # than insert -- the newest run's settings describe the file.
+        # OR REPLACE rather than plain INSERT since `key` is a PRIMARY KEY and
+        # this executemany runs once per key -- an INSERT would only matter on
+        # a pre-existing db (see the schema guard above), where it would
+        # otherwise fail on the second key with a UNIQUE constraint error.
         _cur.executemany(
             "INSERT OR REPLACE INTO meta VALUES (?,?)",
             [(_k, json.dumps(_v)) for _k, _v in _meta.items()],

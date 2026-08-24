@@ -2005,8 +2005,9 @@ def _fitting_export_display(fit_run_config, mo, main_tab, json):
             daily_vaccines_value=_rk["daily_vaccines_value"],
         )
 
-        Path(OUTPUT_FILE).write_text(json.dumps(fit_result_to_dict(result), indent=2))
-        print(f"Wrote {OUTPUT_FILE}")
+        _out_path = _HERE / OUTPUT_FILE
+        _out_path.write_text(json.dumps(fit_result_to_dict(result), indent=2))
+        print(f"Wrote {_out_path}")
 
 
     if __name__ == "__main__":

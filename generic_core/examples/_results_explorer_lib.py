@@ -1415,6 +1415,37 @@ def image_kind() -> str:
     return "png"
 
 
+#  Charts are built with width="container" (see e.g. _build_timeseries) so
+#  they fill whatever card marimo puts them in on screen. vl-convert has no
+#  such container to measure, and Vega-Lite's fallback for an unresolved
+#  "container" width is a few hundred px -- so a downloaded PNG comes out far
+#  narrower than what is on screen unless that width is pinned to a concrete
+#  number first.
+_DOWNLOAD_WIDTH = 900
+
+
+def _pin_container_width(spec: dict, width: int) -> None:
+    """Replace ``"width": "container"`` (and matching ``"height"``) in-place.
+
+    Recurses into faceted/concatenated specs (``vconcat``/``hconcat``/``layer``/
+    ``spec``), since a facet's inner width lives one level down from the root.
+    Height is left alone unless it is itself "container" -- charts here always
+    give it a concrete number, only width is ever "container".
+    """
+    if spec.get("width") == "container":
+        spec["width"] = width
+    if spec.get("height") == "container":
+        spec["height"] = width
+    for _key in ("spec", "layer", "vconcat", "hconcat", "concat"):
+        _child = spec.get(_key)
+        if isinstance(_child, dict):
+            _pin_container_width(_child, width)
+        elif isinstance(_child, list):
+            for _c in _child:
+                if isinstance(_c, dict):
+                    _pin_container_width(_c, width)
+
+
 def chart_image(chart: AltairChart) -> tuple[bytes, str, str]:
     """Render ``chart`` for download: ``(payload, extension, mimetype)``.
 
@@ -1422,7 +1453,9 @@ def chart_image(chart: AltairChart) -> tuple[bytes, str, str]:
     conversion takes appreciable time per chart, and the notebook re-renders
     every chart on every widget change.
     """
-    spec = chart.to_json()  # type: ignore[attr-defined]
+    spec = json.loads(chart.to_json())  # type: ignore[attr-defined]
+    _pin_container_width(spec, _DOWNLOAD_WIDTH)
+    spec = json.dumps(spec)
     if image_kind() == "png":
         import vl_convert as vlc
 
