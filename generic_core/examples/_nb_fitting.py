@@ -2271,8 +2271,11 @@ def _fitting_results_display(
             return f"{v:.6g}"
         return str(v)
 
-    # Loss / progress plot
-    _fig, _axes = plt.subplots(1, 2, figsize=(14, 4))
+    # Loss / progress plot. Height grows with the number of fitted parameters
+    # so the results table (which can have dozens of rows) doesn't overflow
+    # the axes and collide with the "Best-fit parameters" title above it.
+    _fig_h = max(4.0, 0.35 * len(_bp) + 1.5) if _bp else 4.0
+    _fig, _axes = plt.subplots(1, 2, figsize=(14, _fig_h))
     if _method == "ar":
         _axes[0].plot(_lc, linewidth=1.5, label="Weighted R²")
         _r2_thr = fit_result.r2_threshold
@@ -2356,11 +2359,11 @@ def _fitting_results_display(
             _col_labels = ["Parameter", "Best-fit value"]
         _tbl = _axes[1].table(
             cellText=_rows, colLabels=_col_labels,
-            loc="center", cellLoc="left",
+            loc="upper center", cellLoc="left",
         )
         _tbl.auto_set_font_size(True)
         _tbl.scale(1.2, 1.5)
-        _axes[1].set_title("Best-fit parameters")
+        _axes[1].set_title("Best-fit parameters", pad=20)
     plt.tight_layout()
 
     _params_md = "\n".join(f"- `{k}` = **{_fmt_val(v)}**" for k, v in _bp.items())
