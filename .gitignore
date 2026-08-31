@@ -9,6 +9,9 @@ generic_core/examples/__pycache__/
 flu_instances/examples/profiling_austin_2pop.py
 flu_instances/examples/profiling_findings.md
 *.db
+# Parquet directories from convert_results_to_parquet.py -- derived from a
+# results.db, regenerate on demand, never meant to be committed.
+*_parquet/
 flu_instances/examples/__marimo__/
 flu_instances/examples/__pycache__/
 flu_instances/examples/outputs/

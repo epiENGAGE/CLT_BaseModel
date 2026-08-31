@@ -49,10 +49,8 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
     import os
     import json
     import copy
-    import itertools
     import numpy as np
     import pandas as pd
-    import sqlite3
     from datetime import datetime
     from pathlib import Path
     from types import SimpleNamespace
@@ -134,12 +132,17 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
     # ---- Setup ----
     _HERE = Path(__file__).parent
     sys.path.insert(0, str(_HERE.parent.parent))
+    # _results_explorer_lib.py lives in generic_core/examples/, not under the
+    # generic_core package itself, so it needs its own sys.path entry.
+    sys.path.insert(0, str(_HERE.parent.parent / "generic_core" / "examples"))
 
     # Write output next to this script, not into whatever the current working
     # directory happens to be. An absolute OUTPUT_DIR is used as-is.
     if not OUTPUT_DIR.is_absolute():
         OUTPUT_DIR = _HERE / OUTPUT_DIR
 
+    import duckdb
+    import _results_explorer_lib as rex
     import clt_toolkit as clt
     import flu_core as flu
     from generic_core.config_parser import parse_model_config_from_dict
@@ -717,91 +720,58 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
 
         # Pool completion order is nondeterministic; sort each scenario's
         # replicates back into run-schedule order so the `rep` column
-        # written to results.db below matches what a serial run would have
-        # produced.
+        # written to results_parquet/ below matches what a serial run would
+        # have produced.
         for _scen in all_results:
             all_results[_scen] = [
                 (_h, _h_full, _kinds, _psi)
                 for (_rep, _h, _h_full, _kinds, _psi) in sorted(all_results[_scen], key=lambda _r: _r[0])
             ]
 
-        # Every run of this script writes a FRESH database, never appends to
-        # one already on disk: two runs sharing a file would both write
-        # rep=0, rep=1, ... under the same scenario names, and a reader
-        # grouping by (scenario, rep, day) would silently blend the two
-        # runs' rows together into nonsense (this bit a real user: a stale
-        # results.db from an earlier, differently-configured run stayed on
-        # disk and got averaged in with a later correct run). So results.db
-        # is used only while that exact name is free; once it exists, a
-        # timestamped results_{timestamp}.db is used instead (with a
-        # numeric suffix in the unlikely case two runs start in the same
-        # second), so nothing already on disk is ever appended to.
-        _db = OUTPUT_DIR / "results.db"
-        if _db.exists():
+        # Every run of this script writes a FRESH results directory, never
+        # appends to one already on disk: two runs sharing one would both
+        # write rep=0, rep=1, ... under the same scenario names, and a
+        # reader grouping by (scenario, rep, day) would silently blend the
+        # two runs' rows together into nonsense (this bit a real user: a
+        # stale results.db from an earlier, differently-configured run
+        # stayed on disk and got averaged in with a later correct run). So
+        # results_parquet/ is used only while that exact name is free; once
+        # it exists, a timestamped results_{timestamp}_parquet/ is used
+        # instead (with a numeric suffix in the unlikely case two runs start
+        # in the same second), so nothing already on disk is ever appended to.
+        _out_dir = OUTPUT_DIR / "results_parquet"
+        if _out_dir.exists():
             _stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            _db = OUTPUT_DIR / f"results_{_stamp}.db"
+            _out_dir = OUTPUT_DIR / f"results_{_stamp}_parquet"
             _suffix = 1
-            while _db.exists():
-                _db = OUTPUT_DIR / f"results_{_stamp}_{_suffix}.db"
+            while _out_dir.exists():
+                _out_dir = OUTPUT_DIR / f"results_{_stamp}_{_suffix}_parquet"
                 _suffix += 1
-            print(f"{OUTPUT_DIR / 'results.db'} already exists -- writing to {_db} instead")
-        _con = sqlite3.connect(_db)
-        # WAL + synchronous=NORMAL: skips most of the per-write fsync cost
-        # (the dominant cost for stochastic runs with hundreds of replicates
-        # x days x age/risk groups) while staying safe against an
-        # application crash; only a concurrent OS crash/power loss could
-        # still corrupt data.
-        _con.execute("PRAGMA journal_mode = WAL")
-        _con.execute("PRAGMA synchronous = NORMAL")
-        _cur = _con.cursor()
-        # `compartment` keeps its name (so existing queries still work) but now holds
-        # transition-variable names too; `kind` distinguishes them. `param_set` is the
-        # index into the sampled parameter sets (NULL when parameter uncertainty is
-        # off), so replicates can be grouped by draw. This table only exists already
-        # if _db somehow predates this run (e.g. a hand-picked OUTPUT_DIR reusing an
-        # old file) -- guard against a stale schema from an older version of this
-        # script rather than silently dropping the new rows or corrupting the old
-        # table.
-        _existing = _cur.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='results'"
-        ).fetchone()
-        if _existing:
-            _cols = {_r[1] for _r in _cur.execute("PRAGMA table_info(results)")}
-            _missing = {"kind", "param_set"} - _cols
-            if _missing:
-                _con.close()
-                raise SystemExit(
-                    f"{_db} was written by an older version of this script (missing "
-                    f"column(s): {sorted(_missing)}). Delete or rename it and re-run."
-                )
-        _cur.execute(
-            "CREATE TABLE IF NOT EXISTS results "
-            "(scenario TEXT, rep INTEGER, param_set INTEGER, compartment TEXT, kind TEXT, "
-            "day INTEGER, value REAL)"
-        )
-        # Same shape as `results`, plus `subpop`/`age_group`/`risk_group` columns
-        # (age_group/risk_group are 0-based indices into NUM_AGE_GROUPS/
-        # NUM_RISK_GROUPS) -- kept as a separate table rather than adding
-        # nullable columns to `results`, so `results` alone still answers
-        # population-aggregate queries without a GROUP BY. Single-population,
-        # single-risk-group models (the common case) just get one subpop name
-        # and risk_group=0 throughout -- still queryable the same way, just with
-        # nothing to GROUP BY away.
-        _cur.execute(
-            "CREATE TABLE IF NOT EXISTS results_full "
-            "(scenario TEXT, rep INTEGER, param_set INTEGER, compartment TEXT, kind TEXT, "
-            "subpop TEXT, age_group INTEGER, risk_group INTEGER, day INTEGER, value REAL)"
-        )
-        print(f"Writing results for {len(all_results)} scenario(s) to {_db}")
+            print(f"{OUTPUT_DIR / 'results_parquet'} already exists -- writing to {_out_dir} instead")
+        # Staged in a native DuckDB table first, then exported to Parquet in
+        # one shot at the end (rex.write_results_parquet) -- DuckDB is a
+        # vectorized engine tuned for bulk columnar loads, not row-by-row
+        # inserts (a plain executemany measured ~10s per 100k rows), so rows
+        # are appended per array as a small DataFrame via
+        # `con.append(table, df)`, which does the same insert as one bulk
+        # write. The staging file is removed once the Parquet export below
+        # succeeds; if the process dies mid-run, its presence marks the
+        # Parquet directory as incomplete rather than silently half-written.
+        _stage_path = OUTPUT_DIR / f"{_out_dir.name}.stage.duckdb"
+        _stage_path.unlink(missing_ok=True)
+        _con = duckdb.connect(str(_stage_path))
+        rex.create_results_tables(_con)
+        print(f"Writing results for {len(all_results)} scenario(s) to {_out_dir}")
         for _si, (_scen, _reps_data) in enumerate(all_results.items(), start=1):
             _n_reps = len(_reps_data)
             for _ri, (_h, _h_full, _kinds, _psi) in enumerate(_reps_data):
                 for _c, _arr in _h.items():
-                    _cur.executemany(
-                        "INSERT INTO results VALUES (?,?,?,?,?,?,?)",
-                        [(_scen, _ri, _psi, _c, _kinds[_c], _d + 1, float(_v))
-                         for _d, _v in enumerate(_arr)],
-                    )
+                    _con.append("results", pd.DataFrame({
+                        "scenario": _scen, "rep": _ri, "param_set": _psi,
+                        "compartment": _c, "kind": _kinds[_c],
+                        "day": np.arange(1, len(_arr) + 1),
+                        "value": np.asarray(_arr, dtype=float),
+                    }))
                 for _c, _sp_map in _h_full.items():
                     for _spname, _arr_full in _sp_map.items():
                         # Vectorized index construction (numpy) instead of a
@@ -810,32 +780,30 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
                         # runs into the hundreds of thousands of rows across
                         # many stochastic replicates.
                         _d_idx, _a_idx, _r_idx = np.indices(_arr_full.shape)
-                        _cur.executemany(
-                            "INSERT INTO results_full VALUES (?,?,?,?,?,?,?,?,?,?)",
-                            zip(
-                                itertools.repeat(_scen), itertools.repeat(_ri), itertools.repeat(_psi),
-                                itertools.repeat(_c), itertools.repeat(_kinds[_c]), itertools.repeat(_spname),
-                                _a_idx.ravel().tolist(), _r_idx.ravel().tolist(),
-                                (_d_idx.ravel() + 1).tolist(), _arr_full.ravel().astype(float).tolist(),
-                            ),
-                        )
+                        _con.append("results_full", pd.DataFrame({
+                            "scenario": _scen, "rep": _ri, "param_set": _psi,
+                            "compartment": _c, "kind": _kinds[_c], "subpop": _spname,
+                            "age_group": _a_idx.ravel(), "risk_group": _r_idx.ravel(),
+                            "day": _d_idx.ravel() + 1,
+                            "value": _arr_full.ravel().astype(float),
+                        }))
                 # Progress within a scenario's replicates, so a long
                 # stochastic run (hundreds of reps) doesn't look stuck
                 # between per-scenario lines below.
                 if _n_reps > 20 and (_ri + 1) % 20 == 0:
                     print(f"  [{_si}/{len(all_results)}] {_scen}: wrote {_ri + 1}/{_n_reps} replicate(s)")
-            print(f"[{_si}/{len(all_results)}] {_scen}: wrote {_n_reps} replicate(s) to {_db}")
+            print(f"[{_si}/{len(all_results)}] {_scen}: wrote {_n_reps} replicate(s)")
         # Run-level metadata the result rows themselves cannot carry: they
         # only hold day indices and 0-based age/risk indices, so without this
         # a reader (e.g. results_explorer_notebook.py) cannot plot real dates
         # or label age bands. It also saves the reader from recovering the
         # scenario/subpop lists with SELECT DISTINCT, which on a large
-        # results.db means a full table scan -- measured at 7s over a 73M-row
+        # results set means a full scan -- measured at 7s over a 73M-row
         # `results` and 49s over its `results_full`, just to list values that
-        # were known here at write time.
+        # were known here at write time (back when this was SQLite).
         #
         # Key/value JSON so keys can be added later without migrating the
-        # schema. Readers must tolerate the table being absent (files written
+        # schema. Readers must tolerate meta.json being absent (files written
         # before it existed) and individual keys being missing.
         _subpop_names = sorted({
             _spname
@@ -875,32 +843,11 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
             "n_reps": len(RUN_SCHEDULE),
             "param_set_indices": list(RUN_SCHEDULE),
         }
-        _cur.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)")
-        # OR REPLACE rather than plain INSERT since `key` is a PRIMARY KEY and
-        # this executemany runs once per key -- an INSERT would only matter on
-        # a pre-existing db (see the schema guard above), where it would
-        # otherwise fail on the second key with a UNIQUE constraint error.
-        _cur.executemany(
-            "INSERT OR REPLACE INTO meta VALUES (?,?)",
-            [(_k, json.dumps(_v)) for _k, _v in _meta.items()],
-        )
-
-        # Downstream table-building scripts filter on (scenario, compartment)
-        # for every table they build, often re-querying the same scenario
-        # several times -- without this index each of those is a full
-        # sequential scan, which gets very slow once replicates/parameter
-        # sets push `results_full` into the hundreds of millions of rows.
-        _cur.execute(
-            "CREATE INDEX IF NOT EXISTS idx_results_full_scenario_compartment "
-            "ON results_full (scenario, compartment)"
-        )
-        _cur.execute(
-            "CREATE INDEX IF NOT EXISTS idx_results_scenario_compartment "
-            "ON results (scenario, compartment)"
-        )
-        _con.commit()
+        print(f"Writing Parquet to {_out_dir}")
+        rex.write_results_parquet(_con, _out_dir, meta=_meta)
         _con.close()
-        print(f"Results saved to {_db}")
+        _stage_path.unlink(missing_ok=True)
+        print(f"Results saved to {_out_dir}")
 """
 
     _scen_lines = [

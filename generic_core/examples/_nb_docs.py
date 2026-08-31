@@ -167,7 +167,7 @@ or in a batch job, and download all configuration files.
 
 - **`run_simulation.py`** — A self-contained script that loads `model_config.json` and
   optionally `fitted_params.json`, builds the model, runs each entry in a `SCENARIOS`
-  dict, and saves results to a SQLite database (`simulation_output/results.db`).
+  dict, and saves results as partitioned Parquet (`simulation_output/results_parquet/`).
 
   Edit the top of the script to configure:
   - `NUM_DAYS`, `NUM_REPS`, `STOCHASTIC`, `TIMESTEPS_PER_DAY`, `START_DATE`
@@ -184,8 +184,10 @@ or in a batch job, and download all configuration files.
 python run_simulation.py
 ```
 
-Results are stored in `simulation_output/results.db` as a table with columns
-`scenario`, `rep`, `compartment`, `day`, `value`.
+Results are stored in `simulation_output/results_parquet/` as Hive-partitioned
+Parquet with columns `scenario`, `rep`, `compartment`, `day`, `value` (plus
+`kind`/`param_set`), partitioned by `scenario` and `compartment` — the two
+columns every downstream query filters on first.
 
 ---
 
@@ -237,17 +239,18 @@ Click **Run analysis**.
 
 Summary statistics (median + 95% interval per scenario/compartment) are
 auto-saved to `{output_dir}/analysis_results.json` after every run. Click
-**Export full results (SQLite)** to additionally write the full per-
+**Export full results (Parquet)** to additionally write the full per-
 subpopulation/age/risk/replicate detail to
-`{output_dir}/analysis_results_full.db` — slower and much larger, so it's
-on demand rather than automatic.
+`{output_dir}/analysis_results_full_parquet/` — slower and much larger, so
+it's on demand rather than automatic.
 
-That `.db` uses the same `results`/`results_full` schema as the `results.db`
-written by the Export tab's `run_simulation.py`, plus a `meta` table holding
-the run settings (start date, age-group labels, scenario order). Either file
-opens directly in the **Results Explorer** notebook
-(`generic_core/examples/results_explorer_notebook.py`), which queries it in
-place with DuckDB — no loading step, so multi-GB result sets stay usable.
+That directory uses the same `results`/`results_full` schema as the
+`results_parquet/` directory written by the Export tab's `run_simulation.py`,
+plus a `meta.json` holding the run settings (start date, age-group labels,
+scenario order). Either one opens directly in the **Results Explorer**
+notebook (`generic_core/examples/results_explorer_notebook.py`), which
+queries it in place with DuckDB — no loading step, so multi-GB result sets
+stay usable.
 
 ---
 

@@ -89,12 +89,20 @@ def _imports():
 
     import numpy as np
     import pandas as pd
+    import duckdb
     import matplotlib.pyplot as plt
     import marimo as mo
     import clt_toolkit as clt
     import flu_core as flu
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    # _results_explorer_lib.py lives next to this file (generic_core/examples),
+    # not under the generic_core package, so it needs its own sys.path entry --
+    # imported here (rather than inline in the Analysis/Export cells that use
+    # it) so both share one loaded module instead of importing it twice under
+    # different names.
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import _results_explorer_lib as rex
 
     import generic_core as gc
     from generic_core import contact_matrix_fetch as cmf
@@ -138,7 +146,7 @@ def _imports():
 
     return (
         Path, SimpleNamespace, namedtuple, copy, re, sqlite3, datetime,
-        clt, flu, gc, cmf, io, json, mo, np, pd, plt,
+        clt, flu, gc, cmf, io, json, mo, np, pd, plt, duckdb, rex,
         ConfigDrivenMetapopModel, ConfigDrivenSubpopModel,
         build_state_from_config, build_params_from_config,
         parse_model_config_from_dict,
@@ -8664,10 +8672,8 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
     import os
     import json
     import copy
-    import itertools
     import numpy as np
     import pandas as pd
-    import sqlite3
     from datetime import datetime
     from pathlib import Path
     from types import SimpleNamespace
@@ -8749,12 +8755,17 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
     # ---- Setup ----
     _HERE = Path(__file__).parent
     sys.path.insert(0, str(_HERE.parent.parent))
+    # _results_explorer_lib.py lives in generic_core/examples/, not under the
+    # generic_core package itself, so it needs its own sys.path entry.
+    sys.path.insert(0, str(_HERE.parent.parent / "generic_core" / "examples"))
 
     # Write output next to this script, not into whatever the current working
     # directory happens to be. An absolute OUTPUT_DIR is used as-is.
     if not OUTPUT_DIR.is_absolute():
         OUTPUT_DIR = _HERE / OUTPUT_DIR
 
+    import duckdb
+    import _results_explorer_lib as rex
     import clt_toolkit as clt
     import flu_core as flu
     from generic_core.config_parser import parse_model_config_from_dict
@@ -9332,91 +9343,58 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
 
         # Pool completion order is nondeterministic; sort each scenario's
         # replicates back into run-schedule order so the `rep` column
-        # written to results.db below matches what a serial run would have
-        # produced.
+        # written to results_parquet/ below matches what a serial run would
+        # have produced.
         for _scen in all_results:
             all_results[_scen] = [
                 (_h, _h_full, _kinds, _psi)
                 for (_rep, _h, _h_full, _kinds, _psi) in sorted(all_results[_scen], key=lambda _r: _r[0])
             ]
 
-        # Every run of this script writes a FRESH database, never appends to
-        # one already on disk: two runs sharing a file would both write
-        # rep=0, rep=1, ... under the same scenario names, and a reader
-        # grouping by (scenario, rep, day) would silently blend the two
-        # runs' rows together into nonsense (this bit a real user: a stale
-        # results.db from an earlier, differently-configured run stayed on
-        # disk and got averaged in with a later correct run). So results.db
-        # is used only while that exact name is free; once it exists, a
-        # timestamped results_{timestamp}.db is used instead (with a
-        # numeric suffix in the unlikely case two runs start in the same
-        # second), so nothing already on disk is ever appended to.
-        _db = OUTPUT_DIR / "results.db"
-        if _db.exists():
+        # Every run of this script writes a FRESH results directory, never
+        # appends to one already on disk: two runs sharing one would both
+        # write rep=0, rep=1, ... under the same scenario names, and a
+        # reader grouping by (scenario, rep, day) would silently blend the
+        # two runs' rows together into nonsense (this bit a real user: a
+        # stale results.db from an earlier, differently-configured run
+        # stayed on disk and got averaged in with a later correct run). So
+        # results_parquet/ is used only while that exact name is free; once
+        # it exists, a timestamped results_{timestamp}_parquet/ is used
+        # instead (with a numeric suffix in the unlikely case two runs start
+        # in the same second), so nothing already on disk is ever appended to.
+        _out_dir = OUTPUT_DIR / "results_parquet"
+        if _out_dir.exists():
             _stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            _db = OUTPUT_DIR / f"results_{_stamp}.db"
+            _out_dir = OUTPUT_DIR / f"results_{_stamp}_parquet"
             _suffix = 1
-            while _db.exists():
-                _db = OUTPUT_DIR / f"results_{_stamp}_{_suffix}.db"
+            while _out_dir.exists():
+                _out_dir = OUTPUT_DIR / f"results_{_stamp}_{_suffix}_parquet"
                 _suffix += 1
-            print(f"{OUTPUT_DIR / 'results.db'} already exists -- writing to {_db} instead")
-        _con = sqlite3.connect(_db)
-        # WAL + synchronous=NORMAL: skips most of the per-write fsync cost
-        # (the dominant cost for stochastic runs with hundreds of replicates
-        # x days x age/risk groups) while staying safe against an
-        # application crash; only a concurrent OS crash/power loss could
-        # still corrupt data.
-        _con.execute("PRAGMA journal_mode = WAL")
-        _con.execute("PRAGMA synchronous = NORMAL")
-        _cur = _con.cursor()
-        # `compartment` keeps its name (so existing queries still work) but now holds
-        # transition-variable names too; `kind` distinguishes them. `param_set` is the
-        # index into the sampled parameter sets (NULL when parameter uncertainty is
-        # off), so replicates can be grouped by draw. This table only exists already
-        # if _db somehow predates this run (e.g. a hand-picked OUTPUT_DIR reusing an
-        # old file) -- guard against a stale schema from an older version of this
-        # script rather than silently dropping the new rows or corrupting the old
-        # table.
-        _existing = _cur.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='results'"
-        ).fetchone()
-        if _existing:
-            _cols = {_r[1] for _r in _cur.execute("PRAGMA table_info(results)")}
-            _missing = {"kind", "param_set"} - _cols
-            if _missing:
-                _con.close()
-                raise SystemExit(
-                    f"{_db} was written by an older version of this script (missing "
-                    f"column(s): {sorted(_missing)}). Delete or rename it and re-run."
-                )
-        _cur.execute(
-            "CREATE TABLE IF NOT EXISTS results "
-            "(scenario TEXT, rep INTEGER, param_set INTEGER, compartment TEXT, kind TEXT, "
-            "day INTEGER, value REAL)"
-        )
-        # Same shape as `results`, plus `subpop`/`age_group`/`risk_group` columns
-        # (age_group/risk_group are 0-based indices into NUM_AGE_GROUPS/
-        # NUM_RISK_GROUPS) -- kept as a separate table rather than adding
-        # nullable columns to `results`, so `results` alone still answers
-        # population-aggregate queries without a GROUP BY. Single-population,
-        # single-risk-group models (the common case) just get one subpop name
-        # and risk_group=0 throughout -- still queryable the same way, just with
-        # nothing to GROUP BY away.
-        _cur.execute(
-            "CREATE TABLE IF NOT EXISTS results_full "
-            "(scenario TEXT, rep INTEGER, param_set INTEGER, compartment TEXT, kind TEXT, "
-            "subpop TEXT, age_group INTEGER, risk_group INTEGER, day INTEGER, value REAL)"
-        )
-        print(f"Writing results for {len(all_results)} scenario(s) to {_db}")
+            print(f"{OUTPUT_DIR / 'results_parquet'} already exists -- writing to {_out_dir} instead")
+        # Staged in a native DuckDB table first, then exported to Parquet in
+        # one shot at the end (rex.write_results_parquet) -- DuckDB is a
+        # vectorized engine tuned for bulk columnar loads, not row-by-row
+        # inserts (a plain executemany measured ~10s per 100k rows), so rows
+        # are appended per array as a small DataFrame via
+        # `con.append(table, df)`, which does the same insert as one bulk
+        # write. The staging file is removed once the Parquet export below
+        # succeeds; if the process dies mid-run, its presence marks the
+        # Parquet directory as incomplete rather than silently half-written.
+        _stage_path = OUTPUT_DIR / f"{_out_dir.name}.stage.duckdb"
+        _stage_path.unlink(missing_ok=True)
+        _con = duckdb.connect(str(_stage_path))
+        rex.create_results_tables(_con)
+        print(f"Writing results for {len(all_results)} scenario(s) to {_out_dir}")
         for _si, (_scen, _reps_data) in enumerate(all_results.items(), start=1):
             _n_reps = len(_reps_data)
             for _ri, (_h, _h_full, _kinds, _psi) in enumerate(_reps_data):
                 for _c, _arr in _h.items():
-                    _cur.executemany(
-                        "INSERT INTO results VALUES (?,?,?,?,?,?,?)",
-                        [(_scen, _ri, _psi, _c, _kinds[_c], _d + 1, float(_v))
-                         for _d, _v in enumerate(_arr)],
-                    )
+                    _con.append("results", pd.DataFrame({
+                        "scenario": _scen, "rep": _ri, "param_set": _psi,
+                        "compartment": _c, "kind": _kinds[_c],
+                        "day": np.arange(1, len(_arr) + 1),
+                        "value": np.asarray(_arr, dtype=float),
+                    }))
                 for _c, _sp_map in _h_full.items():
                     for _spname, _arr_full in _sp_map.items():
                         # Vectorized index construction (numpy) instead of a
@@ -9425,32 +9403,30 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
                         # runs into the hundreds of thousands of rows across
                         # many stochastic replicates.
                         _d_idx, _a_idx, _r_idx = np.indices(_arr_full.shape)
-                        _cur.executemany(
-                            "INSERT INTO results_full VALUES (?,?,?,?,?,?,?,?,?,?)",
-                            zip(
-                                itertools.repeat(_scen), itertools.repeat(_ri), itertools.repeat(_psi),
-                                itertools.repeat(_c), itertools.repeat(_kinds[_c]), itertools.repeat(_spname),
-                                _a_idx.ravel().tolist(), _r_idx.ravel().tolist(),
-                                (_d_idx.ravel() + 1).tolist(), _arr_full.ravel().astype(float).tolist(),
-                            ),
-                        )
+                        _con.append("results_full", pd.DataFrame({
+                            "scenario": _scen, "rep": _ri, "param_set": _psi,
+                            "compartment": _c, "kind": _kinds[_c], "subpop": _spname,
+                            "age_group": _a_idx.ravel(), "risk_group": _r_idx.ravel(),
+                            "day": _d_idx.ravel() + 1,
+                            "value": _arr_full.ravel().astype(float),
+                        }))
                 # Progress within a scenario's replicates, so a long
                 # stochastic run (hundreds of reps) doesn't look stuck
                 # between per-scenario lines below.
                 if _n_reps > 20 and (_ri + 1) % 20 == 0:
                     print(f"  [{_si}/{len(all_results)}] {_scen}: wrote {_ri + 1}/{_n_reps} replicate(s)")
-            print(f"[{_si}/{len(all_results)}] {_scen}: wrote {_n_reps} replicate(s) to {_db}")
+            print(f"[{_si}/{len(all_results)}] {_scen}: wrote {_n_reps} replicate(s)")
         # Run-level metadata the result rows themselves cannot carry: they
         # only hold day indices and 0-based age/risk indices, so without this
         # a reader (e.g. results_explorer_notebook.py) cannot plot real dates
         # or label age bands. It also saves the reader from recovering the
         # scenario/subpop lists with SELECT DISTINCT, which on a large
-        # results.db means a full table scan -- measured at 7s over a 73M-row
+        # results set means a full scan -- measured at 7s over a 73M-row
         # `results` and 49s over its `results_full`, just to list values that
-        # were known here at write time.
+        # were known here at write time (back when this was SQLite).
         #
         # Key/value JSON so keys can be added later without migrating the
-        # schema. Readers must tolerate the table being absent (files written
+        # schema. Readers must tolerate meta.json being absent (files written
         # before it existed) and individual keys being missing.
         _subpop_names = sorted({
             _spname
@@ -9490,32 +9466,11 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
             "n_reps": len(RUN_SCHEDULE),
             "param_set_indices": list(RUN_SCHEDULE),
         }
-        _cur.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)")
-        # OR REPLACE rather than plain INSERT since `key` is a PRIMARY KEY and
-        # this executemany runs once per key -- an INSERT would only matter on
-        # a pre-existing db (see the schema guard above), where it would
-        # otherwise fail on the second key with a UNIQUE constraint error.
-        _cur.executemany(
-            "INSERT OR REPLACE INTO meta VALUES (?,?)",
-            [(_k, json.dumps(_v)) for _k, _v in _meta.items()],
-        )
-
-        # Downstream table-building scripts filter on (scenario, compartment)
-        # for every table they build, often re-querying the same scenario
-        # several times -- without this index each of those is a full
-        # sequential scan, which gets very slow once replicates/parameter
-        # sets push `results_full` into the hundreds of millions of rows.
-        _cur.execute(
-            "CREATE INDEX IF NOT EXISTS idx_results_full_scenario_compartment "
-            "ON results_full (scenario, compartment)"
-        )
-        _cur.execute(
-            "CREATE INDEX IF NOT EXISTS idx_results_scenario_compartment "
-            "ON results (scenario, compartment)"
-        )
-        _con.commit()
+        print(f"Writing Parquet to {_out_dir}")
+        rex.write_results_parquet(_con, _out_dir, meta=_meta)
         _con.close()
-        print(f"Results saved to {_db}")
+        _stage_path.unlink(missing_ok=True)
+        print(f"Results saved to {_out_dir}")
 """
 
     _scen_lines = [
@@ -12253,7 +12208,7 @@ def _analysis_autosave(analysis_results, output_dir, json, np):
 
 @app.cell
 def _analysis_export_full_button(mo):
-    analysis_export_full_button = mo.ui.run_button(label="Export full results (SQLite)")
+    analysis_export_full_button = mo.ui.run_button(label="Export full results (Parquet)")
     mo.vstack([
         mo.md(
             "*The autosave above only stores population-level summary "
@@ -12262,10 +12217,12 @@ def _analysis_export_full_button(mo):
             "risk/replicate detail to disk — slower and much larger for "
             "many replicates, and only available when **Keep full "
             "per-replicate results** was on for the current run.*\n\n"
-            "*Written as a SQLite `.db` with the same `results`/`results_full` "
-            "schema the Export tab's `run_simulation.py` produces, so either "
-            "source opens in the Results Explorer notebook "
-            "(`results_explorer_notebook.py`) without conversion.*"
+            "*Written as a directory of partitioned Parquet with the same "
+            "`results`/`results_full` schema the Export tab's "
+            "`run_simulation.py` produces, so either source opens in the "
+            "Results Explorer notebook (`results_explorer_notebook.py`) "
+            "without conversion — Parquet loads there far faster than "
+            "SQLite and takes a fraction of the disk space.*"
         ),
         analysis_export_full_button,
     ])
@@ -12275,10 +12232,8 @@ def _analysis_export_full_button(mo):
 @app.cell
 def _analysis_export_full(
     analysis_export_full_button, analysis_results, output_dir, config_dict,
-    json, np, mo, sqlite3,
+    duckdb, np, pd, mo, rex,
 ):
-    import itertools
-
     mo.stop(not analysis_export_full_button.value)
     mo.stop(
         analysis_results is None,
@@ -12295,47 +12250,37 @@ def _analysis_export_full(
             kind="warn",
         ),
     )
-    # Written as SQLite with exactly the schema the exported script's
-    # results.db uses (results/results_full tables in _nb_export.py) --
-    # scenario, rep, param_set, compartment, kind, day, value
-    # (population-total) and the same plus subpop/age_group/risk_group (full
-    # detail) -- so the Results Explorer notebook opens either source with no
-    # conversion and no format branch.
+    # Written with exactly the schema the exported script's results_parquet
+    # uses (results/results_full tables in _nb_export.py) -- scenario, rep,
+    # param_set, compartment, kind, day, value (population-total) and the
+    # same plus subpop/age_group/risk_group (full detail) -- so the Results
+    # Explorer notebook opens either source with no conversion and no format
+    # branch.
     #
-    # Rows are inserted per array with executemany as the loops walk the
+    # Rows are appended per array as a small DataFrame as the loops walk the
     # results, rather than accumulated into one big list and serialized at
     # the end (what the earlier JSON export did). That keeps peak memory
     # bounded by a single (days, A, R) array instead of growing with the size
     # of the whole export: the JSON path measured ~5.5x the output size in
-    # peak RSS and scaled linearly with it (~8 GB to write a 1.4 GB export),
-    # while this stays flat at tens of MB regardless of scenario/replicate
-    # count.
+    # peak RSS and scaled linearly with it (~8 GB to write a 1.4 GB export).
+    # A native DuckDB table (rather than SQLite) so `con.append(table, df)`
+    # can do the insert as one bulk columnar write instead of a Python-level
+    # executemany, which measured ~10s per 100k rows against DuckDB (DuckDB
+    # is a vectorized engine tuned for bulk loads, not row-by-row inserts).
     _comp_set = set(analysis_results["compartments"])
     _kind_of = lambda _key: "compartment" if _key in _comp_set else "transition"
     _psets = analysis_results.get("param_set_indices", [])
 
-    _p = output_dir / "analysis_results_full.db"
-    # Rebuilt from scratch each export -- appending would mix replicates from
-    # different runs under the same rep indices.
-    _p.unlink(missing_ok=True)
-    for _stale in output_dir.glob("analysis_results_full.db-*"):
-        _stale.unlink(missing_ok=True)
-    _con = sqlite3.connect(_p)
-    _con.execute("PRAGMA journal_mode = WAL")
-    _con.execute("PRAGMA synchronous = NORMAL")
-    _cur = _con.cursor()
-    _cur.execute(
-        "CREATE TABLE results "
-        "(scenario TEXT, rep INTEGER, param_set INTEGER, compartment TEXT, kind TEXT, "
-        "day INTEGER, value REAL)"
-    )
-    _cur.execute(
-        "CREATE TABLE results_full "
-        "(scenario TEXT, rep INTEGER, param_set INTEGER, compartment TEXT, kind TEXT, "
-        "subpop TEXT, age_group INTEGER, risk_group INTEGER, day INTEGER, value REAL)"
-    )
+    _out_dir = output_dir / "analysis_results_full_parquet"
+    # A plain file next to the staging db, deleted once the Parquet export
+    # below succeeds -- if the process dies mid-run, its presence marks the
+    # Parquet directory as incomplete rather than silently half-written.
+    _stage_path = output_dir / ".analysis_results_full_stage.duckdb"
+    _stage_path.unlink(missing_ok=True)
+    _con = duckdb.connect(str(_stage_path))
+    rex.create_results_tables(_con)
 
-    with mo.status.spinner("Writing full results to SQLite…"):
+    with mo.status.spinner("Writing full results…"):
         for _scen, _reps in analysis_results["scenarios"].items():
             for _ri, _rep in enumerate(_reps):
                 _psi = _psets[_ri] if _ri < len(_psets) else None
@@ -12346,34 +12291,32 @@ def _analysis_export_full(
                         _agg_by_key[_key] = _arr if _key not in _agg_by_key else _agg_by_key[_key] + _arr
                 for _key, _arr in _agg_by_key.items():
                     _totals = _arr.sum(axis=(1, 2))  # (days,)
-                    _cur.executemany(
-                        "INSERT INTO results VALUES (?,?,?,?,?,?,?)",
-                        [(_scen, _ri, _psi, _key, _kind_of(_key), _d + 1, float(_v))
-                         for _d, _v in enumerate(_totals)],
-                    )
+                    _con.append("results", pd.DataFrame({
+                        "scenario": _scen, "rep": _ri, "param_set": _psi,
+                        "compartment": _key, "kind": _kind_of(_key),
+                        "day": np.arange(1, len(_totals) + 1),
+                        "value": _totals.astype(float),
+                    }))
                 for _sp_name, _sp_data in _rep.items():
                     for _key, _arr in _sp_data.items():
                         _arr = np.asarray(_arr)
                         _d_idx, _a_idx, _r_idx = np.indices(_arr.shape)
-                        _cur.executemany(
-                            "INSERT INTO results_full VALUES (?,?,?,?,?,?,?,?,?,?)",
-                            zip(
-                                itertools.repeat(_scen), itertools.repeat(_ri), itertools.repeat(_psi),
-                                itertools.repeat(_key), itertools.repeat(_kind_of(_key)),
-                                itertools.repeat(_sp_name),
-                                _a_idx.ravel().tolist(), _r_idx.ravel().tolist(),
-                                (_d_idx.ravel() + 1).tolist(), _arr.ravel().astype(float).tolist(),
-                            ),
-                        )
+                        _con.append("results_full", pd.DataFrame({
+                            "scenario": _scen, "rep": _ri, "param_set": _psi,
+                            "compartment": _key, "kind": _kind_of(_key),
+                            "subpop": _sp_name,
+                            "age_group": _a_idx.ravel(), "risk_group": _r_idx.ravel(),
+                            "day": _d_idx.ravel() + 1,
+                            "value": _arr.ravel().astype(float),
+                        }))
 
         # Run-level metadata the rows themselves cannot carry. Without this a
         # reader only sees day indices and 0-based age/risk indices, so it
-        # cannot plot real dates or label age bands -- and on a large .db,
-        # recovering even the scenario list by SELECT DISTINCT means a full
-        # table scan (measured at 7s on a 73M-row `results`, 49s on its
-        # `results_full`). Stored as key/value JSON so new keys can be added
-        # later without a schema migration; readers must tolerate its absence
-        # (files written before this table existed) and missing keys.
+        # cannot plot real dates or label age bands -- and on a large results
+        # set, recovering even the scenario list by SELECT DISTINCT means a
+        # full scan (measured at 7s on a 73M-row `results`, 49s on its
+        # `results_full`, back when this was SQLite). Readers must tolerate
+        # its absence (files written before it existed) and missing keys.
         _age_risk = (config_dict.get("age_risk", {}) or {})
         _meta = {
             "schema_version": 1,
@@ -12402,31 +12345,17 @@ def _analysis_export_full(
             "n_reps": len(_psets) or None,
             "param_set_indices": _psets,
         }
-        _cur.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT)")
-        _cur.executemany(
-            "INSERT INTO meta VALUES (?,?)",
-            [(_k, json.dumps(_v)) for _k, _v in _meta.items()],
-        )
 
-        # Every explorer query filters on (scenario, compartment) before
-        # aggregating, so without these each chart is a full scan.
-        _cur.execute(
-            "CREATE INDEX idx_results_scenario_compartment "
-            "ON results (scenario, compartment)"
-        )
-        _cur.execute(
-            "CREATE INDEX idx_results_full_scenario_compartment "
-            "ON results_full (scenario, compartment)"
-        )
-        _con.commit()
+        rex.write_results_parquet(_con, _out_dir, meta=_meta)
         _con.close()
+    _stage_path.unlink(missing_ok=True)
 
     _size_mb = sum(
-        _f.stat().st_size for _f in output_dir.glob("analysis_results_full.db*")
+        _f.stat().st_size for _f in _out_dir.rglob("*") if _f.is_file()
     ) / 1e6
     mo.callout(
         mo.md(
-            f"Full results saved to `{_p}` ({_size_mb:.1f} MB).\n\n"
+            f"Full results saved to `{_out_dir}` ({_size_mb:.1f} MB).\n\n"
             "Open it in the Results Explorer notebook "
             "(`generic_core/examples/results_explorer_notebook.py`) to build charts."
         ),
@@ -13497,7 +13426,7 @@ or in a batch job, and download all configuration files.
 
 - **`run_simulation.py`** — A self-contained script that loads `model_config.json` and
   optionally `fitted_params.json`, builds the model, runs each entry in a `SCENARIOS`
-  dict, and saves results to a SQLite database (`simulation_output/results.db`).
+  dict, and saves results as partitioned Parquet (`simulation_output/results_parquet/`).
 
   Edit the top of the script to configure:
   - `NUM_DAYS`, `NUM_REPS`, `STOCHASTIC`, `TIMESTEPS_PER_DAY`, `START_DATE`
@@ -13514,8 +13443,10 @@ or in a batch job, and download all configuration files.
 python run_simulation.py
 ```
 
-Results are stored in `simulation_output/results.db` as a table with columns
-`scenario`, `rep`, `compartment`, `day`, `value`.
+Results are stored in `simulation_output/results_parquet/` as Hive-partitioned
+Parquet with columns `scenario`, `rep`, `compartment`, `day`, `value` (plus
+`kind`/`param_set`), partitioned by `scenario` and `compartment` — the two
+columns every downstream query filters on first.
 
 ---
 
@@ -13567,17 +13498,18 @@ Click **Run analysis**.
 
 Summary statistics (median + 95% interval per scenario/compartment) are
 auto-saved to `{output_dir}/analysis_results.json` after every run. Click
-**Export full results (SQLite)** to additionally write the full per-
+**Export full results (Parquet)** to additionally write the full per-
 subpopulation/age/risk/replicate detail to
-`{output_dir}/analysis_results_full.db` — slower and much larger, so it's
-on demand rather than automatic.
+`{output_dir}/analysis_results_full_parquet/` — slower and much larger, so
+it's on demand rather than automatic.
 
-That `.db` uses the same `results`/`results_full` schema as the `results.db`
-written by the Export tab's `run_simulation.py`, plus a `meta` table holding
-the run settings (start date, age-group labels, scenario order). Either file
-opens directly in the **Results Explorer** notebook
-(`generic_core/examples/results_explorer_notebook.py`), which queries it in
-place with DuckDB — no loading step, so multi-GB result sets stay usable.
+That directory uses the same `results`/`results_full` schema as the
+`results_parquet/` directory written by the Export tab's `run_simulation.py`,
+plus a `meta.json` holding the run settings (start date, age-group labels,
+scenario order). Either one opens directly in the **Results Explorer**
+notebook (`generic_core/examples/results_explorer_notebook.py`), which
+queries it in place with DuckDB — no loading step, so multi-GB result sets
+stay usable.
 
 ---
 

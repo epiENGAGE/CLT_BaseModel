@@ -17,12 +17,20 @@ def _imports():
 
     import numpy as np
     import pandas as pd
+    import duckdb
     import matplotlib.pyplot as plt
     import marimo as mo
     import clt_toolkit as clt
     import flu_core as flu
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    # _results_explorer_lib.py lives next to this file (generic_core/examples),
+    # not under the generic_core package, so it needs its own sys.path entry --
+    # imported here (rather than inline in the Analysis/Export cells that use
+    # it) so both share one loaded module instead of importing it twice under
+    # different names.
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import _results_explorer_lib as rex
 
     import generic_core as gc
     from generic_core import contact_matrix_fetch as cmf
@@ -66,7 +74,7 @@ def _imports():
 
     return (
         Path, SimpleNamespace, namedtuple, copy, re, sqlite3, datetime,
-        clt, flu, gc, cmf, io, json, mo, np, pd, plt,
+        clt, flu, gc, cmf, io, json, mo, np, pd, plt, duckdb, rex,
         ConfigDrivenMetapopModel, ConfigDrivenSubpopModel,
         build_state_from_config, build_params_from_config,
         parse_model_config_from_dict,

@@ -159,8 +159,11 @@ def load_source(path: str | Path, *, progress=None) -> duckdb.DuckDBPyConnection
     ``results_full`` and (when present) ``meta``.
 
     ``path`` may be a SQLite ``.db`` -- attached read-only and queried in
-    place -- or a legacy ``.json`` export, which is converted once to a
-    sibling ``.db`` and then attached (see :func:`convert_json_to_sqlite`).
+    place -- a legacy ``.json`` export, which is converted once to a sibling
+    ``.db`` and then attached (see :func:`convert_json_to_sqlite`) -- or a
+    directory of Hive-partitioned Parquet (written by the Analysis tab's
+    export or ``run_simulation.py``; see :func:`write_results_parquet`),
+    which is read directly (much faster for large ``results_full`` scans).
 
     ``progress`` is an optional ``callable(str)`` used to report conversion
     steps, since that path can take a while on a multi-GB file.
@@ -168,6 +171,9 @@ def load_source(path: str | Path, *, progress=None) -> duckdb.DuckDBPyConnection
     path = Path(path).expanduser()
     if not path.exists():
         raise ResultsExplorerError(f"No such file: {path}")
+
+    if path.is_dir():
+        return _load_parquet_source(path)
 
     suffix = path.suffix.lower()
     if suffix == ".json":
@@ -296,6 +302,123 @@ def convert_json_to_sqlite(
     for stale in tmp_path.parent.glob(tmp_path.name + "-*"):
         stale.unlink(missing_ok=True)
     return db_path
+
+
+# ---------------------------------------------------------------------------
+# Parquet source (partitioned by scenario, for faster-than-SQLite scans)
+# ---------------------------------------------------------------------------
+
+#: Marks a directory as a converted results source, and records enough to
+#: sanity-check it on open (schema version, which tables it holds).
+_PARQUET_MANIFEST_NAME = "_manifest.json"
+
+_PARQUET_SCHEMA_VERSION = 1
+
+
+def create_results_tables(con: duckdb.DuckDBPyConnection) -> None:
+    """Create empty native ``results``/``results_full`` tables on ``con``,
+    ready for :meth:`duckdb.DuckDBPyConnection.append`.
+
+    Shared by every writer of this schema (``_nb_analysis.py``'s Analysis tab
+    export, the generated ``run_simulation.py``) so the column list and types
+    live in one place. ``DOUBLE`` rather than SQLite's ``REAL`` for ``value``:
+    SQLite's ``REAL`` is an 8-byte float, and DuckDB's own ``REAL`` is only
+    4 bytes -- ``DOUBLE`` is the 8-byte type here.
+    """
+    con.execute(
+        "CREATE TABLE results "
+        "(scenario TEXT, rep INTEGER, param_set INTEGER, compartment TEXT, "
+        "kind TEXT, day INTEGER, value DOUBLE)"
+    )
+    con.execute(
+        "CREATE TABLE results_full "
+        "(scenario TEXT, rep INTEGER, param_set INTEGER, compartment TEXT, "
+        "kind TEXT, subpop TEXT, age_group INTEGER, risk_group INTEGER, "
+        "day INTEGER, value DOUBLE)"
+    )
+
+
+def write_results_parquet(
+    con: duckdb.DuckDBPyConnection, out_dir: str | Path, *,
+    meta: dict[str, Any] | None = None, progress=None,
+) -> Path:
+    """Write an open connection's ``results``/``results_full`` (tables or
+    views) out as Hive-partitioned Parquet -- the shared last step behind
+    a run's own writer (native DuckDB tables built up with
+    :meth:`duckdb.DuckDBPyConnection.append` as it runs -- faster than
+    SQLite's row-by-row inserts). Partitioning is on ``(scenario,
+    compartment)`` -- the two columns every chart query filters on first --
+    rather than a global sort, which needs an external-sort spill that can
+    exceed the table's own size.
+
+    ``meta`` is written as ``meta.json`` directly from a plain dict (native
+    Python values, not pre-JSON-encoded).
+    """
+    import shutil
+
+    out_dir = Path(out_dir).expanduser()
+    tmp_dir = out_dir.with_name(out_dir.name + ".partial")
+    if tmp_dir.exists():
+        shutil.rmtree(tmp_dir)
+    tmp_dir.mkdir(parents=True)
+
+    for table in ("results", "results_full"):
+        if progress:
+            progress(f"Writing {table} to Parquet…")
+        con.execute(
+            f"COPY (SELECT * FROM {table}) "
+            f"TO '{(tmp_dir / table).as_posix()}' "
+            f"(FORMAT PARQUET, PARTITION_BY (scenario, compartment), "
+            f"OVERWRITE_OR_IGNORE true, COMPRESSION ZSTD)"
+        )
+
+    if meta is not None:
+        if progress:
+            progress("Writing meta…")
+        (tmp_dir / "meta.json").write_text(
+            json.dumps({k: json.dumps(v) for k, v in meta.items()}),
+            encoding="utf-8")
+
+    manifest: dict[str, Any] = {
+        "schema_version": _PARQUET_SCHEMA_VERSION,
+        "tables": ["results", "results_full"],
+    }
+    (tmp_dir / _PARQUET_MANIFEST_NAME).write_text(
+        json.dumps(manifest), encoding="utf-8")
+
+    if out_dir.exists():
+        shutil.rmtree(out_dir)
+    tmp_dir.replace(out_dir)
+    return out_dir
+
+
+def _load_parquet_source(path: Path) -> duckdb.DuckDBPyConnection:
+    manifest_path = path / _PARQUET_MANIFEST_NAME
+    if not manifest_path.exists():
+        raise ResultsExplorerError(
+            f"{path} is a directory but not a results source "
+            f"(missing {_PARQUET_MANIFEST_NAME})."
+        )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    missing = {"results", "results_full"} - set(manifest.get("tables", []))
+    if missing:
+        raise ResultsExplorerError(
+            f"{path} is missing table(s) {sorted(missing)}.")
+
+    con = duckdb.connect()
+    for table in ("results", "results_full"):
+        glob = (path / table / "**" / "*.parquet").as_posix()
+        con.execute(
+            f"CREATE VIEW {table} AS "
+            f"SELECT * FROM read_parquet('{glob}', hive_partitioning = true)"
+        )
+    meta_path = path / "meta.json"
+    if meta_path.exists():
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        con.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT)")
+        con.executemany(
+            "INSERT INTO meta VALUES (?, ?)", list(meta.items()))
+    return con
 
 
 # ---------------------------------------------------------------------------

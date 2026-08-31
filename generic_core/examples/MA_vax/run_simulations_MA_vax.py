@@ -21,10 +21,9 @@ import io
 import os
 import json
 import copy
-import itertools
 import numpy as np
 import pandas as pd
-import sqlite3
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -221,7 +220,11 @@ DESIGNED_PARAM_RATIOS = {
 # scales whatever it represents (antiviral courses, etc.). Applies to
 # every subpop identically in a metapop run, except where overridden by
 # DOSE_MULTIPLIER_PER_SUBPOP below.
-# Format: {scenario_name: [multiplier_per_age_group, ...]}
+# Format: {scenario_name: [multiplier_per_age_group, ...]}  -- applies the
+# same scaling to every vaccine_schedule in the config; or, to scale two
+# `scheduled_exact` schedules by different amounts, a per-schedule dict:
+#   {scenario_name: {"daily_vaccines_df": [...], "<other>_df": [...]}}
+# keyed by each schedule's df_attribute (a schedule left out is unscaled).
 DOSE_MULTIPLIER = {
     'children vax only': [1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0],
     'no vax': [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
@@ -255,20 +258,43 @@ DOSE_MULTIPLIER = {
 }
 
 # Per-subpopulation override of DOSE_MULTIPLIER above (metapop only).
-# Format: {scenario_name: [multiplier_per_age_group_or_None, ...]}
-# indexed by subpop order; a None entry falls back to DOSE_MULTIPLIER.
+# Format: {scenario_name: [multiplier_or_None, ...]} indexed by subpop
+# order; a None entry falls back to DOSE_MULTIPLIER. Each non-None entry
+# takes either shape accepted by DOSE_MULTIPLIER (list, or per-schedule
+# dict keyed by df_attribute).
 DOSE_MULTIPLIER_PER_SUBPOP = {
+}
+
+# Schedules REPLACED outright by an uploaded CSV, per scenario (as
+# opposed to DOSE_MULTIPLIER, which scales a schedule in place). Names
+# the df_attribute(s) overridden; the actual CSV data lives in
+# schedules.json under "__scenario_overrides__" (see
+# _schedule_overrides_from_json) -- download it from the Export tab
+# alongside this script.
+# Format: {scenario_name: {df_attribute: df_attribute}}
+SCHEDULE_OVERRIDES = {
+}
+
+# Per-subpopulation override of SCHEDULE_OVERRIDES above (metapop only).
+# Format: {scenario_name: [{df_attribute: df_attribute} | None, ...]}
+# indexed by subpop order.
+SCHEDULE_OVERRIDES_PER_SUBPOP = {
 }
 
 # ---- Setup ----
 _HERE = Path(__file__).parent
 sys.path.insert(0, str(_HERE.parent.parent))
+# _results_explorer_lib.py lives in generic_core/examples/, not under the
+# generic_core package itself, so it needs its own sys.path entry.
+sys.path.insert(0, str(_HERE.parent.parent / "generic_core" / "examples"))
 
 # Write output next to this script, not into whatever the current working
 # directory happens to be. An absolute OUTPUT_DIR is used as-is.
 if not OUTPUT_DIR.is_absolute():
     OUTPUT_DIR = _HERE / OUTPUT_DIR
 
+import duckdb
+import _results_explorer_lib as rex
 import clt_toolkit as clt
 import flu_core as flu
 from generic_core.config_parser import parse_model_config_from_dict
@@ -278,7 +304,7 @@ from generic_core.generic_model import (
 from generic_core.generic_metapop import ConfigDrivenMetapopModel
 from generic_core.model_factory import (
     build_compartment_init, make_metapop_from_folder, extract_history,
-    extract_history_full, scale_dose_schedule_df,
+    extract_history_full, scale_dose_schedule_df, config_schedule_df_attributes,
 )
 from generic_core.fitting import (
     _scale_compartment_init, _inject_tv_transmission, _tv_knot_days,
@@ -423,20 +449,77 @@ def _load_schedule_csvs():
         return json.load(_f)
 
 
-def _build_schedules(start_date, num_days, tv_increments=None, dose_mult=None):
-    # dose_mult: per-age-group multiplier on the `scheduled_exact`
-    # transition's daily schedule (see scale_dose_schedule_df) -- e.g. 0 to
-    # zero out an age group for a no-dose / single-age-only scenario.
-    # Despite the "daily_vaccines" naming (fixed by the model config
-    # schema), this isn't vaccine-specific -- it scales whatever
-    # `scheduled_exact` represents (antiviral prophylaxis courses, etc.).
+def _dose_mult_for(dose_mult, attr):
+    # A scenario's dose multiplier is either
+    #   - a per-age-group list  -> applied to EVERY vaccine_schedule, or
+    #   - a {df_attribute: per-age-group list} dict -> per-schedule, letting
+    #     two `scheduled_exact` schedules be scaled by different amounts
+    #     (a schedule absent from the dict is left unscaled).
+    # Both shapes are accepted so hand-edited scripts using the simple list
+    # form keep working.
+    if dose_mult is None:
+        return None
+    if isinstance(dose_mult, dict):
+        return dose_mult.get(attr)
+    return dose_mult
+
+
+def _schedule_overrides_from_json(scenario_name):
+    # {df_attribute: csv_text} of uploaded schedule-REPLACEMENT CSVs for
+    # this scenario (see the Analysis tab's "Replace schedules from
+    # uploaded CSVs" control), read from schedules.json's reserved
+    # "__scenario_overrides__" key. Only the attributes SCHEDULE_OVERRIDES
+    # names for this scenario are pulled out, so a schedules.json missing
+    # an entry (e.g. re-downloaded before that upload was added) degrades
+    # to "no override" instead of raising. Returns None if this scenario
+    # has no schedule overrides.
+    _attrs = SCHEDULE_OVERRIDES.get(scenario_name)
+    if not _attrs:
+        return None
+    _csvs = _load_schedule_csvs()
+    _entry = (_csvs.get("__scenario_overrides__", {}) or {}).get("per_scenario", {}).get(scenario_name, {})
+    return {_a: _entry[_a] for _a in _attrs if _a in _entry} or None
+
+
+def _schedule_overrides_per_subpop_from_json(scenario_name):
+    # [{df_attribute: csv_text} | None, ...] indexed by subpop order --
+    # the per-subpop companion to _schedule_overrides_from_json above.
+    _lists = SCHEDULE_OVERRIDES_PER_SUBPOP.get(scenario_name)
+    if not _lists:
+        return None
+    _csvs = _load_schedule_csvs()
+    _entries = (_csvs.get("__scenario_overrides__", {}) or {}).get("per_subpop", {}).get(scenario_name, [])
+    _out = []
+    for _si, _attrs in enumerate(_lists):
+        if not _attrs:
+            _out.append(None)
+            continue
+        _sp_entry = _entries[_si] if _si < len(_entries) else {}
+        _out.append({_a: _sp_entry[_a] for _a in _attrs if _a in _sp_entry} or None)
+    return _out if any(_out) else None
+
+
+def _build_schedules(start_date, num_days, tv_increments=None, dose_mult=None, schedule_overrides=None):
+    # dose_mult: per-age-group multiplier on the `vaccine_schedule`-template
+    # schedules (see scale_dose_schedule_df and _dose_mult_for above) -- e.g.
+    # 0 to zero out an age group for a no-dose / single-age-only scenario.
+    # Despite the "daily_vaccines" naming (fixed by the model config schema),
+    # this isn't vaccine-specific -- it scales whatever `scheduled_exact`
+    # represents (antiviral prophylaxis courses, etc.).
+    # schedule_overrides: {df_attribute: csv_text} -- REPLACES the named
+    # schedule outright (see _schedule_overrides_from_json above), checked
+    # before the notebook's own uploaded schedules.json so a scenario's
+    # replacement wins; dose_mult scaling above still applies on top of it.
     _h = max(num_days + 14, 370)
     _dates = pd.date_range(start=start_date, periods=_h, freq="D").date
     _mob = json.dumps(np.ones((NUM_AGE_GROUPS, NUM_RISK_GROUPS)).tolist())
     _vax = json.dumps(np.zeros((NUM_AGE_GROUPS, NUM_RISK_GROUPS)).tolist())
     _csvs = _load_schedule_csvs()
+    _overrides = schedule_overrides or {}
 
     def _real_or(_name, _fallback):
+        if _name in _overrides:
+            return pd.read_csv(io.StringIO(_overrides[_name]))
         if _name in _csvs:
             return pd.read_csv(io.StringIO(_csvs[_name]))
         return _fallback
@@ -445,6 +528,21 @@ def _build_schedules(start_date, num_days, tv_increments=None, dose_mult=None):
     _tvm_df = _build_tvm_df(start_date, num_days, tv_increments)
     if _tvm_df is not None:
         _kwargs["transmission_multiplier_df"] = _tvm_df
+    # Any vaccine_schedule-template schedule other than the default-named
+    # "vaccinated_transfer_schedule"/"daily_vaccines" gets its df loaded (or
+    # falls back to an all-zero constant) and scaled by its OWN entry in
+    # dose_mult (see _dose_mult_for).
+    _extra_attrs = sorted({
+        _sc.get("schedule_config", {}).get("df_attribute")
+        for _sc in config_dict.get("schedules", []) or []
+        if _sc.get("schedule_template") == "vaccine_schedule"
+        and _sc.get("schedule_config", {}).get("df_attribute") not in (None, "daily_vaccines_df")
+    })
+    for _attr in _extra_attrs:
+        _kwargs[_attr] = scale_dose_schedule_df(_real_or(
+            _attr,
+            pd.DataFrame({"date": _dates, "daily_vaccines": [_vax] * _h})),
+            _dose_mult_for(dose_mult, _attr))
     return SimpleNamespace(
         absolute_humidity_df=_real_or(
             "absolute_humidity_df",
@@ -457,14 +555,16 @@ def _build_schedules(start_date, num_days, tv_increments=None, dose_mult=None):
             pd.DataFrame({"day_of_week": ["monday","tuesday","wednesday","thursday","friday","saturday","sunday"], "mobility_modifier": [_mob]*7})),
         daily_vaccines_df=scale_dose_schedule_df(_real_or(
             "daily_vaccines_df",
-            pd.DataFrame({"date": _dates, "daily_vaccines": [_vax] * _h})), dose_mult),
+            pd.DataFrame({"date": _dates, "daily_vaccines": [_vax] * _h})),
+            _dose_mult_for(dose_mult, "daily_vaccines_df")),
         **_kwargs,
     )
 
 
 def build_model(cfg, param_overrides, rep, subpop_overrides=None,
                 seed_scales=None, tv_increments=None,
-                dose_mult=None, dose_mult_per_subpop=None):
+                dose_mult=None, dose_mult_per_subpop=None,
+                schedule_overrides=None, schedule_overrides_per_subpop=None):
     # subpop_overrides: list of {param: value} indexed by subpop order (metapop only)
     # seed_scales / tv_increments default to the fitted best set's; a sampled
     # param set passes its own so each run reproduces that draw's initial
@@ -498,6 +598,42 @@ def build_model(cfg, param_overrides, rep, subpop_overrides=None,
                 "(per-subpop seeded initial conditions are read from the metapop folder); "
                 f"ignoring fitted seed scales {sorted(_seed_scales)}."
             )
+        # Split the scenario's dose multiplier per schedule: the factory
+        # takes the default schedule's vector as `dose_mult` and the rest
+        # as an `extra_dose_mult` dict. _dose_mult_for accepts either a
+        # bare per-age-group list (same scaling for every schedule) or a
+        # {df_attribute: list} dict (per-schedule scaling).
+        _extra_attrs = sorted(config_schedule_df_attributes(_cfg) - {"daily_vaccines_df"})
+        _base_dose_mult = _dose_mult_for(dose_mult, "daily_vaccines_df")
+        _extra_dose_mult = (
+            {_attr: _dose_mult_for(dose_mult, _attr) for _attr in _extra_attrs}
+            if (_extra_attrs and dose_mult is not None) else None
+        )
+        _base_dm_per_sp = _extra_dm_per_sp = None
+        if dose_mult_per_subpop:
+            _base_dm_per_sp = [
+                _dose_mult_for(_dm, "daily_vaccines_df") for _dm in dose_mult_per_subpop
+            ]
+            _extra_dm_per_sp = [
+                ({_attr: _dose_mult_for(_dm, _attr) for _attr in _extra_attrs}
+                 if (_extra_attrs and _dm is not None) else None)
+                for _dm in dose_mult_per_subpop
+            ]
+        # Uploaded schedule REPLACEMENTS (as opposed to dose_mult, which
+        # scales a schedule in place): csv_text -> DataFrame, since
+        # make_metapop_from_folder's schedule_df_overrides kwarg takes
+        # actual DataFrames, not raw CSV text.
+        _sched_ov_dfs = (
+            {_a: pd.read_csv(io.StringIO(_t)) for _a, _t in schedule_overrides.items()}
+            if schedule_overrides else None
+        )
+        _sched_ov_dfs_per_sp = (
+            [
+                ({_a: pd.read_csv(io.StringIO(_t)) for _a, _t in _d.items()} if _d else None)
+                for _d in schedule_overrides_per_subpop
+            ]
+            if schedule_overrides_per_subpop else None
+        )
         _m, _ = make_metapop_from_folder(
             METAPOP_FOLDER, _cfg, START_DATE, NUM_DAYS, _comps,
             seed_offset=rep, seed_base=SEED_BASE, ts_per_day=TIMESTEPS_PER_DAY,
@@ -507,11 +643,13 @@ def build_model(cfg, param_overrides, rep, subpop_overrides=None,
             travel_config=METAPOP_TRAVEL_CONFIG or None,
             num_age_groups=NUM_AGE_GROUPS, num_risk_groups=NUM_RISK_GROUPS,
             transmission_multiplier_df=_build_tvm_df(START_DATE, NUM_DAYS, _tv_incr),
-            dose_mult=dose_mult, dose_mult_per_subpop=dose_mult_per_subpop,
+            dose_mult=_base_dose_mult, dose_mult_per_subpop=_base_dm_per_sp,
+            extra_dose_mult=_extra_dose_mult, extra_dose_mult_per_subpop=_extra_dm_per_sp,
+            schedule_df_overrides=_sched_ov_dfs, schedule_df_overrides_per_subpop=_sched_ov_dfs_per_sp,
         )
         return _m
 
-    _sched = _build_schedules(START_DATE, NUM_DAYS, _tv_incr, dose_mult)
+    _sched = _build_schedules(START_DATE, NUM_DAYS, _tv_incr, dose_mult, schedule_overrides=schedule_overrides)
     _mc = parse_model_config_from_dict(_cfg, schedules_input=_sched)
     _A, _R = NUM_AGE_GROUPS, NUM_RISK_GROUPS
     _comps = list(_cfg.get("compartments", {}).keys()) if isinstance(_cfg.get("compartments"), dict) else list(_cfg.get("compartments", ["S"]))
@@ -584,10 +722,10 @@ if _use_psets:
             RUN_SCHEDULE += [int(_i) for _i in _rng_sched.choice(_k, size=_extra_r, replace=False)]
     if __name__ == "__main__":
         # This module-level block runs again on import in every worker
-        # process (spawn re-imports the script as __main__; fork re-runs it
-        # too under some pool implementations) since RUN_PARAM_SETS/
-        # RUN_SCHEDULE must exist there for _apply_pset. Only print once, in
-        # the parent.
+        # process (spawn re-imports the script as __main__; fork re-runs
+        # it too under some pool implementations) since RUN_PARAM_SETS/
+        # RUN_SCHEDULE must exist there for _apply_pset. Only print once,
+        # in the parent.
         print(
             f"Parameter uncertainty: {_k} set(s) sampled from {len(PARAM_SETS)} accepted, "
             f"{len(RUN_SCHEDULE)} run(s) per scenario"
@@ -646,15 +784,18 @@ def _apply_pset(overrides, pset_idx, designed, ratios=None):
 def _run_one(scenario_name, overrides, designed, dose_mult, dose_mult_per_subpop,
              ratios, sp_overrides, rep, pset_idx):
     # One (scenario, replicate) unit of work -- everything a pool worker
-    # needs is passed in as plain, picklable arguments; module globals used
-    # inside (config_dict, NUM_DAYS, TRANSITION_VARS, RUN_PARAM_SETS via
-    # _apply_pset, ...) are rebuilt identically in every worker process when
-    # it re-imports this script, so they don't need to be passed explicitly.
+    # needs is passed in as plain, picklable arguments; module globals
+    # used inside (config_dict, NUM_DAYS, TRANSITION_VARS, RUN_PARAM_SETS
+    # via _apply_pset, ...) are rebuilt identically in every worker
+    # process when it re-imports this script, so they don't need to be
+    # passed explicitly.
     _run_ov, _run_scales, _run_incr = _apply_pset(overrides, pset_idx, designed, ratios)
     _m = build_model(
         config_dict, _run_ov, rep, subpop_overrides=sp_overrides,
         seed_scales=_run_scales, tv_increments=_run_incr,
         dose_mult=dose_mult, dose_mult_per_subpop=dose_mult_per_subpop,
+        schedule_overrides=_schedule_overrides_from_json(scenario_name),
+        schedule_overrides_per_subpop=_schedule_overrides_per_subpop_from_json(scenario_name),
     )
     _m.simulate_until_day(NUM_DAYS)
     _sps = list(_m.subpop_models.values())
@@ -667,10 +808,10 @@ def _run_one(scenario_name, overrides, designed, dose_mult, dose_mult_per_subpop
     _h = extract_history(_m, _comp_names, tvs=TRANSITION_VARS)
     # Fully-resolved companion to _h -- same compartments/transitions,
     # but per-subpop (day, age_group, risk_group) arrays instead of
-    # (day,) scalars summed over subpop/age/risk. The counterfactual
-    # vaccination-impact tables (S.A.2/S.A.3/S.A.5/S.A.6/VAX_CHECK) all
-    # need per-age-group hospitalizations/doses/flows -- extract_history's
-    # own summed totals stay the fast path for the population aggregate.
+    # (day,) scalars summed over subpop/age/risk. Needed by anything
+    # that cares which subpop/age/risk group a flow happened in (e.g.
+    # per-age-group vaccination-impact tables); extract_history's own
+    # summed totals stay the fast path for the population aggregate.
     _h_full = extract_history_full(_m, _comp_names, tvs=TRANSITION_VARS)
     _kinds = {_k: ("transition" if _k in TRANSITION_VARS else "compartment") for _k in _h}
     return scenario_name, rep, pset_idx, _h, _h_full, _kinds
@@ -678,19 +819,21 @@ def _run_one(scenario_name, overrides, designed, dose_mult, dose_mult_per_subpop
 
 # ---- Everything below only runs in the parent process. ----
 # Guarding it is required (not just tidy) on spawn-based multiprocessing
-# (the default on macOS and Windows): each pool worker re-imports this file
-# as __main__, so without this guard every worker would recursively try to
-# build its own pool and re-run the whole scenario sweep. Under fork-based
-# multiprocessing (Linux's default) it isn't strictly required, but keeping
-# it makes the script behave identically on all three platforms.
+# (the default on macOS and Windows): each pool worker re-imports this
+# file as __main__, so without this guard every worker would recursively
+# try to build its own pool and re-run the whole scenario sweep. Under
+# fork-based multiprocessing (Linux's default) it isn't strictly
+# required, but keeping it makes the script behave identically on all
+# three platforms.
 if __name__ == "__main__":
     _tasks = []
     for scenario_name, overrides in SCENARIOS.items():
         _sp_overrides = SUBPOP_PARAM_OVERRIDES.get(scenario_name)
-        # A scenario absent from DESIGNED_PARAMS was added by hand, so nothing
-        # says which of its params are deliberate — protect all of them rather
-        # than silently letting a sampled set overwrite the values the user
-        # just wrote. An explicit (possibly empty) list always wins.
+        # A scenario absent from DESIGNED_PARAMS was added by hand, so
+        # nothing says which of its params are deliberate — protect all
+        # of them rather than silently letting a sampled set overwrite
+        # the values the user just wrote. An explicit (possibly empty)
+        # list always wins.
         if scenario_name in DESIGNED_PARAMS:
             _designed = set(DESIGNED_PARAMS[scenario_name])
         else:
@@ -698,8 +841,9 @@ if __name__ == "__main__":
         _dose_mult = DOSE_MULTIPLIER.get(scenario_name)
         _dose_mult_per_subpop = DOSE_MULTIPLIER_PER_SUBPOP.get(scenario_name)
         _ratios = DESIGNED_PARAM_RATIOS.get(scenario_name, {})
-        # Seed by position in the run schedule so every run gets a distinct
-        # RNG stream once replicates are spread across parameter sets.
+        # Seed by position in the run schedule so every run gets a
+        # distinct RNG stream once replicates are spread across
+        # parameter sets.
         for _rep, _pset_idx in enumerate(RUN_SCHEDULE):
             _tasks.append((
                 scenario_name, overrides, _designed, _dose_mult,
@@ -727,94 +871,132 @@ if __name__ == "__main__":
                 all_results[_scen].append((_rep, _h, _h_full, _kinds, _psi))
 
     # Pool completion order is nondeterministic; sort each scenario's
-    # replicates back into run-schedule order so the `rep` column written to
-    # results.db below matches what a serial run would have produced.
+    # replicates back into run-schedule order so the `rep` column
+    # written to results_parquet/ below matches what a serial run would
+    # have produced.
     for _scen in all_results:
         all_results[_scen] = [
             (_h, _h_full, _kinds, _psi)
             for (_rep, _h, _h_full, _kinds, _psi) in sorted(all_results[_scen], key=lambda _r: _r[0])
         ]
 
-    _db = OUTPUT_DIR / "results.db"
-    _con = sqlite3.connect(_db)
-    # results.db is dropped and rebuilt from scratch every run (see below), so
-    # it never needs to survive a crash -- skip SQLite's per-write fsync/
-    # journaling durability guarantees so writing hundreds of thousands of
-    # rows (stochastic runs with many replicates x days x age/risk groups)
-    # isn't dominated by disk sync time.
-    _con.execute("PRAGMA synchronous = OFF")
-    _con.execute("PRAGMA journal_mode = MEMORY")
-    _cur = _con.cursor()
-    # Drop and recreate both tables every run rather than INSERTing into
-    # whatever's already there -- this script has no notion of "replace this
-    # scenario's rows", so reusing an existing results.db (e.g. after editing
-    # SCENARIOS and rerunning) would otherwise silently accumulate duplicate
-    # rows under the same (scenario, rep) key on top of the old ones, corrupting
-    # every downstream sum. `results.db` is meant to hold exactly one run's
-    # output, not an append-only log across runs.
-    _cur.execute("DROP TABLE IF EXISTS results")
-    _cur.execute("DROP TABLE IF EXISTS results_full")
-    # `compartment` keeps its name (so existing queries still work) but now holds
-    # transition-variable names too; `kind` distinguishes them. `param_set` is the
-    # index into the sampled parameter sets (NULL when parameter uncertainty is
-    # off), so replicates can be grouped by draw.
-    _cur.execute(
-        "CREATE TABLE results "
-        "(scenario TEXT, rep INTEGER, param_set INTEGER, compartment TEXT, kind TEXT, "
-        "day INTEGER, value REAL)"
-    )
-    # Same shape as `results`, plus `subpop`/`age_group`/`risk_group` columns
-    # (age_group/risk_group are 0-based indices into NUM_AGE_GROUPS/
-    # NUM_RISK_GROUPS, i.e. MA_vax.model.AGE_GROUP_LABELS order for age_group) --
-    # kept as a separate table rather than nullable columns on `results`, so
-    # `results` alone still answers population-aggregate queries without a
-    # GROUP BY. This script's single-population, single-risk-group model gets
-    # one subpop name and risk_group=0 throughout -- still queryable the same
-    # way, just with nothing to GROUP BY away.
-    _cur.execute(
-        "CREATE TABLE results_full "
-        "(scenario TEXT, rep INTEGER, param_set INTEGER, compartment TEXT, kind TEXT, "
-        "subpop TEXT, age_group INTEGER, risk_group INTEGER, day INTEGER, value REAL)"
-    )
-    print(f"Writing results for {len(all_results)} scenario(s) to {_db}")
+    # Every run of this script writes a FRESH results directory, never
+    # appends to one already on disk: two runs sharing one would both
+    # write rep=0, rep=1, ... under the same scenario names, and a
+    # reader grouping by (scenario, rep, day) would silently blend the
+    # two runs' rows together into nonsense (this bit a real user: a
+    # stale results.db from an earlier, differently-configured run
+    # stayed on disk and got averaged in with a later correct run). So
+    # results_parquet/ is used only while that exact name is free; once
+    # it exists, a timestamped results_{timestamp}_parquet/ is used
+    # instead (with a numeric suffix in the unlikely case two runs start
+    # in the same second), so nothing already on disk is ever appended to.
+    _out_dir = OUTPUT_DIR / "results_parquet"
+    if _out_dir.exists():
+        _stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        _out_dir = OUTPUT_DIR / f"results_{_stamp}_parquet"
+        _suffix = 1
+        while _out_dir.exists():
+            _out_dir = OUTPUT_DIR / f"results_{_stamp}_{_suffix}_parquet"
+            _suffix += 1
+        print(f"{OUTPUT_DIR / 'results_parquet'} already exists -- writing to {_out_dir} instead")
+    # Staged in a native DuckDB table first, then exported to Parquet in
+    # one shot at the end (rex.write_results_parquet) -- DuckDB is a
+    # vectorized engine tuned for bulk columnar loads, not row-by-row
+    # inserts (a plain executemany measured ~10s per 100k rows), so rows
+    # are appended per array as a small DataFrame via
+    # `con.append(table, df)`, which does the same insert as one bulk
+    # write. The staging file is removed once the Parquet export below
+    # succeeds; if the process dies mid-run, its presence marks the
+    # Parquet directory as incomplete rather than silently half-written.
+    _stage_path = OUTPUT_DIR / f"{_out_dir.name}.stage.duckdb"
+    _stage_path.unlink(missing_ok=True)
+    _con = duckdb.connect(str(_stage_path))
+    rex.create_results_tables(_con)
+    print(f"Writing results for {len(all_results)} scenario(s) to {_out_dir}")
     for _si, (_scen, _reps_data) in enumerate(all_results.items(), start=1):
         _n_reps = len(_reps_data)
         for _ri, (_h, _h_full, _kinds, _psi) in enumerate(_reps_data):
             for _c, _arr in _h.items():
-                _cur.executemany(
-                    "INSERT INTO results VALUES (?,?,?,?,?,?,?)",
-                    [(_scen, _ri, _psi, _c, _kinds[_c], _d + 1, float(_v))
-                     for _d, _v in enumerate(_arr)],
-                )
+                _con.append("results", pd.DataFrame({
+                    "scenario": _scen, "rep": _ri, "param_set": _psi,
+                    "compartment": _c, "kind": _kinds[_c],
+                    "day": np.arange(1, len(_arr) + 1),
+                    "value": np.asarray(_arr, dtype=float),
+                }))
             for _c, _sp_map in _h_full.items():
                 for _spname, _arr_full in _sp_map.items():
                     # Vectorized index construction (numpy) instead of a
                     # triple-nested Python for-loop over day/age_group/
                     # risk_group -- meaningfully faster once that product
-                    # runs into the hundreds of thousands of rows across many
-                    # stochastic replicates.
+                    # runs into the hundreds of thousands of rows across
+                    # many stochastic replicates.
                     _d_idx, _a_idx, _r_idx = np.indices(_arr_full.shape)
-                    _cur.executemany(
-                        "INSERT INTO results_full VALUES (?,?,?,?,?,?,?,?,?,?)",
-                        zip(
-                            itertools.repeat(_scen), itertools.repeat(_ri), itertools.repeat(_psi),
-                            itertools.repeat(_c), itertools.repeat(_kinds[_c]), itertools.repeat(_spname),
-                            _a_idx.ravel().tolist(), _r_idx.ravel().tolist(),
-                            (_d_idx.ravel() + 1).tolist(), _arr_full.ravel().astype(float).tolist(),
-                        ),
-                    )
-            # Progress within a scenario's replicates, so a long stochastic
-            # run (hundreds of reps) doesn't look stuck between per-scenario
-            # lines below.
+                    _con.append("results_full", pd.DataFrame({
+                        "scenario": _scen, "rep": _ri, "param_set": _psi,
+                        "compartment": _c, "kind": _kinds[_c], "subpop": _spname,
+                        "age_group": _a_idx.ravel(), "risk_group": _r_idx.ravel(),
+                        "day": _d_idx.ravel() + 1,
+                        "value": _arr_full.ravel().astype(float),
+                    }))
+            # Progress within a scenario's replicates, so a long
+            # stochastic run (hundreds of reps) doesn't look stuck
+            # between per-scenario lines below.
             if _n_reps > 20 and (_ri + 1) % 20 == 0:
                 print(f"  [{_si}/{len(all_results)}] {_scen}: wrote {_ri + 1}/{_n_reps} replicate(s)")
-        print(f"[{_si}/{len(all_results)}] {_scen}: wrote {_n_reps} replicate(s) to {_db}")
-    # build_counterfactual_tables_from_db.py's ResultsDB.arrays() filters on
-    # (scenario, compartment) for every table it builds, often re-querying
-    # the same scenario several times across different tables -- without
-    # this index each of those is a full sequential scan of `results_full`.
-    _cur.execute("CREATE INDEX idx_results_full_scenario_compartment ON results_full (scenario, compartment)")
-    _cur.execute("CREATE INDEX idx_results_scenario_compartment ON results (scenario, compartment)")
-    _con.commit()
+        print(f"[{_si}/{len(all_results)}] {_scen}: wrote {_n_reps} replicate(s)")
+    # Run-level metadata the result rows themselves cannot carry: they
+    # only hold day indices and 0-based age/risk indices, so without this
+    # a reader (e.g. results_explorer_notebook.py) cannot plot real dates
+    # or label age bands. It also saves the reader from recovering the
+    # scenario/subpop lists with SELECT DISTINCT, which on a large
+    # results set means a full scan -- measured at 7s over a 73M-row
+    # `results` and 49s over its `results_full`, just to list values that
+    # were known here at write time (back when this was SQLite).
+    #
+    # Key/value JSON so keys can be added later without migrating the
+    # schema. Readers must tolerate meta.json being absent (files written
+    # before it existed) and individual keys being missing.
+    _subpop_names = sorted({
+        _spname
+        for _reps_data in all_results.values()
+        for (_h, _h_full, _kinds, _psi) in _reps_data
+        for _sp_map in _h_full.values()
+        for _spname in _sp_map
+    })
+    _meta = {
+        "schema_version": 1,
+        "source": "run_simulation_script",
+        "start_date": START_DATE,
+        "num_days": NUM_DAYS,
+        "timesteps_per_day": TIMESTEPS_PER_DAY,
+        "stochastic": RUN_STOCHASTIC,
+        "uncertainty_source": UNCERTAINTY_SOURCE,
+        "num_age_groups": NUM_AGE_GROUPS,
+        "num_risk_groups": NUM_RISK_GROUPS,
+        "age_group_labels": (config_dict.get("age_risk", {}) or {}).get("age_groups"),
+        "subpop_names": _subpop_names,
+        # Definition order, which SELECT DISTINCT would lose -- it decides
+        # scenario colour assignment and which scenario reads as baseline.
+        "scenarios": list(SCENARIOS.keys()),
+        # Order-bearing too: model_config.json's compartment order followed
+        # by its transition order, matching the metric lists the Model
+        # Builder's own selectors show. SELECT DISTINCT would return these
+        # alphabetically, scrambling a model's natural S -> E -> I -> H -> R
+        # reading order. Keep as-is; do not sort.
+        "compartments": [
+            _c for _c in (
+                list(config_dict.get("compartments", {}).keys())
+                if isinstance(config_dict.get("compartments"), dict)
+                else list(config_dict.get("compartments", []))
+            )
+        ],
+        "transition_vars": list(TRANSITION_VARS),
+        "n_reps": len(RUN_SCHEDULE),
+        "param_set_indices": list(RUN_SCHEDULE),
+    }
+    print(f"Writing Parquet to {_out_dir}")
+    rex.write_results_parquet(_con, _out_dir, meta=_meta)
     _con.close()
-    print(f"Results saved to {_db}")
+    _stage_path.unlink(missing_ok=True)
+    print(f"Results saved to {_out_dir}")

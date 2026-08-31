@@ -2266,7 +2266,7 @@ def _analysis_autosave(analysis_results, output_dir, json, np):
 
 @app.cell
 def _analysis_export_full_button(mo):
-    analysis_export_full_button = mo.ui.run_button(label="Export full results (SQLite)")
+    analysis_export_full_button = mo.ui.run_button(label="Export full results (Parquet)")
     mo.vstack([
         mo.md(
             "*The autosave above only stores population-level summary "
@@ -2275,10 +2275,12 @@ def _analysis_export_full_button(mo):
             "risk/replicate detail to disk — slower and much larger for "
             "many replicates, and only available when **Keep full "
             "per-replicate results** was on for the current run.*\n\n"
-            "*Written as a SQLite `.db` with the same `results`/`results_full` "
-            "schema the Export tab's `run_simulation.py` produces, so either "
-            "source opens in the Results Explorer notebook "
-            "(`results_explorer_notebook.py`) without conversion.*"
+            "*Written as a directory of partitioned Parquet with the same "
+            "`results`/`results_full` schema the Export tab's "
+            "`run_simulation.py` produces, so either source opens in the "
+            "Results Explorer notebook (`results_explorer_notebook.py`) "
+            "without conversion — Parquet loads there far faster than "
+            "SQLite and takes a fraction of the disk space.*"
         ),
         analysis_export_full_button,
     ])
@@ -2288,10 +2290,8 @@ def _analysis_export_full_button(mo):
 @app.cell
 def _analysis_export_full(
     analysis_export_full_button, analysis_results, output_dir, config_dict,
-    json, np, mo, sqlite3,
+    duckdb, np, pd, mo, rex,
 ):
-    import itertools
-
     mo.stop(not analysis_export_full_button.value)
     mo.stop(
         analysis_results is None,
@@ -2308,47 +2308,37 @@ def _analysis_export_full(
             kind="warn",
         ),
     )
-    # Written as SQLite with exactly the schema the exported script's
-    # results.db uses (results/results_full tables in _nb_export.py) --
-    # scenario, rep, param_set, compartment, kind, day, value
-    # (population-total) and the same plus subpop/age_group/risk_group (full
-    # detail) -- so the Results Explorer notebook opens either source with no
-    # conversion and no format branch.
+    # Written with exactly the schema the exported script's results_parquet
+    # uses (results/results_full tables in _nb_export.py) -- scenario, rep,
+    # param_set, compartment, kind, day, value (population-total) and the
+    # same plus subpop/age_group/risk_group (full detail) -- so the Results
+    # Explorer notebook opens either source with no conversion and no format
+    # branch.
     #
-    # Rows are inserted per array with executemany as the loops walk the
+    # Rows are appended per array as a small DataFrame as the loops walk the
     # results, rather than accumulated into one big list and serialized at
     # the end (what the earlier JSON export did). That keeps peak memory
     # bounded by a single (days, A, R) array instead of growing with the size
     # of the whole export: the JSON path measured ~5.5x the output size in
-    # peak RSS and scaled linearly with it (~8 GB to write a 1.4 GB export),
-    # while this stays flat at tens of MB regardless of scenario/replicate
-    # count.
+    # peak RSS and scaled linearly with it (~8 GB to write a 1.4 GB export).
+    # A native DuckDB table (rather than SQLite) so `con.append(table, df)`
+    # can do the insert as one bulk columnar write instead of a Python-level
+    # executemany, which measured ~10s per 100k rows against DuckDB (DuckDB
+    # is a vectorized engine tuned for bulk loads, not row-by-row inserts).
     _comp_set = set(analysis_results["compartments"])
     _kind_of = lambda _key: "compartment" if _key in _comp_set else "transition"
     _psets = analysis_results.get("param_set_indices", [])
 
-    _p = output_dir / "analysis_results_full.db"
-    # Rebuilt from scratch each export -- appending would mix replicates from
-    # different runs under the same rep indices.
-    _p.unlink(missing_ok=True)
-    for _stale in output_dir.glob("analysis_results_full.db-*"):
-        _stale.unlink(missing_ok=True)
-    _con = sqlite3.connect(_p)
-    _con.execute("PRAGMA journal_mode = WAL")
-    _con.execute("PRAGMA synchronous = NORMAL")
-    _cur = _con.cursor()
-    _cur.execute(
-        "CREATE TABLE results "
-        "(scenario TEXT, rep INTEGER, param_set INTEGER, compartment TEXT, kind TEXT, "
-        "day INTEGER, value REAL)"
-    )
-    _cur.execute(
-        "CREATE TABLE results_full "
-        "(scenario TEXT, rep INTEGER, param_set INTEGER, compartment TEXT, kind TEXT, "
-        "subpop TEXT, age_group INTEGER, risk_group INTEGER, day INTEGER, value REAL)"
-    )
+    _out_dir = output_dir / "analysis_results_full_parquet"
+    # A plain file next to the staging db, deleted once the Parquet export
+    # below succeeds -- if the process dies mid-run, its presence marks the
+    # Parquet directory as incomplete rather than silently half-written.
+    _stage_path = output_dir / ".analysis_results_full_stage.duckdb"
+    _stage_path.unlink(missing_ok=True)
+    _con = duckdb.connect(str(_stage_path))
+    rex.create_results_tables(_con)
 
-    with mo.status.spinner("Writing full results to SQLite…"):
+    with mo.status.spinner("Writing full results…"):
         for _scen, _reps in analysis_results["scenarios"].items():
             for _ri, _rep in enumerate(_reps):
                 _psi = _psets[_ri] if _ri < len(_psets) else None
@@ -2359,34 +2349,32 @@ def _analysis_export_full(
                         _agg_by_key[_key] = _arr if _key not in _agg_by_key else _agg_by_key[_key] + _arr
                 for _key, _arr in _agg_by_key.items():
                     _totals = _arr.sum(axis=(1, 2))  # (days,)
-                    _cur.executemany(
-                        "INSERT INTO results VALUES (?,?,?,?,?,?,?)",
-                        [(_scen, _ri, _psi, _key, _kind_of(_key), _d + 1, float(_v))
-                         for _d, _v in enumerate(_totals)],
-                    )
+                    _con.append("results", pd.DataFrame({
+                        "scenario": _scen, "rep": _ri, "param_set": _psi,
+                        "compartment": _key, "kind": _kind_of(_key),
+                        "day": np.arange(1, len(_totals) + 1),
+                        "value": _totals.astype(float),
+                    }))
                 for _sp_name, _sp_data in _rep.items():
                     for _key, _arr in _sp_data.items():
                         _arr = np.asarray(_arr)
                         _d_idx, _a_idx, _r_idx = np.indices(_arr.shape)
-                        _cur.executemany(
-                            "INSERT INTO results_full VALUES (?,?,?,?,?,?,?,?,?,?)",
-                            zip(
-                                itertools.repeat(_scen), itertools.repeat(_ri), itertools.repeat(_psi),
-                                itertools.repeat(_key), itertools.repeat(_kind_of(_key)),
-                                itertools.repeat(_sp_name),
-                                _a_idx.ravel().tolist(), _r_idx.ravel().tolist(),
-                                (_d_idx.ravel() + 1).tolist(), _arr.ravel().astype(float).tolist(),
-                            ),
-                        )
+                        _con.append("results_full", pd.DataFrame({
+                            "scenario": _scen, "rep": _ri, "param_set": _psi,
+                            "compartment": _key, "kind": _kind_of(_key),
+                            "subpop": _sp_name,
+                            "age_group": _a_idx.ravel(), "risk_group": _r_idx.ravel(),
+                            "day": _d_idx.ravel() + 1,
+                            "value": _arr.ravel().astype(float),
+                        }))
 
         # Run-level metadata the rows themselves cannot carry. Without this a
         # reader only sees day indices and 0-based age/risk indices, so it
-        # cannot plot real dates or label age bands -- and on a large .db,
-        # recovering even the scenario list by SELECT DISTINCT means a full
-        # table scan (measured at 7s on a 73M-row `results`, 49s on its
-        # `results_full`). Stored as key/value JSON so new keys can be added
-        # later without a schema migration; readers must tolerate its absence
-        # (files written before this table existed) and missing keys.
+        # cannot plot real dates or label age bands -- and on a large results
+        # set, recovering even the scenario list by SELECT DISTINCT means a
+        # full scan (measured at 7s on a 73M-row `results`, 49s on its
+        # `results_full`, back when this was SQLite). Readers must tolerate
+        # its absence (files written before it existed) and missing keys.
         _age_risk = (config_dict.get("age_risk", {}) or {})
         _meta = {
             "schema_version": 1,
@@ -2415,31 +2403,17 @@ def _analysis_export_full(
             "n_reps": len(_psets) or None,
             "param_set_indices": _psets,
         }
-        _cur.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT)")
-        _cur.executemany(
-            "INSERT INTO meta VALUES (?,?)",
-            [(_k, json.dumps(_v)) for _k, _v in _meta.items()],
-        )
 
-        # Every explorer query filters on (scenario, compartment) before
-        # aggregating, so without these each chart is a full scan.
-        _cur.execute(
-            "CREATE INDEX idx_results_scenario_compartment "
-            "ON results (scenario, compartment)"
-        )
-        _cur.execute(
-            "CREATE INDEX idx_results_full_scenario_compartment "
-            "ON results_full (scenario, compartment)"
-        )
-        _con.commit()
+        rex.write_results_parquet(_con, _out_dir, meta=_meta)
         _con.close()
+    _stage_path.unlink(missing_ok=True)
 
     _size_mb = sum(
-        _f.stat().st_size for _f in output_dir.glob("analysis_results_full.db*")
+        _f.stat().st_size for _f in _out_dir.rglob("*") if _f.is_file()
     ) / 1e6
     mo.callout(
         mo.md(
-            f"Full results saved to `{_p}` ({_size_mb:.1f} MB).\n\n"
+            f"Full results saved to `{_out_dir}` ({_size_mb:.1f} MB).\n\n"
             "Open it in the Results Explorer notebook "
             "(`generic_core/examples/results_explorer_notebook.py`) to build charts."
         ),

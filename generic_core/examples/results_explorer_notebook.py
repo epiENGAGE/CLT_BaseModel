@@ -2,20 +2,21 @@
 results_explorer_notebook.py
 ============================
 
-Interactive explorer for simulation results, in whichever form they were
-produced:
+Interactive explorer for simulation results, as a directory of
+Hive-partitioned Parquet, from either:
 
-  * ``analysis_results_full.db`` — the Analysis tab's "Export full results
-    (SQLite)" button in model_builder_notebook.py
-  * ``simulation_output/results.db`` — the ``run_simulation.py`` script
-    downloaded from that notebook's Export tab
+  * ``analysis_results_full_parquet/`` — the Analysis tab's "Export full
+    results (Parquet)" button in model_builder_notebook.py
+  * ``simulation_output/results_parquet/`` — the ``run_simulation.py``
+    script downloaded from that notebook's Export tab
 
 Both write the same ``results``/``results_full`` schema, so either opens the
-same way. Legacy ``.json`` exports are converted to SQLite once on first open.
+same way.
 
 Run with::
 
     marimo edit generic_core/examples/results_explorer_notebook.py
+    marimo run generic_core/examples/results_explorer_notebook.py
 
 Add as many charts as you like; each one independently chooses its metric(s),
 aggregation level (population total, or broken out by subpopulation / age /
@@ -171,8 +172,9 @@ def _title(mo):
 def _source_state(mo):
     # Holds the open DuckDB connection plus the dimensions discovered from
     # it. Kept in state (rather than recomputed) so unrelated widget changes
-    # never re-open the file — on a large results.db that discovery is the
-    # single most expensive thing this notebook does.
+    # never re-open the file — on a results_parquet/ directory without a
+    # meta.json, that discovery is the single most expensive thing this
+    # notebook does.
     get_source, set_source = mo.state(None)
     return get_source, set_source
 
@@ -198,14 +200,24 @@ def _source_browser(NOTEBOOK_DIR, mo, set_source_path):
     # one into memory would defeat the point of querying it in place.
     # file_browser navigates the filesystem where the notebook is running and
     # hands back a real path, which is exactly what the loader wants.
+    #
+    # selection_mode="file", not "directory": in directory mode, navigating
+    # INTO a folder (double-clicking it, the natural thing to do) makes it
+    # stop being selectable -- only its children are offered as selectable
+    # items from then on, so reaching the results_parquet/ folder itself
+    # means selecting it from its *parent* listing instead, which is not
+    # how anyone actually uses a file browser. So this selects a file
+    # *inside* the directory instead -- every results_parquet/ has a
+    # `_manifest.json` (and usually a `meta.json`) sitting right in it,
+    # and either's parent directory is the path we actually want.
     source_browser = mo.ui.file_browser(
         initial_path=NOTEBOOK_DIR,
-        filetypes=[".db", ".sqlite", ".sqlite3", ".json"],
+        filetypes=[".json"],
         selection_mode="file",
         multiple=False,
-        label="Browse for a results file",
+        label="Browse into a results_parquet/ folder, then select its _manifest.json",
         on_change=lambda _files: (
-            set_source_path(str(_files[0].path)) if _files else None
+            set_source_path(str(_files[0].path.parent)) if _files else None
         ),
     )
     return (source_browser,)
@@ -216,7 +228,7 @@ def _source_controls(mo, get_source_path, set_source_path):
     source_path = mo.ui.text(
         value=get_source_path(),
         on_change=set_source_path,
-        placeholder="/path/to/results.db  (or use Browse above)",
+        placeholder="/path/to/results_parquet  (or use Browse above)",
         label="Or enter the path directly",
         full_width=True,
     )
@@ -228,9 +240,9 @@ def _source_controls(mo, get_source_path, set_source_path):
 def _source_picker(load_button, mo, section_card, source_browser, source_path):
     section_card(
         "① Results file",
-        "A .db written by the Analysis tab's SQLite export or by "
-        "run_simulation.py. A legacy .json export also works — it is "
-        "converted to SQLite once, alongside the original.",
+        "A results_parquet/ directory written by the Analysis tab's export "
+        "or by run_simulation.py — browse into it above and select its "
+        "_manifest.json, or type its path below.",
         mo.vstack([
             source_browser,
             source_path,
