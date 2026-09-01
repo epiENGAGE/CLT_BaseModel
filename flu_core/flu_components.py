@@ -100,11 +100,14 @@ class SusceptibleToExposed(clt.TransitionVariable):
         inf_induced_inf_risk_reduce = params.inf_induced_inf_risk_reduce
         inf_induced_proportional_risk_reduce = inf_induced_inf_risk_reduce / (1 - inf_induced_inf_risk_reduce)
 
-        vax_induced_inf_risk_reduce = params.vax_induced_inf_risk_reduce
-        vax_induced_proportional_risk_reduce = vax_induced_inf_risk_reduce / (1 - vax_induced_inf_risk_reduce)
+        immune_force = 1 + inf_induced_proportional_risk_reduce * state.M
 
-        immune_force = (1 + inf_induced_proportional_risk_reduce * state.M +
-                        vax_induced_proportional_risk_reduce * state.MV)
+        # Vaccine-induced protection against infection is modeled as a
+        #   multiplicative reduction (rather than folded into the additive
+        #   `immune_force` denominator above) -- see
+        #   `compute_vax_induced_risk_reduce_initial` for how
+        #   `vax_induced_inf_risk_reduce_initial` is derived.
+        vax_immunity_factor = 1 - state.MV * params.vax_induced_inf_risk_reduce_initial
 
         if self.total_mixing_exposure is not None:
 
@@ -114,7 +117,11 @@ class SusceptibleToExposed(clt.TransitionVariable):
 
             # Need to convert tensor into array because combining np.ndarrays and
             #   tensors doesn't work, and everything else is an array
-            return np.asarray(beta_adjusted * self.total_mixing_exposure / immune_force)
+            # Note: `self.total_mixing_exposure` (a Tensor) must be the left
+            #   operand of the first multiplication -- np.ndarray * Tensor
+            #   raises TypeError, but Tensor * np.ndarray works fine.
+            return np.asarray(
+                (beta_adjusted * self.total_mixing_exposure / immune_force) * vax_immunity_factor)
 
         else:
             wtd_presymp_asymp_by_age = compute_wtd_presymp_asymp_by_age(state, params)
@@ -128,7 +135,7 @@ class SusceptibleToExposed(clt.TransitionVariable):
             raw_total_exposure = np.matmul(state.flu_contact_matrix, wtd_infectious_prop)
 
             # The total rate is only age-dependent -- it's the same rate across age groups
-            return params.relative_suscept * (beta_adjusted * raw_total_exposure / immune_force)
+            return params.relative_suscept * (beta_adjusted * vax_immunity_factor * raw_total_exposure / immune_force)
 
 
 class RecoveredToSusceptible(clt.TransitionVariable):
@@ -215,13 +222,13 @@ class PresympToSympRecover(clt.TransitionVariable):
         inf_induced_hosp_risk_reduce = params.inf_induced_hosp_risk_reduce
         inf_induced_proportional_risk_reduce = inf_induced_hosp_risk_reduce / (1 - inf_induced_hosp_risk_reduce)
 
-        vax_induced_hosp_risk_reduce = params.vax_induced_hosp_risk_reduce
-        vax_induced_proportional_risk_reduce = vax_induced_hosp_risk_reduce / (1 - vax_induced_hosp_risk_reduce)
+        immunity_force = 1 + inf_induced_proportional_risk_reduce * state.M
 
-        immunity_force = (1 + inf_induced_proportional_risk_reduce * state.M +
-                          vax_induced_proportional_risk_reduce * state.MV)
+        vax_immunity_factor = 1 - state.MV * params.vax_induced_hosp_risk_reduce_initial
 
-        return np.asarray((1 - params.IP_to_ISH_prop / immunity_force) * params.IP_to_IS_rate)
+        prob_hosp = (params.IP_to_ISH_prop / immunity_force) * vax_immunity_factor
+
+        return np.asarray((1 - prob_hosp) * params.IP_to_IS_rate)
 
 
 class PresympToSympHospital(clt.TransitionVariable):
@@ -245,13 +252,13 @@ class PresympToSympHospital(clt.TransitionVariable):
         inf_induced_hosp_risk_reduce = params.inf_induced_hosp_risk_reduce
         inf_induced_proportional_risk_reduce = inf_induced_hosp_risk_reduce / (1 - inf_induced_hosp_risk_reduce)
 
-        vax_induced_hosp_risk_reduce = params.vax_induced_hosp_risk_reduce
-        vax_induced_proportional_risk_reduce = vax_induced_hosp_risk_reduce / (1 - vax_induced_hosp_risk_reduce)
+        immunity_force = 1 + inf_induced_proportional_risk_reduce * state.M
 
-        immunity_force = (1 + inf_induced_proportional_risk_reduce * state.M +
-                          vax_induced_proportional_risk_reduce * state.MV)
+        vax_immunity_factor = 1 - state.MV * params.vax_induced_hosp_risk_reduce_initial
 
-        return np.asarray((params.IP_to_ISH_prop / immunity_force) * params.IP_to_IS_rate)
+        prob_hosp = (params.IP_to_ISH_prop / immunity_force) * vax_immunity_factor
+
+        return np.asarray(prob_hosp * params.IP_to_IS_rate)
 
 
 class SympRecoverToRecovered(clt.TransitionVariable):
@@ -293,19 +300,17 @@ class SympHospitalToHospRecover(clt.TransitionVariable):
         """
         
         inf_induced_death_risk_reduce = params.inf_induced_death_risk_reduce
-        vax_induced_death_risk_reduce = params.vax_induced_death_risk_reduce
 
         inf_induced_proportional_risk_reduce = \
             inf_induced_death_risk_reduce / (1 - inf_induced_death_risk_reduce)
 
-        vax_induced_proportional_risk_reduce = \
-            vax_induced_death_risk_reduce / (1 - vax_induced_death_risk_reduce)
+        immunity_force = 1 + inf_induced_proportional_risk_reduce * state.M
 
-        immunity_force = (1 + inf_induced_proportional_risk_reduce * state.M +
-                          vax_induced_proportional_risk_reduce * state.MV)
+        vax_immunity_factor = 1 - state.MV * params.vax_induced_death_risk_reduce_initial
 
-        return np.full((params.num_age_groups, params.num_risk_groups),
-                       (1 - params.ISH_to_HD_prop / immunity_force) * params.ISH_to_H_rate)
+        prob_death = (params.ISH_to_HD_prop / immunity_force) * vax_immunity_factor
+
+        return np.asarray((1 - prob_death) * params.ISH_to_H_rate)
 
 
 class SympHospitalToHospDead(clt.TransitionVariable):
@@ -331,19 +336,17 @@ class SympHospitalToHospDead(clt.TransitionVariable):
         """
         
         inf_induced_death_risk_reduce = params.inf_induced_death_risk_reduce
-        vax_induced_death_risk_reduce = params.vax_induced_death_risk_reduce
 
         inf_induced_proportional_risk_reduce = \
             inf_induced_death_risk_reduce / (1 - inf_induced_death_risk_reduce)
 
-        vax_induced_proportional_risk_reduce = \
-            vax_induced_death_risk_reduce / (1 - vax_induced_death_risk_reduce)
+        immunity_force = 1 + inf_induced_proportional_risk_reduce * state.M
 
-        immunity_force = (1 + inf_induced_proportional_risk_reduce * state.M +
-                          vax_induced_proportional_risk_reduce * state.MV)
+        vax_immunity_factor = 1 - state.MV * params.vax_induced_death_risk_reduce_initial
 
-        return np.full((params.num_age_groups, params.num_risk_groups),
-                       (params.ISH_to_HD_prop / immunity_force) * params.ISH_to_H_rate)
+        prob_death = (params.ISH_to_HD_prop / immunity_force) * vax_immunity_factor
+
+        return np.asarray(prob_death * params.ISH_to_H_rate)
         
         
 
@@ -447,7 +450,7 @@ class InfInducedImmunity(clt.EpiMetric):
         #   various realizations for more information
 
         return (self.R_to_S.current_val / params.total_pop_age_risk) * \
-               (1 - params.inf_induced_saturation * state.M - params.vax_induced_saturation * state.MV) - \
+               (1 - params.inf_induced_saturation * state.M) - \
                params.inf_induced_immune_wane * state.M / num_timesteps
 
 
@@ -564,6 +567,161 @@ class VaxInducedImmunity(clt.EpiMetric):
                 # Reset vaccine-induced immunity to zero
                 self.current_val = np.zeros_like(self.current_val)
                 print(f"VaxInducedImmunity reset to 0 on {current_date}")
+
+
+def compute_vax_induced_risk_reduce_initial(params: FluSubpopParams,
+                                         schedules: sc.objdict,
+                                         start_real_date: datetime.date) -> tuple:
+    """
+    Computes the "zero-waning" (peak, just-after-protection-delay) vaccine
+    efficacy values `vax_induced_inf_risk_reduce_initial`,
+    `vax_induced_hosp_risk_reduce_initial`, and `vax_induced_death_risk_reduce_initial`
+    from the corresponding season-average efficacy values
+    (`vax_induced_inf_risk_reduce`, `vax_induced_hosp_risk_reduce`,
+    `vax_induced_death_risk_reduce`), `vax_induced_immune_wane`, and the
+    `daily_vaccines` schedule.
+
+    For each age-risk group, given the season's vaccination timing
+    (`p_prot`, the proportion of effective doses -- i.e. vaccination date
+    plus protection delay -- given on each day of the season) and waning
+    rate w_V, this solves for the peak efficacy VE_0 such that the
+    dose-timing-weighted average realized efficacy over the season equals
+    the input (season-average) efficacy value:
+
+        VE_0 = w_V * T * VE_season /
+               ((1 - exp(-w_V)) * sum_{tau=t0}^{T-1} [
+                   (sum_{u=t0}^{tau} p_prot(u) * exp(-w_V * (tau - u))) /
+                   (sum_{u=t0}^{tau} p_prot(u))
+               ])
+
+    where t0 is the first day of the season with a nonzero dose and T is
+    the number of days from t0 through the last day with a nonzero dose.
+
+    The season window is the period between two consecutive occurrences of
+    `vax_immunity_reset_date_mm_dd` (the occurrence on or before
+    `start_real_date`, through one year later), or if that parameter is
+    not set, the 12 months starting from the first date covered by the
+    `daily_vaccines` schedule. This window is further intersected with
+    the actual date range covered by the `daily_vaccines` schedule (which
+    matters when the reset-date window extends past the end of the
+    schedule, or -- in the no-reset-date case -- when the schedule itself
+    spans less than 12 months).
+
+    Edge cases:
+        - If waning (w_V) is 0 for a given age-risk group, VE_0 equals the
+          input (season-average) value for that group -- no adjustment is
+          needed since there is no waning to correct for.
+        - If there are no vaccine doses in the (intersected) season window
+          for a given age-risk group, VE_0 equals the input value for that
+          group -- vaccine-induced immunity is always 0 for that group, so
+          the value is never actually applied.
+
+    Args:
+        params (FluSubpopParams):
+            holds `vax_induced_inf_risk_reduce`, `vax_induced_hosp_risk_reduce`,
+            `vax_induced_death_risk_reduce`, `vax_induced_immune_wane`,
+            `vax_immunity_reset_date_mm_dd`, `num_age_groups`, and
+            `num_risk_groups`.
+        schedules (sc.objdict):
+            holds the `daily_vaccines` `Schedule` instance (already shifted
+            by `vax_protection_delay_days`, date-indexed, one A x R array
+            per day).
+        start_real_date (datetime.date):
+            real-world date corresponding to the start of the simulation --
+            used to anchor the season window.
+
+    Returns:
+        (vax_induced_inf_risk_reduce_initial, vax_induced_hosp_risk_reduce_initial,
+         vax_induced_death_risk_reduce_initial), each an np.ndarray of shape (A, R).
+    """
+
+    target_shape = (params.num_age_groups, params.num_risk_groups)
+
+    w_arr = np.broadcast_to(
+        np.asarray(params.vax_induced_immune_wane, dtype=float), target_shape)
+
+    vaccines_df = schedules["daily_vaccines"].timeseries_df
+
+    schedule_min_date = vaccines_df.index.min()
+    schedule_max_date = vaccines_df.index.max()
+
+    if params.vax_immunity_reset_date_mm_dd is not None:
+        month, day = (int(x) for x in params.vax_immunity_reset_date_mm_dd.split('_'))
+        window_start = datetime.date(start_real_date.year, month, day)
+        if window_start >= start_real_date:
+            window_start = datetime.date(start_real_date.year - 1, month, day)
+        window_end = datetime.date(window_start.year + 1, month, day)
+    else:
+        window_start = schedule_min_date
+        window_end = schedule_min_date + datetime.timedelta(days=365)
+
+    window_start = max(window_start, schedule_min_date)
+    window_end = min(window_end, schedule_max_date + datetime.timedelta(days=1))
+
+    if window_start < window_end:
+        mask = (vaccines_df.index >= window_start) & (vaccines_df.index < window_end)
+        window_doses_df = vaccines_df.loc[mask]
+    else:
+        window_doses_df = vaccines_df.iloc[0:0]
+
+    if not window_doses_df.empty:
+        doses_stack = np.stack(window_doses_df["daily_vaccines"].values, axis=0)
+        if doses_stack.shape[1:] != target_shape:
+            # Time series has a different age-risk resolution than the
+            # risk-reduce parameters -- aggregate (sum) across all
+            # dimensions and broadcast the resulting total evenly across
+            # every age-risk group.
+            doses_stack = doses_stack.reshape(doses_stack.shape[0], -1).sum(axis=1, keepdims=True)
+            doses_stack = np.broadcast_to(doses_stack, (doses_stack.shape[0],) + target_shape)
+    else:
+        doses_stack = np.zeros((0,) + target_shape)
+
+    def compute_initial_for_field(field_name: str) -> np.ndarray:
+
+        ve_season_arr = np.broadcast_to(
+            np.asarray(getattr(params, field_name), dtype=float), target_shape).copy()
+        ve_initial_arr = ve_season_arr.copy()
+
+        for a in range(target_shape[0]):
+            for r in range(target_shape[1]):
+
+                w_ar = w_arr[a, r]
+                ve_season = ve_season_arr[a, r]
+
+                if w_ar == 0 or doses_stack.shape[0] == 0:
+                    continue
+
+                cell_doses = doses_stack[:, a, r]
+                nonzero_idxs = np.flatnonzero(cell_doses > 0)
+
+                if nonzero_idxs.size == 0:
+                    continue
+
+                t0_idx, last_idx = nonzero_idxs[0], nonzero_idxs[-1]
+                sub = cell_doses[t0_idx:last_idx + 1]
+                T = sub.size
+                p_prot = sub / sub.sum()
+
+                cumsum_p_prot = np.cumsum(p_prot)
+                
+                # numer[n] = sum_{u=0}^{n} p_prot(u) * exp(-w * (n - u))
+                #          = p_prot(n) + exp(-w) * numer[n - 1]
+                decay = np.exp(-w_ar)
+                numer = np.empty(T)
+                acc = 0.0
+                for n in range(T):
+                    acc = p_prot[n] + decay * acc
+                    numer[n] = acc
+
+                S = np.sum(numer / cumsum_p_prot)
+
+                ve_initial_arr[a, r] = w_ar * T * ve_season / ((1 - decay) * S)
+
+        return ve_initial_arr
+
+    return (compute_initial_for_field("vax_induced_inf_risk_reduce"),
+           compute_initial_for_field("vax_induced_hosp_risk_reduce"),
+           compute_initial_for_field("vax_induced_death_risk_reduce"))
 
 
 class BetaReduce(clt.DynamicVal):
@@ -980,8 +1138,36 @@ class FluSubpopModel(clt.SubpopModel):
         # (redundant) because the parent class `SubpopModel`'s `__init__`
         # creates deep copies.
         super().__init__(state, params, simulation_settings, RNG, name)
-        
+
         self.params = clt.updated_dataclass(self.params, {"start_real_date": self.start_real_date})
+
+        self.update_vax_induced_risk_reduce_initial()
+
+    def update_vax_induced_risk_reduce_initial(self) -> None:
+        """
+        Recomputes `vax_induced_inf_risk_reduce_initial`,
+        `vax_induced_hosp_risk_reduce_initial`, and
+        `vax_induced_death_risk_reduce_initial` from the current
+        `daily_vaccines` schedule and updates `self.params` in place.
+
+        This must be re-run (not just computed once at construction)
+        whenever the `daily_vaccines` schedule or any of the underlying
+        base parameters (`vax_induced_*_risk_reduce`,
+        `vax_induced_immune_wane`) change after construction -- e.g. via
+        `replace_schedule` or a `ScenarioRunner` parameter override --
+        otherwise these derived values would silently keep reflecting
+        the schedule/params from construction time. See
+        `reset_simulation`, which calls this for the same reason
+        `VaxInducedImmunity`'s initial value is recomputed there.
+        """
+
+        inf_initial, hosp_initial, death_initial = compute_vax_induced_risk_reduce_initial(
+            self.params, self.schedules, self.start_real_date)
+        self.params = clt.updated_dataclass(self.params, {
+            "vax_induced_inf_risk_reduce_initial": inf_initial,
+            "vax_induced_hosp_risk_reduce_initial": hosp_initial,
+            "vax_induced_death_risk_reduce_initial": death_initial,
+        })
 
     def check_humidity_input(self) -> None:
         """
@@ -1355,17 +1541,21 @@ class FluSubpopModel(clt.SubpopModel):
 
     def reset_simulation(self) -> None:
         """
-        Extends the base `reset_simulation` to recompute `MV.init_val`
-        from the currently loaded vaccine schedule before resetting.
+        Extends the base `reset_simulation` to recompute `MV.init_val` and
+        `vax_induced_*_risk_reduce_initial` from the currently loaded
+        vaccine schedule (and current base params) before resetting.
 
         This ensures that if the `daily_vaccines` schedule has been replaced
-        (e.g. via `replace_schedule`), the model resets to an initial
-        vaccine-induced immunity that is consistent with the new schedule,
-        rather than the value computed at construction time from the original
-        schedule.
+        (e.g. via `replace_schedule`), or the underlying
+        `vax_induced_*_risk_reduce`/`vax_induced_immune_wane` params have
+        been overridden (e.g. by `ScenarioRunner`), the model resets to
+        values consistent with the current schedule/params, rather than
+        the values computed at construction time from the original
+        schedule/params.
 
-        The recomputation uses `VaxInducedImmunity.adjust_initial_value()`
-        with `MV.original_init_val` as the base — the unmodified value
+        The `MV.init_val` recomputation uses
+        `VaxInducedImmunity.adjust_initial_value()` with
+        `MV.original_init_val` as the base — the unmodified value
         from the state JSON — so adjustments do not compound across calls.
         """
 
@@ -1380,6 +1570,8 @@ class FluSubpopModel(clt.SubpopModel):
         # Use the init_val setter so current_val is also updated immediately,
         # before super()'s reset loop overwrites it again (harmlessly).
         MV.init_val = new_init_val
+
+        self.update_vax_induced_risk_reduce_initial()
 
         super().reset_simulation()
 

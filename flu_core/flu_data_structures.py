@@ -177,6 +177,20 @@ class FluSubpopParams(clt.SubpopParams):
         vax_induced_death_risk_reduce (positive float):
             reduction in risk of death
             after getting vaccinated
+        vax_induced_inf_risk_reduce_initial (np.ndarray of positive floats):
+            "peak" (zero-waning) vaccine-induced reduction in risk
+            of getting infected -- computed once from
+            vax_induced_inf_risk_reduce, vax_induced_immune_wane,
+            and the daily_vaccines schedule so that, averaged over
+            the vaccination season and accounting for waning, it
+            reproduces vax_induced_inf_risk_reduce. See
+            FluSubpopModel.compute_vax_induced_risk_reduce_initial.
+        vax_induced_hosp_risk_reduce_initial (np.ndarray of positive floats):
+            analogous "peak" (zero-waning) value for
+            vax_induced_hosp_risk_reduce.
+        vax_induced_death_risk_reduce_initial (np.ndarray of positive floats):
+            analogous "peak" (zero-waning) value for
+            vax_induced_death_risk_reduce.
         vax_protection_delay_days: (positive int):
             number of days after vaccination until vaccine
             protection is effective.
@@ -262,6 +276,9 @@ class FluSubpopParams(clt.SubpopParams):
     vax_induced_inf_risk_reduce: Optional[float] = None
     vax_induced_hosp_risk_reduce: Optional[float] = None
     vax_induced_death_risk_reduce: Optional[float] = None
+    vax_induced_inf_risk_reduce_initial: Optional[np.ndarray] = None
+    vax_induced_hosp_risk_reduce_initial: Optional[np.ndarray] = None
+    vax_induced_death_risk_reduce_initial: Optional[np.ndarray] = None
     vax_protection_delay_days: Optional[int] = 0
     vax_immunity_reset_date_mm_dd: Optional[str] = None
 
@@ -620,6 +637,9 @@ class FluFullMetapopParamsTensors(FluTravelParamsTensors):
     vax_induced_inf_risk_reduce: Optional[torch.Tensor] = None
     vax_induced_hosp_risk_reduce: Optional[torch.Tensor] = None
     vax_induced_death_risk_reduce: Optional[torch.Tensor] = None
+    vax_induced_inf_risk_reduce_initial: Optional[torch.Tensor] = None
+    vax_induced_hosp_risk_reduce_initial: Optional[torch.Tensor] = None
+    vax_induced_death_risk_reduce_initial: Optional[torch.Tensor] = None
     vax_protection_delay_days: Optional[torch.Tensor] = 0
     vax_immunity_reset_date_mm_dd: Optional[str] = None
 

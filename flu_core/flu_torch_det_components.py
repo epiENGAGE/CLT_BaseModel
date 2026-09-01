@@ -127,13 +127,11 @@ def compute_S_to_E(state: FluFullMetapopStateTensors,
     inf_induced_inf_risk_reduce = params.inf_induced_inf_risk_reduce
     inf_induced_proportional_risk_reduce = inf_induced_inf_risk_reduce / (1 - inf_induced_inf_risk_reduce)
 
-    vax_induced_inf_risk_reduce = params.vax_induced_inf_risk_reduce
-    vax_induced_proportional_risk_reduce = vax_induced_inf_risk_reduce / (1 - vax_induced_inf_risk_reduce)
+    immune_force = 1 + inf_induced_proportional_risk_reduce * state.M
 
-    immune_force = (1 + inf_induced_proportional_risk_reduce * state.M +
-                    vax_induced_proportional_risk_reduce * state.MV)
+    vax_immunity_factor = 1 - state.MV * params.vax_induced_inf_risk_reduce_initial
 
-    rate = beta_adjusted * total_mixing_exposure / immune_force
+    rate = beta_adjusted * total_mixing_exposure * vax_immunity_factor / immune_force
 
     S_to_E = state.S * torch_approx_binom_probability_from_rate(rate, dt)
 
@@ -168,13 +166,13 @@ def compute_IP_to_ISR_rate(state: FluFullMetapopStateTensors,
     inf_induced_hosp_risk_reduce = params.inf_induced_hosp_risk_reduce
     inf_induced_proportional_risk_reduce = inf_induced_hosp_risk_reduce / (1 - inf_induced_hosp_risk_reduce)
 
-    vax_induced_hosp_risk_reduce = params.vax_induced_hosp_risk_reduce
-    vax_induced_proportional_risk_reduce = vax_induced_hosp_risk_reduce / (1 - vax_induced_hosp_risk_reduce)
+    immunity_force = 1 + inf_induced_proportional_risk_reduce * state.M
 
-    immunity_force = (1 + inf_induced_proportional_risk_reduce * state.M +
-                      vax_induced_proportional_risk_reduce * state.MV)
+    vax_immunity_factor = 1 - state.MV * params.vax_induced_hosp_risk_reduce_initial
 
-    rate = params.IP_to_IS_rate * (1 - params.IP_to_ISH_prop / immunity_force)
+    prob_hosp = (params.IP_to_ISH_prop / immunity_force) * vax_immunity_factor
+
+    rate = params.IP_to_IS_rate * (1 - prob_hosp)
 
     return rate
 
@@ -189,13 +187,13 @@ def compute_IP_to_ISH_rate(state: FluFullMetapopStateTensors,
     inf_induced_hosp_risk_reduce = params.inf_induced_hosp_risk_reduce
     inf_induced_proportional_risk_reduce = inf_induced_hosp_risk_reduce / (1 - inf_induced_hosp_risk_reduce)
 
-    vax_induced_hosp_risk_reduce = params.vax_induced_hosp_risk_reduce
-    vax_induced_proportional_risk_reduce = vax_induced_hosp_risk_reduce / (1 - vax_induced_hosp_risk_reduce)
+    immunity_force = 1 + inf_induced_proportional_risk_reduce * state.M
 
-    immunity_force = (1 + inf_induced_proportional_risk_reduce * state.M +
-                      vax_induced_proportional_risk_reduce * state.MV)
+    vax_immunity_factor = 1 - state.MV * params.vax_induced_hosp_risk_reduce_initial
 
-    rate = params.IP_to_IS_rate * (params.IP_to_ISH_prop / immunity_force)
+    prob_hosp = (params.IP_to_ISH_prop / immunity_force) * vax_immunity_factor
+
+    rate = params.IP_to_IS_rate * prob_hosp
 
     return rate
 
@@ -238,18 +236,17 @@ def compute_ISH_to_HR_rate(state: FluFullMetapopStateTensors,
     """
 
     inf_induced_death_risk_reduce = params.inf_induced_death_risk_reduce
-    vax_induced_death_risk_reduce = params.vax_induced_death_risk_reduce
 
     inf_induced_proportional_risk_reduce = \
         inf_induced_death_risk_reduce / (1 - inf_induced_death_risk_reduce)
 
-    vax_induced_proportional_risk_reduce = \
-        vax_induced_death_risk_reduce / (1 - vax_induced_death_risk_reduce)
+    immunity_force = 1 + inf_induced_proportional_risk_reduce * state.M
 
-    immunity_force = (1 + inf_induced_proportional_risk_reduce * state.M +
-                      vax_induced_proportional_risk_reduce * state.MV)
+    vax_immunity_factor = 1 - state.MV * params.vax_induced_death_risk_reduce_initial
 
-    rate = (1 - params.ISH_to_HD_prop / immunity_force) * params.ISH_to_H_rate
+    prob_death = (params.ISH_to_HD_prop / immunity_force) * vax_immunity_factor
+
+    rate = (1 - prob_death) * params.ISH_to_H_rate
 
     return rate
 
@@ -262,18 +259,17 @@ def compute_ISH_to_HD_rate(state: FluFullMetapopStateTensors,
     """
 
     inf_induced_death_risk_reduce = params.inf_induced_death_risk_reduce
-    vax_induced_death_risk_reduce = params.vax_induced_death_risk_reduce
 
     inf_induced_proportional_risk_reduce = \
         inf_induced_death_risk_reduce / (1 - inf_induced_death_risk_reduce)
 
-    vax_induced_proportional_risk_reduce = \
-        vax_induced_death_risk_reduce / (1 - vax_induced_death_risk_reduce)
+    immunity_force = 1 + inf_induced_proportional_risk_reduce * state.M
 
-    immunity_force = (1 + inf_induced_proportional_risk_reduce * state.M +
-                      vax_induced_proportional_risk_reduce * state.MV)
+    vax_immunity_factor = 1 - state.MV * params.vax_induced_death_risk_reduce_initial
 
-    rate = params.ISH_to_HD_prop / immunity_force * params.ISH_to_H_rate
+    prob_death = (params.ISH_to_HD_prop / immunity_force) * vax_immunity_factor
+
+    rate = prob_death * params.ISH_to_H_rate
 
     return rate
 
@@ -324,7 +320,7 @@ def compute_R_to_S(state: FluFullMetapopStateTensors,
 
 
 # The update rule for immunity is
-#   - dM/dt = (R_to_S_rate * R / N) * (1 - inf_induced_saturation * M - vax_induced_saturation * M_v)
+#   - dM/dt = (R_to_S_rate * R / N) * (1 - inf_induced_saturation * M)
 #                   - inf_induced_immune_wane * state.M
 #   - dMV/dt = (new vaccinations at time t - delta)/ N - vax_induced_immune_wane
 
@@ -341,7 +337,7 @@ def compute_M_change(state: FluFullMetapopStateTensors, params: FluFullMetapopPa
     R_to_S = state.R * torch_approx_binom_probability_from_rate(params.R_to_S_rate, dt)
 
     M_change = (R_to_S / precomputed.total_pop_LAR_tensor) * \
-               (1 - params.inf_induced_saturation * state.M - params.vax_induced_saturation * state.MV) - \
+               (1 - params.inf_induced_saturation * state.M) - \
                params.inf_induced_immune_wane * state.M * dt
 
     # Because R_to_S includes dt already, we do not return M_change * dt -- we only multiply

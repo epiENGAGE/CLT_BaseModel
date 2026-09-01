@@ -10,4 +10,9 @@ flu_instances/examples/profiling_findings.md
 *.db
 flu_instances/examples/__marimo__/
 flu_instances/examples/__pycache__/
+.history/
+SIHR_core/__pycache__/
+__marimo__/
 flu_instances/examples/outputs/
+MA_vax_standalone/
+generic_core/
