@@ -210,8 +210,18 @@ class FluSubpopParams(clt.SubpopParams):
         vax_immunity_reset_date_mm_dd: (str or None):
             date (in "mm_dd" format) each year when vaccine
             immunity resets, and date from which to start
-            calculating contribution of vaccines to 
+            calculating contribution of vaccines to
             vaccine-induced immunity.
+        infection_immunity_start_date_mm_dd: (str or None):
+            date (in "mm_dd" format, resolved using
+            start_real_date's year) that the input initial
+            value of infection-induced immunity (M) corresponds
+            to. If this date is before start_real_date, M(0) is
+            decayed forward (waning only) to start_real_date. If
+            this date is after start_real_date, M(0) is set to 0
+            at start_real_date and the input M(0) is instead
+            added to M once this date is reached during the
+            simulation.
         R_to_S_rate (positive float):
             rate at which people in R move to S.
         E_to_I_rate (positive float):
@@ -295,6 +305,7 @@ class FluSubpopParams(clt.SubpopParams):
     adjust_VE_for_seasonal_waning: Optional[bool] = True
     vax_protection_delay_days: Optional[int] = 0
     vax_immunity_reset_date_mm_dd: Optional[str] = None
+    infection_immunity_start_date_mm_dd: Optional[str] = None
 
     R_to_S_rate: Optional[float] = None
     E_to_I_rate: Optional[float] = None
@@ -539,8 +550,8 @@ class FluTravelParamsTensors:
                 else:
                     setattr(self, name, value.view(1, A, A).expand(L, A, A))
             
-            # string parameters
-            elif isinstance(value, str) or isinstance(value, datetime.date):
+            # string parameters (and unset optional parameters)
+            elif value is None or isinstance(value, str) or isinstance(value, datetime.date):
                 continue
 
             # If scalar or already L x A x R, do not need to adjust
@@ -657,6 +668,7 @@ class FluFullMetapopParamsTensors(FluTravelParamsTensors):
     adjust_VE_for_seasonal_waning: Optional[torch.Tensor] = True
     vax_protection_delay_days: Optional[torch.Tensor] = 0
     vax_immunity_reset_date_mm_dd: Optional[str] = None
+    infection_immunity_start_date_mm_dd: Optional[str] = None
 
     R_to_S_rate: Optional[torch.Tensor] = None
     E_to_I_rate: Optional[torch.Tensor] = None

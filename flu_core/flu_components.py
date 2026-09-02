@@ -430,9 +430,84 @@ class InfInducedImmunity(clt.EpiMetric):
     See parent class docstring for other attributes.
     """
 
-    def __init__(self, init_val, R_to_S):
-        super().__init__(init_val)
+    def __init__(self,
+                 init_val,
+                 R_to_S,
+                 current_real_date: datetime.date,
+                 params: FluSubpopParams,
+                 timesteps_per_day: int):
         self.R_to_S = R_to_S
+        self.pending_injection_date = None
+
+        adjusted_init_val = self.adjust_initial_value(
+            init_val, current_real_date, params, timesteps_per_day)
+        super().__init__(adjusted_init_val)
+
+    def adjust_initial_value(self,
+                             init_val: np.ndarray,
+                             current_real_date: datetime.date,
+                             params: FluSubpopParams,
+                             timesteps_per_day: int):
+        """
+        Adjusts initial value of infection-induced immunity based on
+        infection_immunity_start_date_mm_dd, the date that init_val
+        (M(0)) corresponds to.
+
+        If infection_immunity_start_date_mm_dd is None, or falls on
+        current_real_date, init_val is used as-is. If it is before
+        current_real_date, init_val is decayed forward (waning only)
+        to current_real_date. If it is after current_real_date, the
+        adjusted initial value is zero, and init_val is instead added
+        to current_val once infection_immunity_start_date_mm_dd is
+        reached (see check_and_apply_injection).
+        """
+
+        self.original_init_val = copy.deepcopy(init_val)
+        self.adjusted_init_val = copy.deepcopy(init_val)
+        self.pending_injection_date = None
+
+        if params.infection_immunity_start_date_mm_dd is not None:
+            # Parse infection immunity start date (format: "MM_DD"),
+            #   resolved using current_real_date's year
+            month, day = params.infection_immunity_start_date_mm_dd.split('_')
+            immunity_start_date = datetime.date(
+                current_real_date.year, int(month), int(day))
+
+            if immunity_start_date < current_real_date:
+                # init_val is a past value -- decay it forward
+                #   (waning only) to current_real_date
+                num_days = (current_real_date - immunity_start_date).days
+                for _ in range(num_days):
+                    for _ in range(timesteps_per_day):
+                        self.adjusted_init_val = self.adjusted_init_val - \
+                            params.inf_induced_immune_wane * self.adjusted_init_val / timesteps_per_day
+            elif immunity_start_date > current_real_date:
+                # init_val is a future value -- start at 0 and add
+                #   init_val once immunity_start_date is reached
+                self.adjusted_init_val = np.zeros_like(self.adjusted_init_val)
+                self.pending_injection_date = immunity_start_date
+
+        return self.adjusted_init_val
+
+    def check_and_apply_injection(self,
+                                  current_date: datetime.date,
+                                  params: FluSubpopParams):
+        """
+        Check if current_date matches the pending
+        infection_immunity_start_date_mm_dd injection date. If so,
+        add the original initial value to current_val (one-time only).
+
+        Args:
+            current_date: The current simulation date
+            params: FluSubpopParams containing
+                infection_immunity_start_date_mm_dd
+        """
+
+        if self.pending_injection_date is not None and \
+                current_date == self.pending_injection_date:
+            self.current_val = self.current_val + self.original_init_val
+            self.pending_injection_date = None
+            print(f"InfInducedImmunity increased by initial value on {current_date}")
 
     def get_change_in_current_val(self,
                                   state: FluSubpopState,
@@ -1363,9 +1438,11 @@ class FluSubpopModel(clt.SubpopModel):
 
     def prepare_daily_state(self) -> None:
         """
-        Override parent method to add vaccine immunity reset check.
+        Override parent method to add vaccine immunity reset check and
+        infection-induced immunity injection check.
         At beginning of each day, update schedules, dynamic values,
-        and check for vaccine immunity reset.
+        and check for vaccine immunity reset and infection immunity
+        injection.
         """
         # Call parent implementation first to update schedules and dynamic vals
         super().prepare_daily_state()
@@ -1376,6 +1453,21 @@ class FluSubpopModel(clt.SubpopModel):
                 self.current_real_date,
                 self.params
             )
+
+        # Check and potentially inject infection-induced immunity
+        if hasattr(self.epi_metrics, 'M'):
+            self.epi_metrics.M.check_and_apply_injection(
+                self.current_real_date,
+                self.params
+            )
+
+        # The reset/injection checks above set `current_val` directly on
+        #   the epi metric objects -- sync `self.state` immediately so
+        #   that today's ODE update (which reads `state.MV`/`state.M`,
+        #   not the epi metric's own `current_val`) sees the up-to-date
+        #   value on its very first timestep, instead of a stale
+        #   pre-reset/pre-injection value.
+        self.state.sync_to_current_vals(self.epi_metrics)
 
     def create_compartments(self) -> sc.objdict[str, clt.Compartment]:
 
@@ -1511,7 +1603,10 @@ class FluSubpopModel(clt.SubpopModel):
 
         epi_metrics.M = \
             InfInducedImmunity(getattr(self.state, "M"),
-                               self.transition_variables.R_to_S)
+                               self.transition_variables.R_to_S,
+                               self.current_real_date,
+                               self.params,
+                               self.simulation_settings.timesteps_per_day)
 
         epi_metrics.MV = \
             VaxInducedImmunity(getattr(self.state, "MV"),
@@ -1551,26 +1646,29 @@ class FluSubpopModel(clt.SubpopModel):
 
     def reset_simulation(self) -> None:
         """
-        Extends the base `reset_simulation` to recompute `MV.init_val` and
-        `vax_induced_*_risk_reduce_initial` from the currently loaded
-        vaccine schedule (and current base params) before resetting.
+        Extends the base `reset_simulation` to recompute `MV.init_val`,
+        `M.init_val`, and `vax_induced_*_risk_reduce_initial` from the
+        currently loaded vaccine schedule (and current base params)
+        before resetting.
 
         This ensures that if the `daily_vaccines` schedule has been replaced
         (e.g. via `replace_schedule`), or the underlying
-        `vax_induced_*_risk_reduce`/`vax_induced_immune_wane` params have
-        been overridden (e.g. by `ScenarioRunner`), the model resets to
-        values consistent with the current schedule/params, rather than
-        the values computed at construction time from the original
-        schedule/params.
+        `vax_induced_*_risk_reduce`/`vax_induced_immune_wane`/
+        `inf_induced_immune_wane`/`infection_immunity_start_date_mm_dd`
+        params have been overridden (e.g. by `ScenarioRunner`), the model
+        resets to values consistent with the current schedule/params,
+        rather than the values computed at construction time from the
+        original schedule/params.
 
-        The `MV.init_val` recomputation uses
-        `VaxInducedImmunity.adjust_initial_value()` with
-        `MV.original_init_val` as the base — the unmodified value
+        The `MV.init_val` and `M.init_val` recomputations use
+        `VaxInducedImmunity.adjust_initial_value()` and
+        `InfInducedImmunity.adjust_initial_value()` respectively, with
+        `original_init_val` as the base — the unmodified value
         from the state JSON — so adjustments do not compound across calls.
         """
 
         MV = self.epi_metrics["MV"]
-        new_init_val = MV.adjust_initial_value(
+        new_MV_init_val = MV.adjust_initial_value(
             MV.original_init_val,
             self.start_real_date,
             self.params,
@@ -1579,7 +1677,16 @@ class FluSubpopModel(clt.SubpopModel):
         )
         # Use the init_val setter so current_val is also updated immediately,
         # before super()'s reset loop overwrites it again (harmlessly).
-        MV.init_val = new_init_val
+        MV.init_val = new_MV_init_val
+
+        M = self.epi_metrics["M"]
+        new_M_init_val = M.adjust_initial_value(
+            M.original_init_val,
+            self.start_real_date,
+            self.params,
+            self.simulation_settings.timesteps_per_day,
+        )
+        M.init_val = new_M_init_val
 
         self.update_vax_induced_risk_reduce_initial()
 
@@ -1880,7 +1987,7 @@ class FluMetapopModel(clt.MetapopModel, ABC):
                 #   simply store the first value (since its value is common
                 #   across metapopulations)
                 first_val = metapop_vals[0]
-                if isinstance(first_val, str) or isinstance(first_val, datetime.date):
+                if first_val is None or isinstance(first_val, str) or isinstance(first_val, datetime.date):
                     is_non_numerical = True
                     if all(x == first_val for x in metapop_vals):
                         metapop_vals = first_val
