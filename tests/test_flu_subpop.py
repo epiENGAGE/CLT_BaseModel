@@ -210,6 +210,125 @@ def test_subpop_reset_reproducible_results(make_flu_subpop_model, transition_typ
                               np.array(reset_model_history_dict[name]))
 
 
+@pytest.mark.parametrize("transition_type", binom_random_transition_types_list)
+@pytest.mark.parametrize("inputs_id", inputs_id_list)
+def test_subpop_reset_matches_fresh_model_with_same_params(make_flu_subpop_model, transition_type, inputs_id):
+    """
+    A model that is built fresh with some params already modified from
+    their default values should give identical simulation results to a
+    model that is built with default params, simulated once, then has
+    those same params modified (via `modify_subpop_params`) and is reset
+    (via `reset_simulation`) before simulating again.
+
+    This guards `reset_simulation`'s recomputation of derived quantities
+    that depend on `params` -- `MV.init_val` and the
+    `vax_induced_*_risk_reduce_initial` fields (see
+    `FluSubpopModel.reset_simulation` and
+    `update_vax_induced_risk_reduce_initial` in flu_components.py) -- to
+    make sure they reflect the *current* params after reset rather than
+    stale values left over from construction time or from a prior run.
+    """
+
+    params_updates = {
+        "beta_baseline": 0.9,
+        "vax_induced_immune_wane": 0.02,
+        "vax_induced_inf_risk_reduce": 0.4,
+    }
+    seed = 123456789123456789
+
+    # Model built fresh, with the modified params in place before it is
+    #   ever simulated
+    scratch_model = make_flu_subpop_model("scratch_model", transition_type, case_id_str=inputs_id)
+    scratch_model.modify_subpop_params(params_updates)
+    scratch_model.reset_simulation()
+    scratch_model.modify_random_seed(seed)
+    scratch_model.simulate_until_day(100)
+
+    # Model that runs once under the original (unmodified) params, and is
+    #   then modified and reset before being simulated again
+    reused_model = make_flu_subpop_model("reused_model", transition_type, case_id_str=inputs_id)
+    reused_model.modify_random_seed(seed)
+    reused_model.simulate_until_day(100)
+
+    reused_model.modify_subpop_params(params_updates)
+    reused_model.reset_simulation()
+    reused_model.modify_random_seed(seed)
+    reused_model.simulate_until_day(100)
+
+    check_state_variables_same_history(scratch_model, reused_model)
+
+
+@pytest.mark.parametrize("inputs_id,vaccines_csv_name", [
+    ("caseA", "caseA_daily_vaccines_constant.csv"),
+    ("caseB_subpop1", "caseB_daily_vaccines_constant.csv"),
+])
+def test_subpop_reset_recomputes_MV_init_val(make_flu_subpop_model, inputs_id, vaccines_csv_name):
+    """
+    `reset_simulation` should recompute `MV.init_val` from the model's
+    *current* schedule/params, not silently keep the value computed at
+    construction time -- see `FluSubpopModel.reset_simulation`'s docstring,
+    which specifically calls out `replace_schedule` and param overrides as
+    the two ways this value can go stale.
+
+    With the default test fixtures, `MV.init_val`'s reset-date adjustment
+    (in `VaxInducedImmunity.adjust_initial_value`) is a no-op: the
+    `daily_vaccines` schedule has no history before the simulation start
+    date, so the window of vaccines counted toward the adjustment is
+    always empty. To meaningfully exercise the recomputation, this test
+    prepends pre-simulation vaccination history to the schedule (via
+    `replace_schedule`) and moves `vax_immunity_reset_date_mm_dd` earlier
+    (via `modify_subpop_params`) so that window is non-empty, then checks
+    that after `reset_simulation`, `MV.init_val`:
+        1. actually changed from its construction-time value (so this test
+           would fail to exercise anything if it hadn't), and
+        2. matches a value computed independently (calling
+           `adjust_initial_value` directly), so the recomputed value is not
+           just different but *correct*.
+    """
+
+    subpop_model = make_flu_subpop_model("subpop_model", case_id_str=inputs_id)
+
+    MV = subpop_model.epi_metrics["MV"]
+    original_MV_init_val = copy.deepcopy(MV.init_val)
+
+    # Prepend 100 days of nonzero vaccination history before the schedule's
+    #   original start date, so the reset-date window has doses to count
+    raw_df = pd.read_csv(base_path / vaccines_csv_name, index_col=0)
+    raw_df["date"] = pd.to_datetime(raw_df["date"], format="%Y-%m-%d").dt.date
+    fill_val = raw_df["daily_vaccines"].iloc[0]
+    min_date = pd.Timestamp(raw_df["date"].min())
+    extra_dates = pd.date_range(end=min_date - pd.Timedelta(days=1), periods=100, freq="D").date
+    extra_df = pd.DataFrame({"date": extra_dates, "daily_vaccines": [fill_val] * len(extra_dates)})
+    combined_df = pd.concat([extra_df, raw_df], ignore_index=True)
+
+    subpop_model.replace_schedule("daily_vaccines", combined_df)
+
+    params_updates = {
+        "vax_induced_immune_wane": 0.02,
+        "vax_immunity_reset_date_mm_dd": "06_01",
+    }
+    subpop_model.modify_subpop_params(params_updates)
+    subpop_model.reset_simulation()
+
+    expected_MV_init_val = MV.adjust_initial_value(
+        MV.original_init_val,
+        subpop_model.start_real_date,
+        subpop_model.params,
+        subpop_model.schedules,
+        subpop_model.simulation_settings.timesteps_per_day)
+
+    # Sanity check: the schedule/param change must actually move
+    #   MV.init_val, otherwise this test would pass even if reset never
+    #   recomputed it
+    assert not np.array_equal(np.asarray(original_MV_init_val),
+                              np.asarray(MV.init_val))
+
+    # The value reset_simulation left in place should match the value
+    #   independently recomputed from the current schedule/params
+    assert np.allclose(np.asarray(MV.init_val), np.asarray(expected_MV_init_val))
+    assert np.allclose(np.asarray(MV.current_val), np.asarray(expected_MV_init_val))
+
+
 @pytest.mark.parametrize("transition_type", binom_random_transition_types_list + ["poisson"])
 def test_compartments_integer_population(make_flu_subpop_model, transition_type):
     """
