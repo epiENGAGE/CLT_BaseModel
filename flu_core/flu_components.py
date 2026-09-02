@@ -20,7 +20,7 @@ from .flu_data_structures import FluSubpopState, FluSubpopParams, \
     FluTravelStateTensors, FluTravelParamsTensors, \
     FluFullMetapopStateTensors, FluFullMetapopParamsTensors, \
     FluMixingParams, FluPrecomputedTensors, FluFullMetapopScheduleTensors, \
-    FluSubpopSchedules
+    FluSubpopSchedules, resolve_mm_dd_near_date
 
 
 class FluSubpopModelError(clt.SubpopModelError):
@@ -460,6 +460,10 @@ class InfInducedImmunity(clt.EpiMetric):
         adjusted initial value is zero, and init_val is instead added
         to current_val once infection_immunity_start_date_mm_dd is
         reached (see check_and_apply_injection).
+
+        The "MM_DD" string carries no year, so the year is resolved by
+        `resolve_mm_dd_near_date` -- see that function for why the
+        nearest-year rule matters for seasons that span a new year.
         """
 
         self.original_init_val = copy.deepcopy(init_val)
@@ -467,11 +471,11 @@ class InfInducedImmunity(clt.EpiMetric):
         self.pending_injection_date = None
 
         if params.infection_immunity_start_date_mm_dd is not None:
-            # Parse infection immunity start date (format: "MM_DD"),
-            #   resolved using current_real_date's year
-            month, day = params.infection_immunity_start_date_mm_dd.split('_')
-            immunity_start_date = datetime.date(
-                current_real_date.year, int(month), int(day))
+
+            immunity_start_date = resolve_mm_dd_near_date(
+                params.infection_immunity_start_date_mm_dd,
+                current_real_date,
+                param_name="infection_immunity_start_date_mm_dd")
 
             if immunity_start_date < current_real_date:
                 # init_val is a past value -- decay it forward
@@ -560,6 +564,14 @@ class VaxInducedImmunity(clt.EpiMetric):
         Vaccines administered before the reset date are not counted, but
         vaccines administered after the reset date (and before the simulation
         start date, accounting for protection delay) are counted with waning.
+
+        Note on the protection delay: the `daily_vaccines` schedule is
+        indexed by PROTECTION date, not vaccination date --
+        `DailyVaccines.postprocess_data_input` has already shifted every
+        date forward by `vax_protection_delay_days`. So the window here
+        is bounded by the raw reset date; adding the delay to it again
+        would drop the doses that become protective during the delay
+        window just after the reset date.
         """
         
         self.original_init_val = copy.deepcopy(init_val)
@@ -584,11 +596,12 @@ class VaxInducedImmunity(clt.EpiMetric):
                 # If reset date is after start, use previous year
                 reset_date = datetime.date(current_year - 1, int(month), int(day))
             
-            # Filter vaccines between reset_date and start date,
-            # accounting for protection delay
+            # Filter vaccines between reset_date and start date -- the
+            # index is already the protection date (see docstring), so
+            # the protection delay must NOT be added to `reset_date` here
             vaccines_df = schedules['daily_vaccines'].timeseries_df.copy()
 
-            mask = (vaccines_df.index >= (reset_date + datetime.timedelta(days=params.vax_protection_delay_days))) &\
+            mask = (vaccines_df.index >= reset_date) &\
                 (vaccines_df.index < current_real_date)
             relevant_vaccines = vaccines_df[mask]
             
@@ -645,8 +658,8 @@ class VaxInducedImmunity(clt.EpiMetric):
 
 
 def compute_vax_induced_risk_reduce_initial(params: FluSubpopParams,
-                                         schedules: sc.objdict,
-                                         start_real_date: datetime.date) -> tuple:
+                                            schedules: sc.objdict,
+                                            start_real_date: datetime.date) -> tuple:
     """
     Computes the "zero-waning" (peak, just-after-protection-delay) vaccine
     efficacy values `vax_induced_inf_risk_reduce_initial`,
@@ -663,15 +676,18 @@ def compute_vax_induced_risk_reduce_initial(params: FluSubpopParams,
     dose-timing-weighted average realized efficacy over the season equals
     the input (season-average) efficacy value:
 
-        VE_0 = w_V * T * VE_season /
+        VE_0 = VE_season * w_V * T /
                ((1 - exp(-w_V)) * sum_{tau=t0}^{T-1} [
                    (sum_{u=t0}^{tau} p_prot(u) * exp(-w_V * (tau - u))) /
                    (sum_{u=t0}^{tau} p_prot(u))
                ])
 
-    where t0 is the first day of the season with a nonzero dose and T is
-    the number of days from t0 through the last day with a nonzero dose.
+    Note that VE_0 is *linear* in VE_season -- the bracketed quantity
+    depends only on w_V and the dose timing profile, so it is computed
+    once per age-risk group and reused for all three efficacy fields.
 
+    Season window
+    -------------
     The season window is the period between two consecutive occurrences of
     `vax_immunity_reset_date_mm_dd` (the occurrence on or before
     `start_real_date`, through one year later), or if that parameter is
@@ -681,6 +697,29 @@ def compute_vax_induced_risk_reduce_initial(params: FluSubpopParams,
     matters when the reset-date window extends past the end of the
     schedule, or -- in the no-reset-date case -- when the schedule itself
     spans less than 12 months).
+
+    Within that window, t0 and T are by default the first day with a
+    nonzero dose and the number of days through the last day with a
+    nonzero dose. Because the average above is an *unweighted* average
+    over the T days, a long low-dose tail (a schedule that trickles a
+    handful of doses through the spring, say) pulls the average down and
+    so inflates VE_0. Setting `params.VE_season_dose_window_quantile` to a
+    value q in [0, 0.5) trims the window to the days spanning the central
+    (1 - 2q) of the season's cumulative doses, dropping the sparse tails
+    at both ends -- see that parameter's docstring.
+
+    Capping
+    -------
+    VE_0 is a probability and is capped at 1.0. Because VE_0 is
+    VE_season divided by the season's mean waning factor (which is < 1),
+    plausible inputs can push it above 1: VE_season = 0.8 with
+    `vax_induced_immune_wane` = 0.004 over a year-long schedule gives
+    VE_0 ~ 1.07. Values above 1 would make the applied factor
+    `1 - MV * VE_0` negative at high vaccination coverage (a negative
+    force of infection). Any capped entry raises a warning naming the
+    affected age-risk groups, since a cap means the requested
+    season-average efficacy is not actually achievable under the given
+    waning rate and dose timing.
 
     Edge cases:
         - If waning (w_V) is 0 for a given age-risk group, VE_0 equals the
@@ -692,13 +731,15 @@ def compute_vax_induced_risk_reduce_initial(params: FluSubpopParams,
           the value is never actually applied.
         - If `params.adjust_VE_for_seasonal_waning` is False, this
           adjustment is skipped entirely and the input (season-average)
-          values are returned unchanged (broadcast to shape (A, R)).
+          values are returned unchanged (broadcast to shape (A, R)), still
+          capped at 1.0.
 
     Args:
         params (FluSubpopParams):
             holds `vax_induced_inf_risk_reduce`, `vax_induced_hosp_risk_reduce`,
             `vax_induced_death_risk_reduce`, `vax_induced_immune_wane`,
-            `vax_immunity_reset_date_mm_dd`, `num_age_groups`, and
+            `vax_immunity_reset_date_mm_dd`,
+            `VE_season_dose_window_quantile`, `num_age_groups`, and
             `num_risk_groups`.
         schedules (sc.objdict):
             holds the `daily_vaccines` `Schedule` instance (already shifted
@@ -715,15 +756,132 @@ def compute_vax_induced_risk_reduce_initial(params: FluSubpopParams,
 
     target_shape = (params.num_age_groups, params.num_risk_groups)
 
+    field_names = ("vax_induced_inf_risk_reduce",
+                   "vax_induced_hosp_risk_reduce",
+                   "vax_induced_death_risk_reduce")
+
+    ve_season_arrs = {
+        name: np.broadcast_to(
+            np.asarray(getattr(params, name), dtype=float), target_shape).copy()
+        for name in field_names
+    }
+
     if params.adjust_VE_for_seasonal_waning is False:
-        return (
-            np.broadcast_to(np.asarray(params.vax_induced_inf_risk_reduce, dtype=float), target_shape).copy(),
-            np.broadcast_to(np.asarray(params.vax_induced_hosp_risk_reduce, dtype=float), target_shape).copy(),
-            np.broadcast_to(np.asarray(params.vax_induced_death_risk_reduce, dtype=float), target_shape).copy(),
-        )
+        return tuple(_cap_vax_induced_risk_reduce_initial(ve_season_arrs[name], name)
+                     for name in field_names)
 
     w_arr = np.broadcast_to(
         np.asarray(params.vax_induced_immune_wane, dtype=float), target_shape)
+
+    doses_stack = _season_window_doses(params, schedules, start_real_date, target_shape)
+
+    # `inflation_factor[a, r]` is VE_0 / VE_season for that age-risk group --
+    #   it depends only on the waning rate and the dose timing profile, so
+    #   it is shared across all three efficacy fields
+    inflation_factor = np.ones(target_shape)
+
+    trim_quantile = params.VE_season_dose_window_quantile
+
+    if trim_quantile is not None and not 0 <= trim_quantile < 0.5:
+        raise FluSubpopModelError(
+            f"`VE_season_dose_window_quantile` must be None or in [0, 0.5) -- "
+            f"got {trim_quantile}. It trims that fraction of cumulative doses "
+            "off each end of the season window, so 0.5 or more would leave "
+            "nothing behind.")
+
+    for a in range(target_shape[0]):
+        for r in range(target_shape[1]):
+
+            w_ar = w_arr[a, r]
+
+            if w_ar == 0 or doses_stack.shape[0] == 0:
+                continue
+
+            sub = _trimmed_dose_profile(doses_stack[:, a, r], trim_quantile)
+
+            if sub is None:
+                continue
+
+            T = sub.size
+            p_prot = sub / sub.sum()
+            cumsum_p_prot = np.cumsum(p_prot)
+
+            # numer[n] = sum_{u=0}^{n} p_prot(u) * exp(-w * (n - u))
+            #          = p_prot(n) + exp(-w) * numer[n - 1]
+            decay = np.exp(-w_ar)
+            numer = np.empty(T)
+            acc = 0.0
+            for n in range(T):
+                acc = p_prot[n] + decay * acc
+                numer[n] = acc
+
+            S = np.sum(numer / cumsum_p_prot)
+
+            inflation_factor[a, r] = w_ar * T / ((1 - decay) * S)
+
+    return tuple(
+        _cap_vax_induced_risk_reduce_initial(ve_season_arrs[name] * inflation_factor, name)
+        for name in field_names
+    )
+
+
+def _cap_vax_induced_risk_reduce_initial(ve_initial_arr: np.ndarray,
+                                         field_name: str) -> np.ndarray:
+    """
+    Caps peak vaccine efficacy at 1.0, warning if any age-risk group
+    was actually capped.
+
+    A capped entry means the requested season-average efficacy is not
+    achievable given the waning rate and dose timing -- even perfect
+    (100%) protection at the moment of vaccination would average out to
+    less than the requested value over the season. The simulation stays
+    well-defined (`1 - MV * VE_0` remains nonnegative), but realized
+    efficacy will fall short of the input value, so this is worth
+    surfacing rather than silently clipping.
+
+    Args:
+        ve_initial_arr (np.ndarray of shape (A, R)):
+            uncapped peak efficacy values.
+        field_name (str):
+            name of the source season-average parameter, used in the
+            warning message.
+
+    Returns:
+        np.ndarray of shape (A, R), with all entries <= 1.0.
+    """
+
+    over_idxs = np.argwhere(ve_initial_arr > 1.0)
+
+    if over_idxs.size > 0:
+        max_val = float(np.max(ve_initial_arr))
+        groups_str = ", ".join(f"(age {a}, risk {r})" for a, r in over_idxs)
+        warnings.warn(
+            f"`{field_name}_initial` exceeded 1.0 (max {max_val:.4f}) for "
+            f"age-risk group(s) {groups_str} and was capped at 1.0. This means "
+            f"`{field_name}` is not achievable given `vax_induced_immune_wane` "
+            "and the `daily_vaccines` timing -- even 100% protection at the "
+            "moment of vaccination would average to less than the requested "
+            "season-average value. Realized efficacy will be lower than "
+            "requested for these groups. Consider lowering "
+            f"`{field_name}`, lowering `vax_induced_immune_wane`, or setting "
+            "`VE_season_dose_window_quantile` to trim sparse dose tails from "
+            "the season window."
+        )
+
+    return np.minimum(ve_initial_arr, 1.0)
+
+
+def _season_window_doses(params: FluSubpopParams,
+                         schedules: sc.objdict,
+                         start_real_date: datetime.date,
+                         target_shape: tuple) -> np.ndarray:
+    """
+    Returns the `daily_vaccines` doses falling inside the vaccination
+    season window, as an np.ndarray of shape (T, A, R) -- see
+    `compute_vax_induced_risk_reduce_initial` for how the window is
+    defined. Returns an array with T == 0 if the window contains no
+    schedule days.
+    """
 
     vaccines_df = schedules["daily_vaccines"].timeseries_df
 
@@ -749,64 +907,66 @@ def compute_vax_induced_risk_reduce_initial(params: FluSubpopParams,
     else:
         window_doses_df = vaccines_df.iloc[0:0]
 
-    if not window_doses_df.empty:
-        doses_stack = np.stack(window_doses_df["daily_vaccines"].values, axis=0)
-        if doses_stack.shape[1:] != target_shape:
-            # Time series has a different age-risk resolution than the
-            # risk-reduce parameters -- aggregate (sum) across all
-            # dimensions and broadcast the resulting total evenly across
-            # every age-risk group.
-            doses_stack = doses_stack.reshape(doses_stack.shape[0], -1).sum(axis=1, keepdims=True)
-            doses_stack = np.broadcast_to(doses_stack, (doses_stack.shape[0],) + target_shape)
-    else:
-        doses_stack = np.zeros((0,) + target_shape)
+    if window_doses_df.empty:
+        return np.zeros((0,) + target_shape)
 
-    def compute_initial_for_field(field_name: str) -> np.ndarray:
+    doses_stack = np.stack(window_doses_df["daily_vaccines"].values, axis=0)
 
-        ve_season_arr = np.broadcast_to(
-            np.asarray(getattr(params, field_name), dtype=float), target_shape).copy()
-        ve_initial_arr = ve_season_arr.copy()
+    if doses_stack.shape[1:] != target_shape:
+        # Time series has a different age-risk resolution than the
+        # risk-reduce parameters -- aggregate (sum) across all
+        # dimensions and broadcast the resulting total evenly across
+        # every age-risk group.
+        doses_stack = doses_stack.reshape(doses_stack.shape[0], -1).sum(axis=1, keepdims=True)
+        doses_stack = np.broadcast_to(doses_stack, (doses_stack.shape[0],) + target_shape)
 
-        for a in range(target_shape[0]):
-            for r in range(target_shape[1]):
+    return doses_stack
 
-                w_ar = w_arr[a, r]
-                ve_season = ve_season_arr[a, r]
 
-                if w_ar == 0 or doses_stack.shape[0] == 0:
-                    continue
+def _trimmed_dose_profile(cell_doses: np.ndarray,
+                          trim_quantile: Optional[float]) -> Optional[np.ndarray]:
+    """
+    Returns the slice of one age-risk group's daily doses that defines
+    the season window for the VE_0 calculation, or None if the group has
+    no doses at all.
 
-                cell_doses = doses_stack[:, a, r]
-                nonzero_idxs = np.flatnonzero(cell_doses > 0)
+    The base window runs from the first to the last day with a nonzero
+    dose. If `trim_quantile` is a value q in [0, 0.5), the window is
+    further narrowed to the days spanning the central (1 - 2q) of the
+    group's cumulative doses -- i.e. days before the qth and after the
+    (1 - q)th quantile of the cumulative dose distribution are dropped.
+    This removes sparse dose tails that would otherwise stretch the
+    (unweighted) season average over months with almost no vaccination.
 
-                if nonzero_idxs.size == 0:
-                    continue
+    Args:
+        cell_doses (np.ndarray of shape (T,)):
+            daily doses for one age-risk group over the season window.
+        trim_quantile (Optional[float]):
+            q as described above -- None or 0 leaves the window untrimmed.
 
-                t0_idx, last_idx = nonzero_idxs[0], nonzero_idxs[-1]
-                sub = cell_doses[t0_idx:last_idx + 1]
-                T = sub.size
-                p_prot = sub / sub.sum()
+    Returns:
+        np.ndarray of shape (T',) with a positive sum, or None.
+    """
 
-                cumsum_p_prot = np.cumsum(p_prot)
-                
-                # numer[n] = sum_{u=0}^{n} p_prot(u) * exp(-w * (n - u))
-                #          = p_prot(n) + exp(-w) * numer[n - 1]
-                decay = np.exp(-w_ar)
-                numer = np.empty(T)
-                acc = 0.0
-                for n in range(T):
-                    acc = p_prot[n] + decay * acc
-                    numer[n] = acc
+    nonzero_idxs = np.flatnonzero(cell_doses > 0)
 
-                S = np.sum(numer / cumsum_p_prot)
+    if nonzero_idxs.size == 0:
+        return None
 
-                ve_initial_arr[a, r] = w_ar * T * ve_season / ((1 - decay) * S)
+    sub = cell_doses[nonzero_idxs[0]:nonzero_idxs[-1] + 1]
 
-        return ve_initial_arr
+    if not trim_quantile:
+        return sub
 
-    return (compute_initial_for_field("vax_induced_inf_risk_reduce"),
-           compute_initial_for_field("vax_induced_hosp_risk_reduce"),
-           compute_initial_for_field("vax_induced_death_risk_reduce"))
+    cumulative_prop = np.cumsum(sub) / sub.sum()
+
+    # `lo` is the first day by which the trimmed-off leading mass has
+    #   accumulated, `hi` the first day reaching the upper cutoff --
+    #   both are kept, so the window spans the central mass inclusively
+    lo = int(np.searchsorted(cumulative_prop, trim_quantile, side="left"))
+    hi = int(np.searchsorted(cumulative_prop, 1.0 - trim_quantile, side="left"))
+
+    return sub[lo:hi + 1]
 
 
 class BetaReduce(clt.DynamicVal):
@@ -1227,6 +1387,19 @@ class FluSubpopModel(clt.SubpopModel):
         self.params = clt.updated_dataclass(self.params, {"start_real_date": self.start_real_date})
 
         self.update_vax_induced_risk_reduce_initial()
+        self.update_infection_immunity_injection_val()
+
+        # `InfInducedImmunity` and `VaxInducedImmunity` adjust their
+        #   initial values in their constructors (decaying M(0) forward,
+        #   deferring it, or adding pre-start vaccine doses to MV(0)),
+        #   but `self.state` still holds the raw values read from the
+        #   init-vals JSON. Sync so that anything reading `self.state`
+        #   before the first simulated day sees the adjusted values --
+        #   notably `get_flu_torch_inputs`, which builds the torch
+        #   model's starting tensors straight off `self.state` and would
+        #   otherwise start the torch run from different initial
+        #   immunity than the numpy run.
+        self.state.sync_to_current_vals(self.epi_metrics)
 
     def update_vax_induced_risk_reduce_initial(self) -> None:
         """
@@ -1253,6 +1426,37 @@ class FluSubpopModel(clt.SubpopModel):
             "vax_induced_hosp_risk_reduce_initial": hosp_initial,
             "vax_induced_death_risk_reduce_initial": death_initial,
         })
+
+    def update_infection_immunity_injection_val(self) -> None:
+        """
+        Mirrors the `InfInducedImmunity` epi metric's pending injection
+        onto `self.params.infection_immunity_injection_val` -- the
+        amount to add to M when
+        `infection_immunity_start_date_mm_dd` is reached, or zeros if
+        no injection is pending.
+
+        The numpy model applies the injection straight off the epi
+        metric (`InfInducedImmunity.check_and_apply_injection`) and does
+        not need this. The torch metapopulation model has no epi metric
+        objects -- it only sees `params` and state tensors -- so the
+        value has to travel on `params` for
+        `check_and_apply_M_injection` to be able to apply it there.
+
+        Like `update_vax_induced_risk_reduce_initial`, this is re-run on
+        `reset_simulation` so it tracks any post-construction change to
+        `infection_immunity_start_date_mm_dd` or M's initial value.
+        """
+
+        M = self.epi_metrics["M"]
+
+        if M.pending_injection_date is not None:
+            injection_val = np.asarray(M.original_init_val, dtype=float).copy()
+        else:
+            injection_val = np.zeros((self.params.num_age_groups,
+                                      self.params.num_risk_groups))
+
+        self.params = clt.updated_dataclass(
+            self.params, {"infection_immunity_injection_val": injection_val})
 
     def check_humidity_input(self) -> None:
         """
@@ -1381,7 +1585,7 @@ class FluSubpopModel(clt.SubpopModel):
         
         other_params_list = [
             p.humidity_impact, p.inf_induced_saturation, p.inf_induced_immune_wane,
-            p.vax_induced_saturation, p.vax_induced_immune_wane, p.inf_induced_inf_risk_reduce,
+            p.vax_induced_immune_wane, p.inf_induced_inf_risk_reduce,
             p.inf_induced_hosp_risk_reduce, p.inf_induced_death_risk_reduce, 
             p.vax_induced_inf_risk_reduce, p.vax_induced_hosp_risk_reduce,
             p.vax_induced_death_risk_reduce, p.IP_relative_inf,
@@ -1689,6 +1893,7 @@ class FluSubpopModel(clt.SubpopModel):
         M.init_val = new_M_init_val
 
         self.update_vax_induced_risk_reduce_initial()
+        self.update_infection_immunity_injection_val()
 
         super().reset_simulation()
 

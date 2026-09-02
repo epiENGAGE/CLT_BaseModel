@@ -122,7 +122,6 @@ def _param_catalog(flu, inputs, params_baseline):
         "humidity_impact":              "Humidity impact",
         "inf_induced_saturation":       "Inf. induced saturation",
         "inf_induced_immune_wane":      "Inf. immunity wane rate",
-        "vax_induced_saturation":       "Vax. induced saturation",
         "inf_induced_inf_risk_reduce":  "Inf. → inf. risk reduction",
         "inf_induced_hosp_risk_reduce": "Inf. → hosp. risk reduction",
         "vax_induced_inf_risk_reduce":  "Vax. → inf. risk reduction",

@@ -240,7 +240,7 @@ Each scenario requires a `daily_vaccines.csv` that reflects a specific coverage 
 - Geographic availability constraints if modeling a specific city/region
 
 ### 3. Age-Stratified Vaccine Efficacy Parameters
-The current parameters `vax_induced_saturation`, `vax_induced_immune_wane`, and the immunity reduction factors (`vax_immunity_reduction_*`) control how effective vaccination is. For scenario analyses to be meaningful:
+The current parameters `vax_induced_immune_wane` and the immunity reduction factors (`vax_induced_*_risk_reduce`) control how effective vaccination is. For scenario analyses to be meaningful:
 - These should reflect empirically estimated vaccine effectiveness (VE) for the strain and season being modeled
 - Age-specific VE differences (e.g. lower effectiveness in elderly) should be encoded in age-stratified parameters
 

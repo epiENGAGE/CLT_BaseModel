@@ -2,11 +2,83 @@ import torch
 import numpy as np
 import pandas as pd
 import datetime
+import warnings
 
 from typing import Optional
 from dataclasses import dataclass, fields, field
 
 import clt_toolkit as clt
+
+
+# A "MM_DD" parameter describing a date near the simulation start that
+#   resolves further than this many days away is almost certainly a
+#   mis-specification rather than a deliberate choice -- see
+#   `resolve_mm_dd_near_date`
+INFECTION_IMMUNITY_START_DATE_WARN_DAYS = 120
+
+
+def resolve_mm_dd_near_date(mm_dd: str,
+                            reference_date: datetime.date,
+                            param_name: str = "date",
+                            warn_days: Optional[int] = INFECTION_IMMUNITY_START_DATE_WARN_DAYS
+                            ) -> datetime.date:
+    """
+    Resolves a year-less "MM_DD" parameter to the actual calendar date
+    closest to `reference_date`.
+
+    A "MM_DD" string is ambiguous about which year it means, and simply
+    reusing `reference_date`'s year silently picks the wrong one for any
+    season that spans a new year. For a simulation starting 2024-08-15,
+    "01_01" under that rule resolves to 2024-01-01 -- 227 days *before*
+    the start -- when the intended date is almost certainly 2025-01-01,
+    139 days after it. Choosing whichever of the previous, current, and
+    next year lands closest to `reference_date` resolves both cases the
+    way a user would expect, and is unambiguous as long as the intended
+    date is within ~6 months of the reference date.
+
+    Args:
+        mm_dd (str):
+            date in "MM_DD" format, e.g. "01_01".
+        reference_date (datetime.date):
+            the date to resolve relative to -- generally the
+            simulation's `start_real_date`.
+        param_name (str):
+            name of the parameter being resolved, used in messages.
+        warn_days (Optional[int]):
+            warn if the resolved date is more than this many days from
+            `reference_date` -- pass None to skip the check.
+
+    Returns:
+        datetime.date
+    """
+
+    month, day = (int(x) for x in mm_dd.split('_'))
+
+    candidates = []
+    for year in (reference_date.year - 1, reference_date.year, reference_date.year + 1):
+        try:
+            candidates.append(datetime.date(year, month, day))
+        except ValueError:
+            # Feb 29 in a non-leap year -- that year simply has no such
+            #   date, so it is not a candidate
+            continue
+
+    if not candidates:
+        raise ValueError(
+            f"`{param_name}` = '{mm_dd}' does not correspond to a real date in any "
+            f"year adjacent to {reference_date}.")
+
+    resolved = min(candidates, key=lambda d: abs((d - reference_date).days))
+
+    if warn_days is not None and abs((resolved - reference_date).days) > warn_days:
+        warnings.warn(
+            f"`{param_name}` = '{mm_dd}' resolved to {resolved}, which is "
+            f"{abs((resolved - reference_date).days)} days from {reference_date}. "
+            f"This parameter is meant to describe a date near the simulation start "
+            f"(within a couple of months); a gap this large usually means the "
+            f"month/day is mis-specified.")
+
+    return resolved
 
 
 @dataclass
@@ -153,9 +225,6 @@ class FluSubpopParams(clt.SubpopParams):
         inf_induced_immune_wane (positive float):
             rate at which infection-induced immunity
             against infection wanes.
-        vax_induced_saturation (np.ndarray of positive floats):
-            constant(s) modeling saturation of antibody
-            production of vaccinated individuals.
         vax_induced_immune_wane (positive float):
             rate at which vaccine-induced immunity
             against infection wanes.
@@ -169,22 +238,37 @@ class FluSubpopParams(clt.SubpopParams):
             reduction in risk of death
             after getting infected
         vax_induced_inf_risk_reduce (positive float):
-            reduction in risk of getting infected
-            after getting vaccinated
+            SEASON-AVERAGE reduction in risk of getting infected
+            after getting vaccinated -- i.e. the average protection
+            a vaccinated individual has over the whole vaccination
+            season, with waning already folded in. This is NOT the
+            value applied in the model: the model applies
+            `vax_induced_inf_risk_reduce_initial`, the peak
+            (zero-waning) value back-derived from this one, and lets
+            protection wane from there via the `MV` epi metric. See
+            `adjust_VE_for_seasonal_waning` to turn that derivation
+            off and use this value directly as the peak instead.
         vax_induced_hosp_risk_reduce (positive float):
-            reduction in risk of hospitalization
-            after getting vaccinated
+            season-average reduction in risk of hospitalization
+            after getting vaccinated -- see
+            `vax_induced_inf_risk_reduce` for the season-average
+            versus peak distinction.
         vax_induced_death_risk_reduce (positive float):
-            reduction in risk of death
-            after getting vaccinated
+            season-average reduction in risk of death after getting
+            vaccinated -- see `vax_induced_inf_risk_reduce` for the
+            season-average versus peak distinction.
         vax_induced_inf_risk_reduce_initial (np.ndarray of positive floats):
             "peak" (zero-waning) vaccine-induced reduction in risk
-            of getting infected -- computed once from
-            vax_induced_inf_risk_reduce, vax_induced_immune_wane,
-            and the daily_vaccines schedule so that, averaged over
-            the vaccination season and accounting for waning, it
-            reproduces vax_induced_inf_risk_reduce. See
-            FluSubpopModel.compute_vax_induced_risk_reduce_initial.
+            of getting infected -- this is the value actually applied
+            in the model, as `1 - MV * vax_induced_inf_risk_reduce_initial`.
+            Derived from vax_induced_inf_risk_reduce,
+            vax_induced_immune_wane, and the daily_vaccines schedule
+            so that, averaged over the vaccination season and
+            accounting for waning, it reproduces
+            vax_induced_inf_risk_reduce. Capped at 1.0. Recomputed on
+            `reset_simulation`, so it stays consistent with any
+            schedule or parameter overrides. See
+            `flu_components.compute_vax_induced_risk_reduce_initial`.
         vax_induced_hosp_risk_reduce_initial (np.ndarray of positive floats):
             analogous "peak" (zero-waning) value for
             vax_induced_hosp_risk_reduce.
@@ -203,7 +287,29 @@ class FluSubpopParams(clt.SubpopParams):
             set equal to the corresponding `vax_induced_*_risk_reduce`
             values (i.e. waning is not accounted for when determining
             the peak vaccine efficacy applied to newly-vaccinated
-            individuals).
+            individuals), which means the `vax_induced_*_risk_reduce`
+            inputs are interpreted as peak rather than season-average
+            efficacies.
+        VE_season_dose_window_quantile (float in [0, 0.5) or None):
+            controls how much of the `daily_vaccines` schedule counts
+            as the "vaccination season" when back-deriving the
+            `vax_induced_*_risk_reduce_initial` values (only used when
+            `adjust_VE_for_seasonal_waning` is True).
+
+            The season average is taken as an unweighted average over
+            the days of the season window, so a schedule with a long
+            low-dose tail (a few doses trickling through the spring,
+            say) stretches that window over months with almost no
+            vaccination, pulling the average down and inflating the
+            derived peak efficacy. Setting this to q trims the window
+            to the days spanning the central (1 - 2q) of the season's
+            cumulative doses, dropping the sparse tails at both ends.
+
+            None or 0 (default) uses the full first-dose-to-last-dose
+            window. 0.05 and 0.10 are reasonable choices. This has no
+            effect on schedules whose doses are spread evenly across
+            the season, and a substantial effect on campaign-shaped
+            schedules that taper off.
         vax_protection_delay_days: (positive int):
             number of days after vaccination until vaccine
             protection is effective.
@@ -213,15 +319,36 @@ class FluSubpopParams(clt.SubpopParams):
             calculating contribution of vaccines to
             vaccine-induced immunity.
         infection_immunity_start_date_mm_dd: (str or None):
-            date (in "mm_dd" format, resolved using
-            start_real_date's year) that the input initial
-            value of infection-induced immunity (M) corresponds
-            to. If this date is before start_real_date, M(0) is
+            date (in "mm_dd" format) that the input initial value
+            of infection-induced immunity (M) corresponds to.
+            If this date is before start_real_date, M(0) is
             decayed forward (waning only) to start_real_date. If
             this date is after start_real_date, M(0) is set to 0
             at start_real_date and the input M(0) is instead
             added to M once this date is reached during the
             simulation.
+
+            The calendar year is resolved to whichever of
+            start_real_date's year, the year before, or the year
+            after puts the date CLOSEST to start_real_date -- so
+            for a season starting 2024-08-15, "01_01" resolves to
+            2025-01-01 (139 days after the start) rather than
+            2024-01-01 (227 days before it). A resolved date more
+            than `INFECTION_IMMUNITY_START_DATE_WARN_DAYS` days
+            from start_real_date raises a warning, since this
+            parameter is meant to describe an immunity snapshot
+            taken within a couple of months of the simulation
+            start.
+        infection_immunity_injection_val (np.ndarray of nonnegative floats):
+            the M value waiting to be injected once
+            infection_immunity_start_date_mm_dd is reached, or an
+            array of zeros if no injection is pending. The user does
+            not specify this -- `FluSubpopModel` derives it from the
+            input M(0) and keeps it in sync on `reset_simulation`. It
+            lives on the params (rather than only on the
+            `InfInducedImmunity` epi metric) so that the torch
+            metapopulation model, which has no epi metric objects,
+            can apply the same injection.
         R_to_S_rate (positive float):
             rate at which people in R move to S.
         E_to_I_rate (positive float):
@@ -291,7 +418,6 @@ class FluSubpopParams(clt.SubpopParams):
 
     inf_induced_saturation: Optional[float] = None
     inf_induced_immune_wane: Optional[float] = None
-    vax_induced_saturation: Optional[float] = None
     vax_induced_immune_wane: Optional[float] = None
     inf_induced_inf_risk_reduce: Optional[float] = None
     inf_induced_hosp_risk_reduce: Optional[float] = None
@@ -303,9 +429,11 @@ class FluSubpopParams(clt.SubpopParams):
     vax_induced_hosp_risk_reduce_initial: Optional[np.ndarray] = None
     vax_induced_death_risk_reduce_initial: Optional[np.ndarray] = None
     adjust_VE_for_seasonal_waning: Optional[bool] = True
+    VE_season_dose_window_quantile: Optional[float] = None
     vax_protection_delay_days: Optional[int] = 0
     vax_immunity_reset_date_mm_dd: Optional[str] = None
     infection_immunity_start_date_mm_dd: Optional[str] = None
+    infection_immunity_injection_val: Optional[np.ndarray] = None
 
     R_to_S_rate: Optional[float] = None
     E_to_I_rate: Optional[float] = None
@@ -654,7 +782,6 @@ class FluFullMetapopParamsTensors(FluTravelParamsTensors):
 
     inf_induced_saturation: Optional[torch.Tensor] = None
     inf_induced_immune_wane: Optional[torch.Tensor] = None
-    vax_induced_saturation: Optional[torch.Tensor] = None
     vax_induced_immune_wane: Optional[torch.Tensor] = None
     inf_induced_inf_risk_reduce: Optional[torch.Tensor] = None
     inf_induced_hosp_risk_reduce: Optional[torch.Tensor] = None
@@ -666,9 +793,11 @@ class FluFullMetapopParamsTensors(FluTravelParamsTensors):
     vax_induced_hosp_risk_reduce_initial: Optional[torch.Tensor] = None
     vax_induced_death_risk_reduce_initial: Optional[torch.Tensor] = None
     adjust_VE_for_seasonal_waning: Optional[torch.Tensor] = True
+    VE_season_dose_window_quantile: Optional[torch.Tensor] = None
     vax_protection_delay_days: Optional[torch.Tensor] = 0
     vax_immunity_reset_date_mm_dd: Optional[str] = None
     infection_immunity_start_date_mm_dd: Optional[str] = None
+    infection_immunity_injection_val: Optional[torch.Tensor] = None
 
     R_to_S_rate: Optional[torch.Tensor] = None
     E_to_I_rate: Optional[torch.Tensor] = None

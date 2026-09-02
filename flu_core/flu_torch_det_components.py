@@ -20,11 +20,11 @@ import datetime
 from typing import Tuple
 
 from collections import defaultdict
-from dataclasses import dataclass, fields, field
+from dataclasses import dataclass, fields, field, replace
 
 from .flu_data_structures import FluFullMetapopStateTensors, \
     FluFullMetapopParamsTensors, FluPrecomputedTensors, \
-    FluFullMetapopScheduleTensors
+    FluFullMetapopScheduleTensors, resolve_mm_dd_near_date
 from .flu_travel_functions import compute_total_mixing_exposure
 
 base_path = clt.utils.PROJECT_ROOT / "flu_instances" / "texas_input_files"
@@ -361,24 +361,103 @@ def compute_MV_change(state: FluFullMetapopStateTensors,
 
 def check_and_apply_MV_reset(state: FluFullMetapopStateTensors,
                              params: FluFullMetapopParamsTensors,
-                             day_counter: int):
+                             day_counter: int) -> FluFullMetapopStateTensors:
     """
-    Check if current date matches vax_immunity_reset_date_mm_dd
-    where vaccine-induced immunity should be reset.
-    If so, reset MV to zero.
-    """
-    
-    if params.vax_immunity_reset_date_mm_dd is not None:
-        current_date = params.start_real_date + datetime.timedelta(days=day_counter)
-        
-        # Parse reset date (format: "MM_DD")
-        month, day = params.vax_immunity_reset_date_mm_dd.split('_')
+    Torch counterpart of `VaxInducedImmunity.check_and_apply_reset`.
 
-        # Check if current date matches the reset date (month and day)
-        if current_date.month == int(month) and current_date.day == int(day):
-            # Reset vaccine-induced immunity to zero
-            state.MV = np.zeros_like(state.MV)
-            print(f"VaxInducedImmunity MV reset to 0 on {current_date}")
+    If the current date matches `vax_immunity_reset_date_mm_dd`, returns
+    a new state with vaccine-induced immunity `MV` reset to zero;
+    otherwise returns `state` unchanged. Like the numpy version, this
+    fires on every matching month/day, so it repeats each year in a
+    multi-season run.
+
+    Args:
+        state (FluFullMetapopStateTensors):
+            current state.
+        params (FluFullMetapopParamsTensors):
+            holds `vax_immunity_reset_date_mm_dd` and `start_real_date`.
+        day_counter (int):
+            days elapsed since `start_real_date`.
+
+    Returns:
+        FluFullMetapopStateTensors
+    """
+
+    if params.vax_immunity_reset_date_mm_dd is None:
+        return state
+
+    current_date = params.start_real_date + datetime.timedelta(days=day_counter)
+
+    # Parse reset date (format: "MM_DD")
+    month, day = params.vax_immunity_reset_date_mm_dd.split('_')
+
+    # Check if current date matches the reset date (month and day)
+    if current_date.month != int(month) or current_date.day != int(day):
+        return state
+
+    print(f"VaxInducedImmunity MV reset to 0 on {current_date}")
+
+    return replace(state, MV=torch.zeros_like(state.MV))
+
+
+def check_and_apply_M_injection(state: FluFullMetapopStateTensors,
+                                params: FluFullMetapopParamsTensors,
+                                day_counter: int) -> FluFullMetapopStateTensors:
+    """
+    Torch counterpart of `InfInducedImmunity.check_and_apply_injection`.
+
+    If `infection_immunity_start_date_mm_dd` falls after the simulation
+    start, the input M(0) is held back rather than applied at time zero
+    (see `InfInducedImmunity.adjust_initial_value`). When the simulation
+    reaches that date, this adds it in -- once -- and otherwise returns
+    `state` unchanged.
+
+    The amount added travels on
+    `params.infection_immunity_injection_val`, since the torch model has
+    no `InfInducedImmunity` object to read `original_init_val` from --
+    see `FluSubpopModel.update_infection_immunity_injection_val`.
+
+    Unlike the MV reset, this fires only on the specific resolved
+    calendar date (year included), matching the numpy behavior of
+    injecting exactly once even across a multi-year run.
+
+    Args:
+        state (FluFullMetapopStateTensors):
+            current state.
+        params (FluFullMetapopParamsTensors):
+            holds `infection_immunity_start_date_mm_dd`,
+            `infection_immunity_injection_val`, and `start_real_date`.
+        day_counter (int):
+            days elapsed since `start_real_date`.
+
+    Returns:
+        FluFullMetapopStateTensors
+    """
+
+    if params.infection_immunity_start_date_mm_dd is None or \
+            params.infection_immunity_injection_val is None:
+        return state
+
+    injection_date = resolve_mm_dd_near_date(
+        params.infection_immunity_start_date_mm_dd,
+        params.start_real_date,
+        param_name="infection_immunity_start_date_mm_dd")
+
+    # Only a date strictly after the start is held back -- a date on or
+    #   before the start was already folded into M(0)
+    if injection_date <= params.start_real_date:
+        return state
+
+    current_date = params.start_real_date + datetime.timedelta(days=day_counter)
+
+    if current_date != injection_date:
+        return state
+
+    print(f"InfInducedImmunity M increased by initial value on {current_date}")
+
+    injection_val = params.infection_immunity_injection_val.to(state.M.dtype)
+
+    return replace(state, M=state.M + injection_val)
 
 def update_state_with_schedules(state: FluFullMetapopStateTensors,
                                 params: FluFullMetapopParamsTensors,
@@ -600,6 +679,10 @@ def torch_simulate_full_history(state: FluFullMetapopStateTensors,
 
     for day in range(num_days):
         state = update_state_with_schedules(state, params, schedules, day)
+        # Apply the once-a-day immunity reset/injection before anything
+        #   reads M or MV, matching `FluSubpopModel.prepare_daily_state`
+        state = check_and_apply_MV_reset(state, params, day)
+        state = check_and_apply_M_injection(state, params, day)
         # Compute mixing exposure once per day (matching numpy metapop model)
         daily_mixing_exposure = compute_total_mixing_exposure(state, params, precomputed)
 
@@ -650,6 +733,10 @@ def torch_simulate_hospital_admits(state: FluFullMetapopStateTensors,
 
     for day in range(num_days):
         state = update_state_with_schedules(state, params, schedules, day)
+        # Apply the once-a-day immunity reset/injection before anything
+        #   reads M or MV, matching `FluSubpopModel.prepare_daily_state`
+        state = check_and_apply_MV_reset(state, params, day)
+        state = check_and_apply_M_injection(state, params, day)
         # Compute mixing exposure once per day (matching numpy metapop model)
         daily_mixing_exposure = compute_total_mixing_exposure(state, params, precomputed)
         daily_admits = None
