@@ -615,6 +615,9 @@ def compute_vax_induced_risk_reduce_initial(params: FluSubpopParams,
           for a given age-risk group, VE_0 equals the input value for that
           group -- vaccine-induced immunity is always 0 for that group, so
           the value is never actually applied.
+        - If `params.adjust_VE_for_seasonal_waning` is False, this
+          adjustment is skipped entirely and the input (season-average)
+          values are returned unchanged (broadcast to shape (A, R)).
 
     Args:
         params (FluSubpopParams):
@@ -636,6 +639,13 @@ def compute_vax_induced_risk_reduce_initial(params: FluSubpopParams,
     """
 
     target_shape = (params.num_age_groups, params.num_risk_groups)
+
+    if params.adjust_VE_for_seasonal_waning is False:
+        return (
+            np.broadcast_to(np.asarray(params.vax_induced_inf_risk_reduce, dtype=float), target_shape).copy(),
+            np.broadcast_to(np.asarray(params.vax_induced_hosp_risk_reduce, dtype=float), target_shape).copy(),
+            np.broadcast_to(np.asarray(params.vax_induced_death_risk_reduce, dtype=float), target_shape).copy(),
+        )
 
     w_arr = np.broadcast_to(
         np.asarray(params.vax_induced_immune_wane, dtype=float), target_shape)

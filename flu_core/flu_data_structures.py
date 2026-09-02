@@ -191,6 +191,19 @@ class FluSubpopParams(clt.SubpopParams):
         vax_induced_death_risk_reduce_initial (np.ndarray of positive floats):
             analogous "peak" (zero-waning) value for
             vax_induced_death_risk_reduce.
+        adjust_VE_for_seasonal_waning (bool):
+            if True (default), `vax_induced_inf_risk_reduce_initial`,
+            `vax_induced_hosp_risk_reduce_initial`, and
+            `vax_induced_death_risk_reduce_initial` are computed from
+            the corresponding `vax_induced_*_risk_reduce` season-average
+            value, `vax_induced_immune_wane`, and the `daily_vaccines`
+            schedule -- see
+            `compute_vax_induced_risk_reduce_initial`. If False, this
+            adjustment is skipped and the `_initial` values are simply
+            set equal to the corresponding `vax_induced_*_risk_reduce`
+            values (i.e. waning is not accounted for when determining
+            the peak vaccine efficacy applied to newly-vaccinated
+            individuals).
         vax_protection_delay_days: (positive int):
             number of days after vaccination until vaccine
             protection is effective.
@@ -279,6 +292,7 @@ class FluSubpopParams(clt.SubpopParams):
     vax_induced_inf_risk_reduce_initial: Optional[np.ndarray] = None
     vax_induced_hosp_risk_reduce_initial: Optional[np.ndarray] = None
     vax_induced_death_risk_reduce_initial: Optional[np.ndarray] = None
+    adjust_VE_for_seasonal_waning: Optional[bool] = True
     vax_protection_delay_days: Optional[int] = 0
     vax_immunity_reset_date_mm_dd: Optional[str] = None
 
@@ -640,6 +654,7 @@ class FluFullMetapopParamsTensors(FluTravelParamsTensors):
     vax_induced_inf_risk_reduce_initial: Optional[torch.Tensor] = None
     vax_induced_hosp_risk_reduce_initial: Optional[torch.Tensor] = None
     vax_induced_death_risk_reduce_initial: Optional[torch.Tensor] = None
+    adjust_VE_for_seasonal_waning: Optional[torch.Tensor] = True
     vax_protection_delay_days: Optional[torch.Tensor] = 0
     vax_immunity_reset_date_mm_dd: Optional[str] = None
 
