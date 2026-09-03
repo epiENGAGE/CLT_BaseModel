@@ -28,11 +28,15 @@ REPO_ROOT = CLT_BASEMODEL_ROOT.parent
 
 # ---------------------------------------------------------------------------
 # Shared-file config templates  (base_path is None; filled in at runtime)
+#   "subpop_specific_params_file" is optional -- it names per-subpopulation
+#   parameter values (e.g. IP_to_ISH_prop, ISH_to_HD_prop) that override
+#   the common ones, and is ignored if the file is not present
 # ---------------------------------------------------------------------------
 
 AUSTIN_L2_SHARED_FILES_CONFIG = {
     "base_path":          None,
     "common_params_file": "common_subpop_params.json",
+    "subpop_specific_params_file": "subpop_specific_params.json",
     "mixing_params_file": "mixing_params.json",
     "settings_file":      "simulation_settings.json",
     "humidity_file":      "absolute_humidity_austin.csv",
@@ -42,6 +46,7 @@ AUSTIN_L2_SHARED_FILES_CONFIG = {
 AUSTIN_L3_SHARED_FILES_CONFIG = {
     "base_path":          None,
     "common_params_file": "common_subpop_params.json",
+    "subpop_specific_params_file": "subpop_specific_params.json",
     "mixing_params_file": "mixing_params.json",
     "settings_file":      "simulation_settings.json",
     "humidity_file":      "absolute_humidity_austin.csv",
@@ -51,6 +56,7 @@ AUSTIN_L3_SHARED_FILES_CONFIG = {
 DALLAS_L6_SHARED_FILES_CONFIG = {
     "base_path":          None,
     "common_params_file": "common_subpop_params.json",
+    "subpop_specific_params_file": "subpop_specific_params.json",
     "mixing_params_file": "mixing_params.json",
     "settings_file":      "simulation_settings.json",
     "humidity_file":      "absolute_humidity_dallas.csv",
@@ -272,10 +278,22 @@ def load_flu_inputs(subpop_config, shared_config, clt_module, flu_module, pd_mod
         "vaccines_df"     : {name: DataFrame}
         "calendar_df"     : {name: DataFrame}
         "params_baseline" : FluSubpopParams  (shared across subpopulations)
+        "params_by_subpop": {name: FluSubpopParams}
         "mixing_params"   : FluMixingParams
         "settings_base"   : SimulationSettings
         "humidity_df"     : DataFrame
         "mobility_df"     : DataFrame
+
+    If ``shared_config`` has a ``"subpop_specific_params_file"`` key (and that
+    file exists), parameters listed in it override the common values for the
+    named subpopulations in "params_by_subpop" -- this is how age-risk
+    parameters such as ``IP_to_ISH_prop`` and ``ISH_to_HD_prop`` are given
+    values that differ across subpopulations. Otherwise every entry of
+    "params_by_subpop" is just "params_baseline".
+
+    Callers that build their own per-subpopulation parameters may replace this
+    key -- :func:`load_calibrated_austin_inputs` does, so
+    ``subpop_specific_params.json`` has no effect on that path.
     """
     base = Path(shared_config["base_path"])
 
@@ -306,11 +324,23 @@ def load_flu_inputs(subpop_config, shared_config, clt_module, flu_module, pd_mod
     humidity_df = pd_module.read_csv(base / shared_config["humidity_file"], index_col=0)
     mobility_df = pd_module.read_csv(base / shared_config["mobility_file"], index_col=0)
 
+    subpop_specific_file = shared_config.get("subpop_specific_params_file")
+    subpop_specific_path = base / subpop_specific_file if subpop_specific_file else None
+    if subpop_specific_path is not None and not subpop_specific_path.exists():
+        subpop_specific_path = None
+
+    params_by_subpop = clt_module.make_subpop_params_dict(
+        params_baseline,
+        [sp["name"] for sp in subpop_config],
+        subpop_specific_filepath=subpop_specific_path,
+    )
+
     return {
         "states":          states,
         "vaccines_df":     vaccines_df,
         "calendar_df":     calendar_df,
         "params_baseline": params_baseline,
+        "params_by_subpop": params_by_subpop,
         "mixing_params":   mixing_params,
         "settings_base":   settings_base,
         "humidity_df":     humidity_df,
@@ -486,7 +516,16 @@ def load_calibrated_austin_inputs(
     region_model="L2",
     calibration_mode="normal",
 ):
-    """Load Austin calibrated inputs with calibrated beta/E0/IHR and 2 risk groups."""
+    """Load Austin calibrated inputs with calibrated beta/E0/IHR and 2 risk groups.
+
+    Note that this path *replaces* the ``"params_by_subpop"`` that
+    :func:`load_flu_inputs` builds from ``subpop_specific_params.json``: it
+    rebuilds per-subpopulation parameters from ``params_baseline`` and takes
+    ``beta_baseline`` and ``IP_to_ISH_prop`` from the calibration file instead.
+    So values placed in ``subpop_specific_params.json`` have no effect here --
+    to vary a parameter across subpopulations on this path, either add it to
+    the calibration file or edit the loop below.
+    """
     global CURRENT_LOCATION, SHARED_FILES_CONFIG, SUBPOP_CONFIG
 
     location = f"Austin_{region_model}"
@@ -553,6 +592,11 @@ def load_calibrated_austin_inputs(
             rate_updates[rate_name] = orig_arr / time_stretch
         params_base = clt_module.updated_dataclass(params_base, rate_updates)
 
+    # Built from scratch off `params_base`, so this discards the
+    #   `inputs["params_by_subpop"]` that `load_flu_inputs` derived from
+    #   `subpop_specific_params.json` -- on this path the calibration file
+    #   is the source of per-subpopulation `beta_baseline` and
+    #   `IP_to_ISH_prop`. See this function's docstring.
     params_by_subpop = {}
     states = {}
     for idx, sp in enumerate(SUBPOP_CONFIG):

@@ -1,0 +1,27 @@
+{
+	"_comment": "TEMPLATE -- every subpopulation currently repeats the value in common_subpop_params.json, so this file changes nothing as written. Edit a subpopulation's entry to give it its own value, or delete a parameter here to leave every subpopulation on the common value. Keys starting with an underscore are ignored.",
+	"IP_to_ISH_prop": {
+		"east": [[0.0064, 0.0498],
+				 [0.0017, 0.0055],
+				 [0.0005, 0.0031],
+				 [0.0014, 0.0097],
+				 [0.0061, 0.0312]],
+		"west": [[0.0064, 0.0498],
+				 [0.0017, 0.0055],
+				 [0.0005, 0.0031],
+				 [0.0014, 0.0097],
+				 [0.0061, 0.0312]]
+	},
+	"ISH_to_HD_prop": {
+		"east": [[0.0194, 0.0194],
+				 [0.0129, 0.0129],
+				 [0.0258, 0.0258],
+				 [0.0683, 0.0683],
+				 [0.0778, 0.0778]],
+		"west": [[0.0194, 0.0194],
+				 [0.0129, 0.0129],
+				 [0.0258, 0.0258],
+				 [0.0683, 0.0683],
+				 [0.0778, 0.0778]]
+	}
+}

@@ -38,7 +38,7 @@ Note that many of the fixed parameters will likely be common across city models,
 - `ISH_to_H_rate` -- CLT Lit Review (Sonny) -- but may eventually get age-specific rates from hospital data
 - `HR_to_R_rate` -- B&B 2025 -- also may eventually get from hospital data
 - `HD_to_D_rate` -- B&B 2025 and CLT Lit Review -- may eventually get from hospital data
-- `inf_induced_saturation`, `vax_induced_saturation` -- Anass Analysis 2025
+- `inf_induced_saturation` -- Anass Analysis 2025
 - `inf_induced_inf_risk_reduce`, `vax_induced_inf_risk_reduce` -- Anass Analysis 2025
 - `inf_induced_hosp_risk_reduce` -- Anass Analysis 08/09/2025, analysis in PDF posted in Slack: (the values of k/(k-1) equal) "6.81 for H1N1 and 9.09 for H3N2" -- according to the [CDC](https://www.cdc.gov/flu/whats-new/flu-summary-2023-2024.html) H1N1 was dominant in 2023-2024 so we'll use the first one -- solving for k, that means the risk reduction is 0.87 roughly.
 
