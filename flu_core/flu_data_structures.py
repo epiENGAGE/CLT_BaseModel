@@ -375,11 +375,16 @@ class FluSubpopParams(clt.SubpopParams):
             proportion exposed who are asymptomatic based on
             age-risk groups.
         IP_to_ISH_prop (np.ndarray of positive floats in [0,1]):
-            proportion infected who are hospitalized
-            based on age-risk groups.
+            A x R array -- proportion infected who are hospitalized
+            based on age-risk groups. To vary this across the L
+            subpopulations of a `FluMetapopModel`, give each
+            subpopulation its own value in a subpopulation-specific
+            parameters `JSON` file -- see
+            `clt.make_subpop_params_dict`.
         ISH_to_HD_prop (np.ndarray of positive floats in [0,1]):
-            proportion hospitalized who die based on
-            age-risk groups.
+            A x R array -- proportion hospitalized who die based on
+            age-risk groups. Varies across subpopulations the same way
+            as `IP_to_ISH_prop`.
         IP_relative_inf (positive float):
             relative infectiousness of pre-symptomatic to symptomatic
             people (IP to IS compartment).

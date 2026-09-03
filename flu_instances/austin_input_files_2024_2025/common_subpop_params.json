@@ -1,4 +1,5 @@
 {
+	"_comment": "IP_to_ISH_prop and ISH_to_HD_prop are also listed in subpop_specific_params.json, which currently repeats these exact values for every subpopulation as a template. Any subpopulation listed there overrides the value here, so edit both files together (or delete the entry there) when changing them.",
 	"num_age_groups":5,
 	"num_risk_groups":2,
 	"beta_baseline": 0.0282,

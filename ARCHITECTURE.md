@@ -131,12 +131,76 @@ Each model instance is described by a set of JSON and CSV files:
 |------|----------|
 | `simulation_settings.json` | `timesteps_per_day`, `transition_type`, `start_real_date`, history flags |
 | `common_subpop_params.json` | Shared epidemiological parameters (beta, rates, proportions, immunity params, contact matrices) |
+| `subpop_specific_params.json` | *(optional)* Parameter values that differ by subpopulation — overrides `common_subpop_params.json` |
 | `init_vals_*.json` | Initial compartment and metric values as age×risk arrays |
 | `mixing_params.json` | Number of locations and travel proportion matrix (rows sum to 1) |
 | `absolute_humidity.csv` | Daily absolute humidity values |
 | `contact_matrix.csv` | Daily school/work day indicators for contact matrix interpolation |
 | `daily_vaccines.csv` | Daily vaccination counts per age-risk cell (JSON-encoded per row) |
 | `mobility_modifier.csv` | Time-varying or day-of-week mobility reduction factors |
+
+### Parameters that vary by subpopulation
+
+Parameters in `FluSubpopParams` are A × R (age groups × risk groups) *within*
+one subpopulation — there is no L (subpopulation) axis, because each
+`FluSubpopModel` holds its own `FluSubpopParams`. `FluMetapopModel` stacks them
+into the L × A × R tensors used by the torch path.
+
+To give a parameter such as `IP_to_ISH_prop` or `ISH_to_HD_prop` values that
+differ across subpopulations, list it in `subpop_specific_params.json`, keyed by
+subpopulation name (parameter-major, so that one parameter's values across
+locations can be read side by side):
+
+```json
+{
+    "IP_to_ISH_prop": {
+        "east": [[0.0070, 0.0543], [0.0027, 0.0088], ...],
+        "west": [[0.0051, 0.0397], [0.0020, 0.0064], ...]
+    },
+    "ISH_to_HD_prop": {
+        "east": [0.0132, 0.0099, 0.0295, 0.0594, 0.0802],
+        "west": 0.02
+    },
+    "beta_baseline": {"east": 1.5, "west": 2.1}
+}
+```
+
+Age-risk values may be written four ways: a full A × R nested list (as
+`IP_to_ISH_prop` is above), an A × 1 nested list or a length-A list (as
+`ISH_to_HD_prop` is above — both broadcast the same value across risk groups),
+or a scalar (as `west` is above). The dimensions may be mixed freely across
+subpopulations; once the loader recognizes a parameter as age-risk — because its
+common value is an A × R array, or because *some* subpopulation gives it as an
+array — it expands **every** subpopulation's value for that parameter to A × R,
+including the ones falling back to the common value. That is what lets
+`FluMetapopModel` stack them into a rectangular L × A × R tensor. A parameter
+that is a scalar in the common parameters and a scalar in every override is left
+scalar: nothing marks it as age-risk (it could just as well be `beta_baseline`),
+and scalars stack without expansion anyway.
+
+An unrecognized subpopulation or parameter name raises, so typos are not
+silently ignored, and so does `num_age_groups` or `num_risk_groups` — A and R
+define the grid that subpopulation tensors are stacked on, so they must be the
+same everywhere and belong only in `common_subpop_params.json`. `JSON` has no
+comment syntax, so keys beginning with an underscore (`"_comment"`) are ignored
+in both files.
+
+A parameter normally appears in *both* files, and precedence is resolved per
+subpopulation and per parameter: the subpopulation-specific value wins where it
+is given, and a subpopulation omitted from a parameter keeps the common value
+(so overriding only `east` leaves `west` on the shared number, expanded to A × R
+alongside `east`'s). Keeping the parameter in `common_subpop_params.json` is
+worth doing even when every subpopulation overrides it, because the common value
+is what the loader validates each override's shape against — without it, a
+per-subpopulation value with the wrong number of age groups has nothing to be
+checked against and is passed through as written.
+
+Build the per-subpopulation parameters with
+`clt.make_subpop_params_dict(common_params, subpop_names, FluSubpopParams,
+subpop_specific_filepath)`, which returns `{name: FluSubpopParams}` to pass to
+each `FluSubpopModel`. To apply the same file to an already-built metapop model,
+use `clt.load_subpop_specific_params_json(...)` and feed each subpopulation's
+updates to `FluMetapopModel.modify_subpop_params`.
 
 ---
 
