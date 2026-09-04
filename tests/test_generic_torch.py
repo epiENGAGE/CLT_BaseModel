@@ -28,6 +28,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import clt_toolkit as clt
 import flu_core as flu
 from conftest import subpop_inputs
+from conftest import requires_flu_core_new_ve
 
 from generic_core.config_parser import parse_model_config
 from generic_core.generic_model import (
@@ -171,6 +172,7 @@ def both_torch_histories():
 
 @pytest.mark.parametrize("subpop_ix", [0, 1])
 @pytest.mark.parametrize("compartment", COMPARTMENTS)
+@requires_flu_core_new_ve
 def test_compartment_torch_history_matches_flu(both_torch_histories, subpop_ix, compartment):
     flu_hist, gen_hist = both_torch_histories
 
@@ -185,6 +187,7 @@ def test_compartment_torch_history_matches_flu(both_torch_histories, subpop_ix, 
 
 
 @pytest.mark.parametrize("subpop_ix", [0, 1])
+@requires_flu_core_new_ve
 def test_M_torch_history_matches_flu(both_torch_histories, subpop_ix):
     flu_hist, gen_hist = both_torch_histories
     flu_series = torch.stack([flu_hist["M"][d][subpop_ix] for d in range(NUM_DAYS)])

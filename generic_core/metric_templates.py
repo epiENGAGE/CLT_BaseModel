@@ -30,6 +30,22 @@ import numpy as np
 
 import clt_toolkit as clt
 
+from .data_structures import resolve_mm_dd_near_date
+
+
+def injection_val_param_name(metric_name: str) -> str:
+    """
+    Name of the derived param carrying an infection-induced immunity
+    metric's pending injection value.
+
+    The numpy model reads the pending injection off the metric object
+    itself; the torch model has no metric objects, so
+    ConfigDrivenSubpopModel mirrors the value onto params under this name
+    and torch_generic.check_and_apply_M_injection reads it back. The
+    leading underscore marks it as derived, not user-supplied.
+    """
+    return f"_{metric_name}_injection_val"
+
 
 # ---------------------------------------------------------------------------
 # Abstract base class
@@ -108,10 +124,12 @@ class InfInducedImmunityGeneric(clt.EpiMetric):
             Name of the R→S transition variable.
         inf_induced_saturation_param : str
             Parameter name for inf_induced_saturation.
-        vax_induced_saturation_param : str
-            Parameter name for vax_induced_saturation.
         inf_induced_immune_wane_param : str
             Parameter name for inf_induced_immune_wane.
+        infection_immunity_start_date_mm_dd_param : str, optional
+            Parameter name holding a "MM_DD" string (or None) giving the
+            date that the input M(0) corresponds to — see
+            `adjust_initial_value`.
     """
 
     def __init__(
@@ -120,11 +138,91 @@ class InfInducedImmunityGeneric(clt.EpiMetric):
         R_to_S: clt.TransitionVariable,
         update_config: dict,
         params,
+        current_real_date: datetime.date,
+        timesteps_per_day: int,
     ):
-        super().__init__(init_val)
         self.R_to_S = R_to_S
         self.update_config = update_config
         self.params = params
+        self.pending_injection_date = None
+
+        adjusted_init_val = self.adjust_initial_value(
+            init_val, current_real_date, params, timesteps_per_day
+        )
+        super().__init__(adjusted_init_val)
+
+    def adjust_initial_value(
+        self,
+        init_val: np.ndarray,
+        current_real_date: datetime.date,
+        params,
+        timesteps_per_day: int,
+    ) -> np.ndarray:
+        """
+        Adjusts the initial value of infection-induced immunity based on
+        `infection_immunity_start_date_mm_dd_param`, the date that
+        init_val (M(0)) corresponds to.
+
+        If that parameter is unset, or resolves to `current_real_date`,
+        init_val is used as-is. If it resolves to a date before
+        `current_real_date`, init_val is decayed forward (waning only) to
+        `current_real_date`. If it resolves to a date after, the adjusted
+        initial value is zero and init_val is instead added to
+        `current_val` once that date is reached (see
+        `check_and_apply_injection`).
+
+        The "MM_DD" string carries no year, so the year is resolved by
+        `resolve_mm_dd_near_date` — see that function for why the
+        nearest-year rule matters for seasons that span a new year.
+
+        Mirrors InfInducedImmunity.adjust_initial_value in
+        flu_core/flu_components.py.
+        """
+
+        self.original_init_val = copy.deepcopy(init_val)
+        self.adjusted_init_val = copy.deepcopy(init_val)
+        self.pending_injection_date = None
+
+        start_param = self.update_config.get("infection_immunity_start_date_mm_dd_param")
+        start_date_str = params.params.get(start_param) if start_param else None
+
+        if start_date_str is not None:
+
+            immunity_start_date = resolve_mm_dd_near_date(
+                start_date_str,
+                current_real_date,
+                param_name=start_param)
+
+            if immunity_start_date < current_real_date:
+                # init_val is a past value -- decay it forward
+                #   (waning only) to current_real_date
+                wane = params.params[self.update_config["inf_induced_immune_wane_param"]]
+                num_days = (current_real_date - immunity_start_date).days
+                for _ in range(num_days):
+                    for _ in range(timesteps_per_day):
+                        self.adjusted_init_val = self.adjusted_init_val - \
+                            wane * self.adjusted_init_val / timesteps_per_day
+            elif immunity_start_date > current_real_date:
+                # init_val is a future value -- start at 0 and add
+                #   init_val once immunity_start_date is reached
+                self.adjusted_init_val = np.zeros_like(self.adjusted_init_val)
+                self.pending_injection_date = immunity_start_date
+
+        return self.adjusted_init_val
+
+    def check_and_apply_injection(self, current_date: datetime.date, params) -> None:
+        """
+        If `current_date` matches the pending injection date, add the
+        original initial value to `current_val` (one time only).
+
+        Mirrors InfInducedImmunity.check_and_apply_injection.
+        """
+
+        if self.pending_injection_date is not None and \
+                current_date == self.pending_injection_date:
+            self.current_val = self.current_val + self.original_init_val
+            self.pending_injection_date = None
+            print(f"InfInducedImmunityGeneric increased by initial value on {current_date}")
 
     def get_change_in_current_val(self, state: Any, params: Any, num_timesteps: int) -> np.ndarray:
         """
@@ -137,17 +235,10 @@ class InfInducedImmunityGeneric(clt.EpiMetric):
         wane = params.params[self.update_config["inf_induced_immune_wane_param"]]
 
         M = state.epi_metrics["M"]
-        MV = state.epi_metrics.get("MV", None)
-
-        if "vax_induced_saturation_param" in self.update_config and MV is not None:
-            vax_sat = params.params[self.update_config["vax_induced_saturation_param"]]
-            vax_term = vax_sat * MV
-        else:
-            vax_term = 0.0
 
         return (
             (self.R_to_S.current_val / params.total_pop_age_risk)
-            * (1.0 - inf_sat * M - vax_term)
+            * (1.0 - inf_sat * M)
             - wane * M / num_timesteps
         )
 
@@ -161,10 +252,13 @@ class InfectionInducedImmunityTemplate(MetricTemplate):
     r_to_s_transition : str
         Name of the R→S transition variable in the model.
     inf_induced_saturation_param : str
-    vax_induced_saturation_param : str, optional
-        If omitted, the vaccine-immunity saturation term is treated as zero
-        (MV need not be present in the state either).
     inf_induced_immune_wane_param : str
+    infection_immunity_start_date_mm_dd_param : str, optional
+        Parameter name holding a "MM_DD" string (or None) giving the date
+        that the configured init_val corresponds to.
+
+    NOTE: `vax_induced_saturation_param` was REMOVED — vaccine-induced
+    immunity no longer damps the M update. See generic_core/limitations.md.
     """
 
     _REQUIRED = (
@@ -191,15 +285,35 @@ class InfectionInducedImmunityTemplate(MetricTemplate):
                     f"InfectionInducedImmunityTemplate: param '{pname}' (from '{pkey}') not in model params"
                 )
         if "vax_induced_saturation_param" in update_config:
-            pname = update_config["vax_induced_saturation_param"]
-            if pname not in param_names:
-                raise ValueError(
-                    f"InfectionInducedImmunityTemplate: param '{pname}' (from 'vax_induced_saturation_param') not in model params"
-                )
+            raise ValueError(
+                "InfectionInducedImmunityTemplate: 'vax_induced_saturation_param' is no "
+                "longer supported -- vaccine-induced immunity no longer damps the "
+                "infection-induced immunity update. Remove the key from update_config."
+            )
+        start_param = update_config.get("infection_immunity_start_date_mm_dd_param")
+        if start_param is not None and start_param not in param_names:
+            raise ValueError(
+                f"InfectionInducedImmunityTemplate: param '{start_param}' (from "
+                "'infection_immunity_start_date_mm_dd_param') not in model params"
+            )
 
     def build_metric(self, init_val, update_config, params, transition_variables, schedules, timesteps_per_day):
         R_to_S = transition_variables[update_config["r_to_s_transition"]]
-        return InfInducedImmunityGeneric(init_val, R_to_S, update_config, params)
+        current_real_date = update_config.get("_current_real_date")
+        if current_real_date is None:
+            raise ValueError(
+                "InfectionInducedImmunityTemplate: '_current_real_date' must be set in "
+                "update_config before calling build_metric "
+                "(done automatically by ConfigDrivenSubpopModel)"
+            )
+        return InfInducedImmunityGeneric(
+            init_val,
+            R_to_S,
+            update_config,
+            params,
+            current_real_date,
+            timesteps_per_day,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -221,8 +335,8 @@ class VaxInducedImmunityGeneric(clt.EpiMetric):
             Parameter name for the reset date string ("MM_DD"), or None
             if no reset is used.
         vax_protection_delay_days_param : str | None
-            Parameter name for vax_protection_delay_days (used during
-            initial value adjustment only).
+            Unused here — the protection delay is applied once, by
+            VaccineScheduleTemplate, when building the schedule.
     """
 
     def __init__(
@@ -234,13 +348,13 @@ class VaxInducedImmunityGeneric(clt.EpiMetric):
         schedules: dict,
         timesteps_per_day: int,
     ):
-        adjusted_init_val = self._adjust_initial_value(
+        self.update_config = update_config
+        adjusted_init_val = self.adjust_initial_value(
             init_val, current_real_date, update_config, params, schedules, timesteps_per_day
         )
         super().__init__(adjusted_init_val)
-        self.update_config = update_config
 
-    def _adjust_initial_value(
+    def adjust_initial_value(
         self,
         init_val: np.ndarray,
         current_real_date: datetime.date,
@@ -256,7 +370,13 @@ class VaxInducedImmunityGeneric(clt.EpiMetric):
         parameter), counts vaccines administered after the reset date up to
         the simulation start, applying waning, and adds this adjustment to
         init_val.
+
+        `original_init_val` is stored so that reset_simulation can re-derive
+        from the unmodified config value without adjustments compounding
+        across calls.
         """
+        self.original_init_val = copy.deepcopy(init_val)
+
         reset_param = update_config.get("vax_immunity_reset_date_mm_dd_param")
         reset_date_str = None
         if reset_param is not None:
@@ -280,17 +400,15 @@ class VaxInducedImmunityGeneric(clt.EpiMetric):
         if reset_date >= current_real_date:
             reset_date = datetime.date(current_year - 1, int(month), int(day))
 
-        delay_param = update_config.get("vax_protection_delay_days_param")
-        delay_days = 0
-        if delay_param is not None:
-            delay_days = int(params.params.get(delay_param, 0))
-
-        import datetime as dt
         vaccines_schedule = schedules[update_config["daily_vaccines_schedule"]]
         vaccines_df = vaccines_schedule.timeseries_df.copy()
 
-        effective_reset = reset_date + dt.timedelta(days=delay_days)
-        mask = (vaccines_df.index >= effective_reset) & (vaccines_df.index < current_real_date)
+        # The schedule index is already the PROTECTION date --
+        #   VaccineScheduleGeneric.preprocess has shifted every date forward
+        #   by vax_protection_delay_days. Adding the delay to `reset_date`
+        #   here as well would drop the doses that become protective during
+        #   the delay window just after the reset date.
+        mask = (vaccines_df.index >= reset_date) & (vaccines_df.index < current_real_date)
         relevant_vaccines = vaccines_df[mask]
 
         wane = params.params[update_config["vax_induced_immune_wane_param"]]
@@ -348,8 +466,8 @@ class VaccineInducedImmunityTemplate(MetricTemplate):
         Parameter name for the reset date (value is "MM_DD" string), or
         None/absent if no reset is used.
     vax_protection_delay_days_param : str | None
-        Parameter name for the protection delay (used for initial value
-        adjustment only). Absent means no delay adjustment.
+        Unused here — the protection delay is applied once, by
+        VaccineScheduleTemplate, when building the schedule.
     """
 
     _REQUIRED = (

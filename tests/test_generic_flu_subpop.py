@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import clt_toolkit as clt
 import flu_core as flu
 from conftest import subpop_inputs
+from conftest import requires_flu_core_new_ve
 
 from generic_core.config_parser import parse_model_config
 from generic_core.generic_model import (
@@ -101,6 +102,7 @@ def both_models():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("compartment", COMPARTMENTS)
+@requires_flu_core_new_ve
 def test_compartment_trajectory_identical(both_models, compartment):
     ref, gen = both_models
     ref_hist = np.array(ref.compartments[compartment].history_vals_list)
@@ -113,6 +115,7 @@ def test_compartment_trajectory_identical(both_models, compartment):
     )
 
 
+@requires_flu_core_new_ve
 def test_epi_metric_M_trajectory(both_models):
     ref, gen = both_models
     ref_hist = np.array(ref.epi_metrics["M"].history_vals_list)

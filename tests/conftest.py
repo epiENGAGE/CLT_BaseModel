@@ -9,6 +9,27 @@ from typing import Tuple
 base_path = clt.utils.PROJECT_ROOT / "tests" / "test_input_files"
 
 
+# generic_core implements the reworked vaccine-efficacy model from the
+#   `ve_update` branch: vaccine protection is a multiplicative
+#   `1 - MV * VE_0` factor (with VE_0 back-derived from a season-average
+#   efficacy) rather than a term in the additive immunity denominator, and
+#   `vax_induced_saturation` no longer damps the M update.
+#
+# flu_core has NOT been ported yet on this branch, so the generic-vs-flu
+#   exact-equality tests are expected to diverge until `ve_update` merges.
+#   They are gated rather than deleted: this flips back on automatically
+#   once flu_core gains the derived-efficacy params, at which point the
+#   parity assertions become meaningful again (and must pass).
+FLU_CORE_HAS_NEW_VE = hasattr(flu.FluSubpopParams, "vax_induced_inf_risk_reduce_initial")
+
+requires_flu_core_new_ve = pytest.mark.skipif(
+    not FLU_CORE_HAS_NEW_VE,
+    reason="generic_core uses the ve_update vaccine-efficacy model; flu_core on this "
+           "branch still uses the old additive-immunity model, so exact parity with "
+           "flu_core cannot hold. Re-enables automatically once ve_update merges.",
+)
+
+
 def subpop_inputs(id: str) -> Tuple[flu.FluSubpopState,
                                     flu.FluSubpopParams,
                                     flu.FluMixingParams,

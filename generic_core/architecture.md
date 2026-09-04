@@ -99,7 +99,7 @@ class RateTemplate(ABC):
 |---------------|---------|----------|
 | `constant_param` | `params[name]` broadcast to (A,R) | R→S, ISR→R, IA→R, HR→R, HD→D |
 | `param_product` | `params[a] * params[b] * (1 - params[c]) ...` | E→IP, E→IA |
-| `immunity_modulated` | `base_rate * (prop / immunity_force)` or complement | IP→ISR, IP→ISH, ISH→HR, ISH→HD |
+| `immunity_modulated` | `base_rate * prob` or complement, `prob = (prop / immunity_force) * vax_factor` | IP→ISR, IP→ISH, ISH→HR, ISH→HD |
 | `force_of_infection` | Beta × humidity × contact_matrix × infectious_prop / immune_force | S→E (single-pop) |
 | `force_of_infection_travel` | As above but uses `compute_total_mixing_exposure` | S→E (metapop) |
 
@@ -134,6 +134,57 @@ subclass with whatever extra constructor arguments it needs (e.g.,
 |---------------|----------------------|-------|
 | `infection_induced_immunity` | `InfInducedImmunityGeneric` | Needs reference to `R_to_S` transition variable |
 | `vaccine_induced_immunity` | `VaxInducedImmunityGeneric` | Needs schedule + delay params + reset date |
+
+### Vaccine efficacy
+
+Infection- and vaccine-induced immunity act through two different mechanisms
+(mirroring `flu_core` as reworked on the `ve_update` branch):
+
+- **Infection-induced** immunity divides the rate:
+  `immunity_force = 1 + (r_inf / (1 - r_inf)) * M`
+- **Vaccine-induced** immunity multiplies it:
+  `vax_factor = 1 - MV * VE_0`
+
+For the severe-outcome splits the vaccine factor multiplies the *probability*,
+so it does not cancel out of the complement branch.
+
+`VE_0` is the peak (zero-waning) efficacy. The user supplies a *season-average*
+efficacy, and `ve_derivation.compute_ve_inflation_factors` back-solves for the
+inflation factor `VE_0 / VE_season` that makes the dose-timing-weighted average
+over the vaccination season reproduce the input.
+
+Because `VE_0` is linear in `VE_season`, only the **factor** is stored — under
+`ve_inflation_param_name(<season param>)` in `params.params`, written by
+`ConfigDrivenSubpopModel.update_ve_inflation_factors` at construction and on
+`reset_simulation`. Rate templates form `VE_0 = min(VE_season × factor, 1)` at
+every evaluation (`rate_templates._vax_induced_peak_efficacy_np` / `_torch`).
+
+Storing the factor rather than the product is deliberate: it keeps `VE_season`
+live for scenario overrides, fitting draws applied after `reset_simulation`,
+and torch autodiff. Precomputing `VE_0` onto params — as `flu_core` does on
+`ve_update` — makes all three silent no-ops, since no rate would then read the
+season-average parameter at all.
+
+Rate configs name the season-average param directly, via `vax_reduce_param`.
+The top-level `ve_derivation` block lists which params get a factor derived for
+them. See limitations.md for what remains construction-time-bound.
+
+`vax_induced_saturation` no longer exists — vaccine immunity does not damp the
+`M` update.
+
+### Immunity start dates
+
+Both immunity metrics can be anchored to a real date given as a year-less
+`"MM_DD"` string, resolved by `data_structures.resolve_mm_dd_near_date` to
+whichever adjacent year lands closest to the simulation start.
+
+- `vax_immunity_reset_date_mm_dd` — resets `MV` to 0 each year on that date,
+  and bounds the pre-simulation dose window folded into `MV(0)`.
+- `infection_immunity_start_date_mm_dd` — the date the configured `M(0)`
+  corresponds to. Before the start, `M(0)` is decayed forward (waning only);
+  after it, `M` starts at 0 and `M(0)` is injected once on that date. The
+  torch path has no epi metric objects, so the pending amount is mirrored onto
+  params under `injection_val_param_name(<metric>)`.
 
 ---
 

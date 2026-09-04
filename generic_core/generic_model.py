@@ -31,8 +31,17 @@ from clt_toolkit.base_data_structures import SimulationSettings
 from .data_structures import GenericSubpopState, GenericSubpopParams
 from .config_parser import ModelConfig
 from .rate_templates import RATE_TEMPLATE_REGISTRY
-from .metric_templates import METRIC_TEMPLATE_REGISTRY, VaxInducedImmunityGeneric
+from .metric_templates import (
+    METRIC_TEMPLATE_REGISTRY,
+    InfInducedImmunityGeneric,
+    VaxInducedImmunityGeneric,
+    injection_val_param_name,
+)
 from .schedule_templates import SCHEDULE_TEMPLATE_REGISTRY
+from .ve_derivation import (
+    compute_ve_inflation_factors,
+    warn_if_ve_initial_capped,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -169,6 +178,157 @@ class ConfigDrivenSubpopModel(clt.SubpopModel):
         # super().__init__ calls create_schedules, create_compartments, ...,
         # run_input_checks in that order.
         super().__init__(state_init, params, simulation_settings, RNG, name)
+
+        self.update_ve_inflation_factors()
+        self.update_infection_immunity_injection_val()
+
+        # The immunity metrics adjust their own initial values in their
+        #   constructors (decaying M(0) forward, deferring it, or adding
+        #   pre-start vaccine doses to MV(0)), but `self.state` still holds
+        #   the raw values from the config. Sync so that anything reading
+        #   `self.state` before the first simulated day sees the adjusted
+        #   values -- notably the torch path, which builds its starting
+        #   tensors straight off `self.state` and would otherwise start from
+        #   different initial immunity than the numpy run.
+        self.state.sync_to_current_vals(self.epi_metrics)
+
+    # -----------------------------------------------------------------------
+    # Derived vaccine-efficacy / immunity params
+    # -----------------------------------------------------------------------
+
+    def update_ve_inflation_factors(self, warn: bool = True) -> None:
+        """
+        Recompute the derived VE inflation factors from the current dose
+        schedule and waning rate, writing them into `self.params.params`.
+
+        Each factor is `VE_0 / VE_season` for one configured season-average
+        efficacy param; the rate templates multiply it by that param's live
+        value at every evaluation (see
+        `rate_templates._vax_induced_peak_efficacy_np`). Storing the factor
+        rather than the finished `VE_0` is what keeps season-average efficacy
+        overrides -- scenario overrides, fitting draws, torch autodiff --
+        effective; see ve_derivation's module docstring.
+
+        The factor itself depends on the dose schedule and the waning rate,
+        so it is also refreshed on `reset_simulation` and again at the start
+        of day 0 in `prepare_daily_state`.
+
+        The day-0 refresh is the one that matters for overrides. Every
+        override path in this repo applies parameters AFTER
+        `reset_simulation()` -- `fitting._reuse_simulate` additionally
+        restores a cached baseline params dict, which overwrites whatever
+        the reset just computed -- so a reset-time refresh alone would leave
+        the factor pinned to its construction-time waning rate for an entire
+        fit. Refreshing once more when the run actually starts picks up
+        every override regardless of ordering.
+
+        Args:
+            warn: whether to report age-risk groups whose implied peak
+                efficacy exceeds 1.0 and will be capped. False for the
+                day-0 refresh, which would otherwise repeat the same
+                warning on every one of a fit's thousands of evaluations.
+
+        No-op when the config has no "ve_derivation" block.
+        """
+
+        derivation_config = self.model_config.ve_derivation
+
+        if not derivation_config:
+            return
+
+        self.params.params.update(compute_ve_inflation_factors(
+            self.params, self.schedules, self.start_real_date, derivation_config
+        ))
+
+        if warn:
+            warn_if_ve_initial_capped(self.params, derivation_config)
+
+    def update_infection_immunity_injection_val(self) -> None:
+        """
+        Mirror each infection-induced immunity metric's pending injection onto
+        `self.params.params` -- the amount to add to M when its start date is
+        reached, or zeros if no injection is pending.
+
+        The numpy model applies the injection straight off the epi metric
+        (`InfInducedImmunityGeneric.check_and_apply_injection`) and does not
+        need this. The torch model has no epi metric objects -- it only sees
+        params and state tensors -- so the value has to travel on params for
+        `torch_generic.check_and_apply_M_injection` to apply it there.
+
+        Like `update_ve_inflation_factors`, this is re-run on
+        `reset_simulation` so it tracks post-construction changes.
+
+        Note that `pending_injection_date is None` covers three different
+        situations -- no start date, a start date landing on the simulation
+        start, and a PAST start date whose value was decayed forward into
+        `init_val`. All three want zeros here: the adjusted M(0) reaches the
+        torch path through the state tensors, not through this param. Only a
+        FUTURE start date defers, and only then is there anything to inject.
+
+        The mirror is kept in step with the metric throughout: it is set at
+        construction and on `reset_simulation`, and `prepare_daily_state`
+        re-runs this method on the day an injection fires so the spent
+        injection zeroes out. That matters because `build_generic_torch_inputs`
+        reads `params` (and the model's current state) at whatever point it is
+        called -- a mirror left claiming "pending" after the fact would make
+        the torch path apply the same injection a second time.
+        """
+
+        A, R = self.params.num_age_groups, self.params.num_risk_groups
+
+        for name, metric in self.epi_metrics.items():
+            if not isinstance(metric, InfInducedImmunityGeneric):
+                continue
+            if metric.pending_injection_date is not None:
+                injection_val = np.asarray(metric.original_init_val, dtype=float).copy()
+            else:
+                injection_val = np.zeros((A, R))
+            self.params.params[injection_val_param_name(name)] = injection_val
+
+    def reset_simulation(self) -> None:
+        """
+        Extend the base `reset_simulation` to recompute the immunity metrics'
+        initial values and the derived vaccine-efficacy params from the
+        currently loaded schedules and params, before resetting.
+
+        This ensures that if a schedule has been replaced (e.g. via
+        `replace_schedule`), or base params have been overridden (e.g. by
+        `ScenarioRunner`), the model resets to values consistent with the
+        current schedules/params rather than those computed at construction
+        time.
+
+        Both recomputations start from each metric's `original_init_val` --
+        the unmodified config value -- so adjustments do not compound across
+        calls.
+        """
+
+        schedules_dict = dict(self.schedules)
+
+        for metric in self.epi_metrics.values():
+            if isinstance(metric, VaxInducedImmunityGeneric):
+                # Use the init_val setter so current_val is also updated
+                # immediately, before super()'s reset loop overwrites it again
+                # (harmlessly).
+                metric.init_val = metric.adjust_initial_value(
+                    metric.original_init_val,
+                    self.start_real_date,
+                    metric.update_config,
+                    self.params,
+                    schedules_dict,
+                    self.simulation_settings.timesteps_per_day,
+                )
+            elif isinstance(metric, InfInducedImmunityGeneric):
+                metric.init_val = metric.adjust_initial_value(
+                    metric.original_init_val,
+                    self.start_real_date,
+                    self.params,
+                    self.simulation_settings.timesteps_per_day,
+                )
+
+        self.update_ve_inflation_factors()
+        self.update_infection_immunity_injection_val()
+
+        super().reset_simulation()
 
     # -----------------------------------------------------------------------
     # Factory methods
@@ -425,15 +585,47 @@ class ConfigDrivenSubpopModel(clt.SubpopModel):
 
     def prepare_daily_state(self) -> None:
         """
-        Override to also call check_and_apply_reset on vaccine immunity metrics.
+        Override to also apply the vaccine-immunity reset and the
+        infection-immunity injection at the start of each day.
 
         Mirrors FluSubpopModel.prepare_daily_state.
         """
         super().prepare_daily_state()
 
+        # Refresh the derived VE inflation factors once, as the run starts.
+        #   By now any post-reset parameter override (a fitting draw, a
+        #   scenario override) is in place, which is not true at
+        #   `reset_simulation` time -- see `update_ve_inflation_factors`.
+        #   Params only; no state is touched, so this cannot disturb a
+        #   manually set `current_val`.
+        if self.current_simulation_day == 0:
+            self.update_ve_inflation_factors(warn=False)
+
+        injection_fired = False
+
         for metric in self.epi_metrics.values():
             if isinstance(metric, VaxInducedImmunityGeneric):
                 metric.check_and_apply_reset(self.current_real_date, self.params)
+            elif isinstance(metric, InfInducedImmunityGeneric):
+                was_pending = metric.pending_injection_date is not None
+                metric.check_and_apply_injection(self.current_real_date, self.params)
+                if was_pending and metric.pending_injection_date is None:
+                    injection_fired = True
+
+        # An injection that just fired is spent, so zero its mirrored params
+        #   value -- otherwise `params` would keep claiming an injection is
+        #   pending after the metric knows better, and anything reading params
+        #   mid-run (notably `build_generic_torch_inputs`) would apply it a
+        #   second time. `reset_simulation` restores it for the next run.
+        if injection_fired:
+            self.update_infection_immunity_injection_val()
+
+        # The reset/injection above set `current_val` directly on the epi
+        #   metric objects -- sync `self.state` immediately so that today's
+        #   update (which reads state.epi_metrics, not the metric's own
+        #   current_val) sees the up-to-date value on its very first
+        #   timestep, instead of a stale pre-reset/pre-injection value.
+        self.state.sync_to_current_vals(self.epi_metrics)
 
 
 # ---------------------------------------------------------------------------

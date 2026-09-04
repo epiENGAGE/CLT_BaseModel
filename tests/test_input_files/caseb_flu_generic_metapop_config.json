@@ -6,7 +6,6 @@
         "humidity_impact":               0.0,
         "inf_induced_saturation":        0.7,
         "inf_induced_immune_wane":       0.0002,
-        "vax_induced_saturation":        0.2,
         "vax_induced_immune_wane":       0.004,
         "inf_induced_inf_risk_reduce":   0.8,
         "inf_induced_hosp_risk_reduce":  0.8,
@@ -212,6 +211,19 @@
         }
     ],
 
+    "ve_derivation": {
+        "daily_vaccines_schedule":             "daily_vaccines",
+        "vax_induced_immune_wane_param":       "vax_induced_immune_wane",
+        "vax_immunity_reset_date_mm_dd_param": "vax_immunity_reset_date_mm_dd",
+        "adjust_VE_for_seasonal_waning":       true,
+        "VE_season_dose_window_quantile":      null,
+        "fields": [
+            "vax_induced_inf_risk_reduce",
+            "vax_induced_hosp_risk_reduce",
+            "vax_induced_death_risk_reduce"
+        ]
+    },
+
     "epi_metrics": [
         {
             "name":            "M",
@@ -220,7 +232,6 @@
             "update_config": {
                 "r_to_s_transition":             "R_to_S",
                 "inf_induced_saturation_param":  "inf_induced_saturation",
-                "vax_induced_saturation_param":  "vax_induced_saturation",
                 "inf_induced_immune_wane_param":  "inf_induced_immune_wane"
             }
         },

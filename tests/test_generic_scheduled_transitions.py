@@ -1,6 +1,6 @@
 """
 Tests for the scheduled-transition / vaccination feature (commit 550fc87) and
-a regression test for the optional vax_induced_saturation_param on the torch path.
+a regression test for the optional vaccine-efficacy key on the torch path.
 
 Covers:
   1. ScheduledTransferVariable.get_scheduled_exact_realization() unit behaviour:
@@ -9,8 +9,8 @@ Covers:
   2. ScheduledTransferVariable.reset() restores the within-day timestep counter.
   3. Config-parser rejection of scheduled_exact inside transition groups and in
      jointly_distributed_with (these constraints are coded in config_parser.py).
-  4. Regression: an infection-induced-immunity model WITHOUT
-     vax_induced_saturation_param must run on the torch path without raising
+  4. Regression: an infection-induced-immunity model that OMITS
+     a vaccine-efficacy key must run on the torch path without raising
      KeyError (previously torch_generic.generic_advance_timestep accessed the
      optional key unconditionally).
 """
@@ -327,16 +327,16 @@ def test_scheduled_exact_no_reset_key_means_no_adjustment():
 
 
 # ---------------------------------------------------------------------------
-# 4. Regression: optional vax_induced_saturation_param on the torch path
+# 4. Regression: optional vax_reduce_param on the torch path
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("drop_vax_sat", [False, True])
-def test_torch_runs_with_optional_vax_saturation(drop_vax_sat):
+@pytest.mark.parametrize("drop_vax_reduce", [False, True])
+def test_torch_runs_with_optional_vax_reduce(drop_vax_reduce):
     """
     Build the caseB generic metapop model on the torch path and run a short
-    history. With drop_vax_sat=True the M-metric's vax_induced_saturation_param
-    is removed from update_config; the torch path must treat the vax-immunity
-    saturation term as zero rather than raising KeyError.
+    history. With drop_vax_reduce=True every rate config's
+    vax_reduce_param is removed; the torch path must then treat the
+    vaccine-protection factor as 1 rather than raising KeyError.
     """
     torch = pytest.importorskip("torch")
 
@@ -357,10 +357,12 @@ def test_torch_runs_with_optional_vax_saturation(drop_vax_sat):
     compartments = ["S", "E", "IP", "ISR", "ISH", "IA", "HR", "HD", "R", "D"]
 
     config_dict = json.loads(CASEB_CONFIG_PATH.read_text())
-    if drop_vax_sat:
-        for m in config_dict["epi_metrics"]:
-            if m["name"] == "M":
-                m["update_config"].pop("vax_induced_saturation_param", None)
+    if drop_vax_reduce:
+        for t in config_dict["transitions"]:
+            t.get("rate_config", {}).pop("vax_reduce_param", None)
+        # With no rate referencing a derived efficacy, the derivation block
+        # has nothing left to feed
+        config_dict.pop("ve_derivation", None)
 
     state1, params1, mixing_params, settings, schedules_info = subpop_inputs("caseB_subpop1")
     state2, params2, _, _, _ = subpop_inputs("caseB_subpop2")

@@ -12,6 +12,7 @@ build_schedules_dict                     — pre-compute per-day schedule tensor
 build_generic_torch_inputs               — combine all inputs (entry point)
 update_state_dict_with_schedules         — inject per-day schedule values into state_dict
 check_and_apply_MV_reset                 — reset vaccine immunity on anniversary date
+check_and_apply_M_injection              — add deferred M(0) on its start date
 generic_advance_timestep                 — one dt-sized step (differentiable)
 generic_torch_simulate_full_history      — full compartment+tvar history
 generic_torch_simulate_calibration_target — calibration target only
@@ -26,7 +27,10 @@ import torch
 from typing import Tuple
 
 from .config_parser import ModelConfig
+from .data_structures import resolve_mm_dd_near_date
+from .metric_templates import injection_val_param_name
 from .travel_functions import GenericPrecomputedTensors, compute_total_mixing_exposure
+from .ve_derivation import ve_inflation_param_name
 from .rate_templates import RATE_TEMPLATE_REGISTRY
 
 
@@ -106,6 +110,29 @@ def _standardize_param_tensor(
     return t
 
 
+def _derived_param_names(model_config: ModelConfig) -> list[str]:
+    """
+    Names of params that ConfigDrivenSubpopModel derives at construction
+    rather than reading from the config: one VE inflation factor per
+    season-average efficacy param in the ve_derivation block, and one
+    deferred-M(0)-injection value per infection-induced immunity metric.
+
+    Note that the season-average efficacy params themselves are ordinary
+    config params and so are already in `params_dict` (and trainable) --
+    only the factors they are multiplied by are derived.
+    """
+    names = [
+        ve_inflation_param_name(season_param)
+        for season_param in model_config.ve_derivation.get("fields", [])
+    ]
+    names += [
+        injection_val_param_name(mc.name)
+        for mc in model_config.epi_metrics
+        if mc.metric_template == "infection_induced_immunity"
+    ]
+    return names
+
+
 def build_params_dict(
     metapop_model,
     model_config: ModelConfig,
@@ -116,6 +143,12 @@ def build_params_dict(
 
     Includes:
         - All model_config.params as standardized tensors
+        - Derived params computed at model construction (VE inflation
+          factors, deferred M(0) injection values), stacked across
+          subpopulations — these are absent from model_config.params
+          because ConfigDrivenSubpopModel writes them onto each subpop's
+          own params, and they genuinely differ per subpop when the
+          subpops have different dose schedules
         - "travel_proportions" : (L, L) float32 tensor from mixing_params
         - "total_pop_age_risk" : (L, A, R) float32 tensor
         - "num_age_groups", "num_risk_groups" : scalar int tensors
@@ -136,6 +169,20 @@ def build_params_dict(
     params_dict: dict = {}
     for name, val in model_config.params.items():
         params_dict[name] = _standardize_param_tensor(val, L, A, R, requires_grad)
+
+    # Derived (A, R) params, stacked to (L, A, R). Not trainable — a VE
+    # inflation factor is a fixed function of the dose schedule and waning
+    # rate, and the season-average efficacy it multiplies IS trainable and
+    # already in params_dict, so gradients reach the efficacy through it.
+    for name in _derived_param_names(model_config):
+        if any(name not in m.params.params for m in subpop_models):
+            continue
+        stacked = np.asarray(
+            [np.broadcast_to(np.asarray(m.params.params[name], dtype=np.float64), (A, R))
+             for m in subpop_models],
+            dtype=np.float64,
+        )
+        params_dict[name] = torch.tensor(stacked)
 
     # travel_proportions (L, L) — not trainable
     tp = np.asarray(metapop_model.mixing_params.travel_proportions, dtype=np.float64)
@@ -334,6 +381,75 @@ def check_and_apply_MV_reset(
     return state_dict
 
 
+def check_and_apply_M_injection(
+    state_dict: dict,
+    params_dict: dict,
+    model_config: ModelConfig,
+    day_counter: int,
+    start_real_date: datetime.date,
+) -> dict:
+    """
+    Add a deferred infection-induced immunity initial value on its start date.
+
+    Torch counterpart of
+    `InfInducedImmunityGeneric.check_and_apply_injection`. If a metric's
+    `infection_immunity_start_date_mm_dd_param` resolves to a date after the
+    simulation start, the input M(0) is held back rather than applied at time
+    zero (see `InfInducedImmunityGeneric.adjust_initial_value`). When the
+    simulation reaches that date, this adds it in -- once.
+
+    The amount travels on `params_dict`, since the torch path has no epi
+    metric objects to read `original_init_val` from -- see
+    `ConfigDrivenSubpopModel.update_infection_immunity_injection_val`.
+
+    Unlike the MV reset, this fires only on the specific resolved calendar
+    date (year included), matching the numpy behavior of injecting exactly
+    once even across a multi-year run.
+
+    Every infection-induced immunity metric is considered, not just the
+    first: the numpy path injects each such metric independently in
+    `ConfigDrivenSubpopModel.prepare_daily_state`, and two metrics can share
+    an injection date.
+
+    Returns possibly-updated state_dict (a new dict if any injection applied).
+    """
+    new_state = None
+
+    for mc in model_config.epi_metrics:
+        if mc.metric_template != "infection_induced_immunity":
+            continue
+        start_param = mc.update_config.get("infection_immunity_start_date_mm_dd_param")
+        if start_param is None:
+            continue
+        start_date_str = model_config.params.get(start_param)
+        if start_date_str is None:
+            continue
+
+        injection_val = params_dict.get(injection_val_param_name(mc.name))
+        if injection_val is None:
+            continue
+
+        injection_date = resolve_mm_dd_near_date(
+            start_date_str, start_real_date, param_name=start_param
+        )
+
+        # Only a date strictly after the start is held back -- a date on or
+        #   before the start was already folded into M(0)
+        if injection_date <= start_real_date:
+            continue
+
+        current_date = start_real_date + datetime.timedelta(days=day_counter)
+        if current_date != injection_date:
+            continue
+
+        if new_state is None:
+            new_state = dict(state_dict)
+        new_state[mc.name] = new_state[mc.name] + injection_val.to(new_state[mc.name].dtype)
+        print(f"InfInducedImmunityGeneric '{mc.name}' increased by initial value on {current_date}")
+
+    return state_dict if new_state is None else new_state
+
+
 # ---------------------------------------------------------------------------
 # One-timestep advance (tasks 4.2, 4.3)
 # ---------------------------------------------------------------------------
@@ -350,14 +466,6 @@ def _build_torch_rate_config(
         rc["_precomputed"] = precomputed
         return rc
     return tc.rate_config
-
-
-def _find_vax_metric_name(model_config: ModelConfig) -> str | None:
-    """Return the name of the first vaccine-induced immunity metric, or None."""
-    for mc in model_config.epi_metrics:
-        if mc.metric_template == "vaccine_induced_immunity":
-            return mc.name
-    return None
 
 
 def generic_advance_timestep(
@@ -510,37 +618,22 @@ def generic_advance_timestep(
     #    Mirrors compute_M_change / compute_MV_change in
     #    flu_torch_det_components.py:328–360.
     # -------------------------------------------------------------------
-    vax_metric_name = _find_vax_metric_name(model_config)
-
     for mc in model_config.epi_metrics:
         if mc.metric_template == "infection_induced_immunity":
             r_to_s_name = mc.update_config["r_to_s_transition"]
             R_to_S = transition_amounts[r_to_s_name]
             M = state_dict[mc.name]
-            MV = (
-                state_dict[vax_metric_name]
-                if vax_metric_name
-                else torch.zeros_like(M)
-            )
 
             inf_sat = params_dict[mc.update_config["inf_induced_saturation_param"]]
             wane = params_dict[mc.update_config["inf_induced_immune_wane_param"]]
-
-            # vax_induced_saturation_param is optional (mirrors the numpy guard
-            # in metric_templates.py InfInducedImmunityGeneric): only include the
-            # vax-immunity saturation term when configured and a vax metric exists.
-            if "vax_induced_saturation_param" in mc.update_config and vax_metric_name:
-                vax_sat = params_dict[mc.update_config["vax_induced_saturation_param"]]
-                vax_term = vax_sat * MV
-            else:
-                vax_term = torch.zeros_like(M)
 
             total_pop = precomputed.total_pop_LAR_tensor.to(R_to_S.dtype)
 
             # Mirrors compute_M_change: R_to_S already includes dt,
             # so only the waning term is multiplied by dt.
+            # Vaccine-induced immunity no longer damps this update.
             M_change = (
-                (R_to_S / total_pop) * (1 - inf_sat * M - vax_term)
+                (R_to_S / total_pop) * (1 - inf_sat * M)
                 - wane * M * dt
             )
             new_state[mc.name] = M + M_change
@@ -616,8 +709,13 @@ def generic_torch_simulate_full_history(
             state_dict, schedules_dict, model_config, day
         )
         if start_real_date is not None:
+            # Apply the once-a-day immunity reset/injection before anything
+            #   reads M or MV, matching ConfigDrivenSubpopModel.prepare_daily_state
             state_dict = check_and_apply_MV_reset(
                 state_dict, model_config, day, start_real_date
+            )
+            state_dict = check_and_apply_M_injection(
+                state_dict, params_dict, model_config, day, start_real_date
             )
 
         for timestep in range(timesteps_per_day):
@@ -694,8 +792,13 @@ def generic_torch_simulate_calibration_target(
             state_dict, schedules_dict, model_config, day
         )
         if start_real_date is not None:
+            # Apply the once-a-day immunity reset/injection before anything
+            #   reads M or MV, matching ConfigDrivenSubpopModel.prepare_daily_state
             state_dict = check_and_apply_MV_reset(
                 state_dict, model_config, day, start_real_date
+            )
+            state_dict = check_and_apply_M_injection(
+                state_dict, params_dict, model_config, day, start_real_date
             )
 
         day_tv_accum: dict = {t: None for t in calibration_transition_names}

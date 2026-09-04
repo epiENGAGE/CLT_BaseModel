@@ -122,6 +122,10 @@ class ModelConfig:
     epi_metrics: list[EpiMetricConfig]
     schedules: list[ScheduleConfig]
 
+    # Optional "ve_derivation" block — see validate_ve_derivation_config.
+    # Empty dict means no seasonal-waning VE derivation is performed.
+    ve_derivation: dict = field(default_factory=dict)
+
     # Per-subpopulation parameter overrides: {subpop_name: {param_name: raw_value}}
     # Raw JSON values (numbers, lists) — not yet parsed through _parse_param_value.
     subpop_params: dict[str, dict] = field(default_factory=dict)
@@ -258,6 +262,11 @@ def parse_model_config_from_dict(
         schedules.append(ScheduleConfig(name=name, schedule_template=tname, schedule_config=cfg))
     schedule_names = {s.name for s in schedules}
 
+    # --- 3b. VE derivation ---
+    ve_derivation = validate_ve_derivation_config(
+        raw.get("ve_derivation"), param_names, schedule_names
+    )
+
     # --- 4. Transitions ---
     transitions_raw = _require_list(raw, "transitions", "top level")
     transitions = []
@@ -361,9 +370,122 @@ def parse_model_config_from_dict(
         transition_groups=groups,
         epi_metrics=epi_metrics,
         schedules=schedules,
+        ve_derivation=ve_derivation,
         subpop_params=subpop_params_raw,
     )
     return config
+
+
+def validate_ve_derivation_config(
+    raw_cfg: Any,
+    param_names: set,
+    schedule_names: set,
+) -> dict:
+    """
+    Validate the optional top-level "ve_derivation" block and return it
+    (an empty dict if absent).
+
+    The block tells ConfigDrivenSubpopModel how to back-derive peak
+    (zero-waning) vaccine efficacy from season-average efficacy inputs --
+    see ve_derivation.compute_ve_inflation_factors.
+
+    Expected structure
+    ------------------
+    "ve_derivation": {
+        "daily_vaccines_schedule": "daily_vaccines",
+        "vax_induced_immune_wane_param": "vax_induced_immune_wane",
+        "vax_immunity_reset_date_mm_dd_param": "vax_immunity_reset_date_mm_dd",
+        "adjust_VE_for_seasonal_waning": true,
+        "VE_season_dose_window_quantile": 0.05,
+        "fields": ["vax_induced_inf_risk_reduce",
+                   "vax_induced_hosp_risk_reduce",
+                   "vax_induced_death_risk_reduce"]
+    }
+
+    "fields" lists the SEASON-AVERAGE efficacy params to derive an inflation
+    factor for. Each must be declared in "params"; each is what a rate config
+    names in "vax_reduce_param". The derived factors themselves are written
+    into params at construction under `ve_inflation_param_name(...)` and are
+    never named directly in a config.
+    """
+
+    if raw_cfg is None:
+        return {}
+
+    loc = "ve_derivation"
+
+    if not isinstance(raw_cfg, dict):
+        raise ValueError(f"ModelConfig: '{loc}' must be a JSON object")
+
+    schedule_name = _require_str(raw_cfg, "daily_vaccines_schedule", loc)
+    if schedule_name not in schedule_names:
+        raise ValueError(
+            f"{loc}: schedule '{schedule_name}' (from 'daily_vaccines_schedule') "
+            "not in model schedules"
+        )
+
+    wane_param = _require_str(raw_cfg, "vax_induced_immune_wane_param", loc)
+    if wane_param not in param_names:
+        raise ValueError(
+            f"{loc}: param '{wane_param}' (from 'vax_induced_immune_wane_param') "
+            "not in model params"
+        )
+
+    reset_param = raw_cfg.get("vax_immunity_reset_date_mm_dd_param")
+    if reset_param is not None and reset_param not in param_names:
+        raise ValueError(
+            f"{loc}: param '{reset_param}' (from "
+            "'vax_immunity_reset_date_mm_dd_param') not in model params"
+        )
+
+    adjust = raw_cfg.get("adjust_VE_for_seasonal_waning", True)
+    if not isinstance(adjust, bool):
+        raise ValueError(
+            f"{loc}: 'adjust_VE_for_seasonal_waning' must be true or false, "
+            f"got {type(adjust).__name__}"
+        )
+
+    quantile = raw_cfg.get("VE_season_dose_window_quantile")
+    if quantile is not None:
+        if not isinstance(quantile, (int, float)) or isinstance(quantile, bool):
+            raise ValueError(
+                f"{loc}: 'VE_season_dose_window_quantile' must be a number or null, "
+                f"got {type(quantile).__name__}"
+            )
+        if not 0 <= quantile < 0.5:
+            raise ValueError(
+                f"{loc}: 'VE_season_dose_window_quantile' must be in [0, 0.5) -- "
+                f"got {quantile}. It trims that fraction of cumulative doses off "
+                "each end of the season window, so 0.5 or more would leave nothing "
+                "behind."
+            )
+
+    fields_raw = _require_list(raw_cfg, "fields", loc)
+    if len(fields_raw) == 0:
+        raise ValueError(f"{loc}: 'fields' must be non-empty")
+
+    fields_out = []
+    for i, f in enumerate(fields_raw):
+        floc = f"{loc}.fields[{i}]"
+        if not isinstance(f, str):
+            raise ValueError(
+                f"{floc}: must be the name of a season-average efficacy param "
+                f"(a string), got {type(f).__name__}"
+            )
+        if f not in param_names:
+            raise ValueError(f"{floc}: param '{f}' not in model params")
+        if f in fields_out:
+            raise ValueError(f"{floc}: duplicate param '{f}'")
+        fields_out.append(f)
+
+    return {
+        "daily_vaccines_schedule": schedule_name,
+        "vax_induced_immune_wane_param": wane_param,
+        "vax_immunity_reset_date_mm_dd_param": reset_param,
+        "adjust_VE_for_seasonal_waning": adjust,
+        "VE_season_dose_window_quantile": quantile,
+        "fields": fields_out,
+    }
 
 
 # ---------------------------------------------------------------------------

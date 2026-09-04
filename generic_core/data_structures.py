@@ -30,13 +30,90 @@ This means:
 
 from __future__ import annotations
 
+import datetime
+import warnings
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Optional
 
 import numpy as np
 import torch
 
 import clt_toolkit as clt
+
+
+# A "MM_DD" parameter describing a date near the simulation start that
+#   resolves further than this many days away is almost certainly a
+#   mis-specification rather than a deliberate choice -- see
+#   `resolve_mm_dd_near_date`
+INFECTION_IMMUNITY_START_DATE_WARN_DAYS = 120
+
+
+def resolve_mm_dd_near_date(mm_dd: str,
+                            reference_date: datetime.date,
+                            param_name: str = "date",
+                            warn_days: Optional[int] = INFECTION_IMMUNITY_START_DATE_WARN_DAYS
+                            ) -> datetime.date:
+    """
+    Resolves a year-less "MM_DD" parameter to the actual calendar date
+    closest to `reference_date`.
+
+    A "MM_DD" string is ambiguous about which year it means, and simply
+    reusing `reference_date`'s year silently picks the wrong one for any
+    season that spans a new year. For a simulation starting 2024-08-15,
+    "01_01" under that rule resolves to 2024-01-01 -- 227 days *before*
+    the start -- when the intended date is almost certainly 2025-01-01,
+    139 days after it. Choosing whichever of the previous, current, and
+    next year lands closest to `reference_date` resolves both cases the
+    way a user would expect, and is unambiguous as long as the intended
+    date is within ~6 months of the reference date.
+
+    NOTE: this duplicates `flu_core.flu_data_structures.resolve_mm_dd_near_date`
+    -- generic_core deliberately does not import flu_core for core logic.
+    See generic_core/limitations.md.
+
+    Args:
+        mm_dd (str):
+            date in "MM_DD" format, e.g. "01_01".
+        reference_date (datetime.date):
+            the date to resolve relative to -- generally the
+            simulation's `start_real_date`.
+        param_name (str):
+            name of the parameter being resolved, used in messages.
+        warn_days (Optional[int]):
+            warn if the resolved date is more than this many days from
+            `reference_date` -- pass None to skip the check.
+
+    Returns:
+        datetime.date
+    """
+
+    month, day = (int(x) for x in mm_dd.split("_"))
+
+    candidates = []
+    for year in (reference_date.year - 1, reference_date.year, reference_date.year + 1):
+        try:
+            candidates.append(datetime.date(year, month, day))
+        except ValueError:
+            # Feb 29 in a non-leap year -- that year simply has no such
+            #   date, so it is not a candidate
+            continue
+
+    if not candidates:
+        raise ValueError(
+            f"`{param_name}` = '{mm_dd}' does not correspond to a real date in any "
+            f"year adjacent to {reference_date}.")
+
+    resolved = min(candidates, key=lambda d: abs((d - reference_date).days))
+
+    if warn_days is not None and abs((resolved - reference_date).days) > warn_days:
+        warnings.warn(
+            f"`{param_name}` = '{mm_dd}' resolved to {resolved}, which is "
+            f"{abs((resolved - reference_date).days)} days from {reference_date}. "
+            f"This parameter is meant to describe a date near the simulation start "
+            f"(within a couple of months); a gap this large usually means the "
+            f"month/day is mis-specified.")
+
+    return resolved
 
 
 # ---------------------------------------------------------------------------

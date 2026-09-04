@@ -2193,7 +2193,7 @@ def _transition_forms_ui(compartments, loaded_config, mo, slugify_schedule_name)
     t_vax_reduce = mo.ui.array([
         mo.ui.text(
             value=_rcget(_i, "vax_reduce_param", "vax_risk_reduce"),
-            label="Vaccine reduction param",
+            label="Vaccine reduction param (season-average)",
         )
         for _i in range(_max_t)
     ])
@@ -2292,19 +2292,25 @@ def _transition_show(
     _ACC = CLT_ACCENT["builder"]
     mo.stop(main_tab.value != "Model Builder", None)
     _IMMUNITY_TIP = (
-        "Divides the rate or force of infection by a population-level immunity factor:\n\n"
-        "  immunity_force =\n"
-        "    1\n"
-        "    + (r_inf / (1 − r_inf)) × M\n"
-        "    + (r_vax / (1 − r_vax)) × MV\n\n"
-        "  r_inf = inf_reduce_param ∈ [0, 1)\n"
-        "  r_vax = vax_reduce_param ∈ [0, 1)\n"
+        "Infection- and vaccine-induced immunity act through two DIFFERENT\n"
+        "mechanisms.\n\n"
+        "Infection-induced immunity divides the rate:\n\n"
+        "  immunity_force = 1 + (r_inf / (1 − r_inf)) × M\n"
+        "  r_inf = inf_reduce_param ∈ [0, 1)\n\n"
+        "Vaccine-induced immunity multiplies it:\n\n"
+        "  vax_factor = 1 − MV × VE_0\n\n"
         "  M  = cumulative infection-induced immunity\n"
         "  MV = cumulative vaccine-induced immunity\n\n"
-        "Higher r → stronger rate reduction.\n"
+        "VE_0 is the PEAK (zero-waning) efficacy: the SEASON-AVERAGE\n"
+        "efficacy you enter here, times an inflation factor derived from\n"
+        "the vaccine waning rate and the dose schedule — see\n"
+        "adjust_VE_for_seasonal_waning in Step 5. VE_0 is capped at 1.\n\n"
+        "For a severe-outcome split, the vaccine factor multiplies the\n"
+        "PROBABILITY, so it does not cancel out of the complement branch.\n\n"
+        "Higher values → stronger reduction.\n"
         "Example: r_inf = 0.5, M = 1 → rate halved.\n\n"
         "Requires at least one of M or MV to be enabled\n"
-        "in Step 5, otherwise immunity_force stays at 1."
+        "in Step 5, otherwise no immunity adjustment is applied."
     )
 
     def _immunity_checkbox(checkbox):
@@ -2842,7 +2848,11 @@ def _schedule_and_immunity_ui(
 
 
 @app.cell
-def _epi_metric_ui(n_transitions, t_name, mo, loaded_config):
+def _epi_metric_ui(
+    n_transitions, t_name, mo, loaded_config, np,
+    age_groups, num_age_groups, num_risk_groups,
+    param_grid_columns, array_to_grid_rows,
+):
     _saved_params = loaded_config.get("params", {})
     _epi_cfgs = {_m["name"]: _m for _m in loaded_config.get("epi_metrics", [])}
     _M_cfg = _epi_cfgs.get("M", {}).get("update_config", {})
@@ -2863,15 +2873,43 @@ def _epi_metric_ui(n_transitions, t_name, mo, loaded_config):
         value=float(_saved_params.get("inf_induced_saturation", 0.0)),
         label="inf_induced_saturation",
     )
-    vax_sat_input = mo.ui.number(
-        start=0.0, stop=1.0, step=None,
-        value=float(_saved_params.get("vax_induced_saturation", 0.0)),
-        label="vax_induced_saturation",
-    )
     inf_wane_input = mo.ui.number(
         start=0.0, stop=1.0, step=None,
         value=float(_saved_params.get("inf_induced_immune_wane", 0.01)),
         label="inf_induced_immune_wane",
+    )
+    # M(0) / MV(0): initial immunity levels, per age x risk group. Same
+    # risk-row / age-column grid the parameter table uses, seeded from the
+    # saved config's epi-metric init_val.
+    _age_cols_imm = param_grid_columns(age_groups, num_age_groups)
+
+    def _saved_metric_init(_name):
+        _raw = next(
+            (_m.get("init_val") for _m in (loaded_config or {}).get("epi_metrics", [])
+             if _m.get("name") == _name), None)
+        try:
+            _arr = np.asarray(_raw, dtype=float).reshape(
+                int(num_age_groups), int(num_risk_groups))
+        except (TypeError, ValueError):
+            return None
+        return _arr
+
+    inf_immunity_init_grid = mo.ui.data_editor(
+        data=array_to_grid_rows(
+            _saved_metric_init("M"), _age_cols_imm, num_risk_groups),
+        label="M(0) — initial infection-induced immunity",
+        editable_columns=list(_age_cols_imm),
+    )
+    inf_immunity_start_date_input = mo.ui.text(
+        value=str(_saved_params.get("infection_immunity_start_date_mm_dd", "") or ""),
+        placeholder="09_01",
+        label="infection_immunity_start_date_mm_dd (MM_DD, blank = simulation start)",
+    )
+    vax_immunity_init_grid = mo.ui.data_editor(
+        data=array_to_grid_rows(
+            _saved_metric_init("MV"), _age_cols_imm, num_risk_groups),
+        label="MV(0) — initial vaccine-induced immunity",
+        editable_columns=list(_age_cols_imm),
     )
     _vax_wane_raw = _saved_params.get("vax_induced_immune_wane", 0.0)
     vax_wane_is_array = isinstance(_vax_wane_raw, list)
@@ -2886,14 +2924,27 @@ def _epi_metric_ui(n_transitions, t_name, mo, loaded_config):
         value=int(_saved_params.get("vax_protection_delay_days", 0)),
         label="vax_protection_delay_days",
     )
+    _saved_ve = (loaded_config or {}).get("ve_derivation", {}) or {}
+    adjust_VE_input = mo.ui.checkbox(
+        value=bool(_saved_ve.get("adjust_VE_for_seasonal_waning", True)),
+        label="adjust_VE_for_seasonal_waning",
+    )
+    VE_quantile_input = mo.ui.number(
+        start=0.0, stop=0.49, step=None,
+        value=float(_saved_ve.get("VE_season_dose_window_quantile") or 0.0),
+        label="VE_season_dose_window_quantile",
+    )
     vax_reset_date_input = mo.ui.text(
         value=str(_saved_params.get("vax_immunity_reset_date_mm_dd", "")),
         placeholder="07_30",
         label="vax_immunity_reset_date_mm_dd (MM_DD, blank to disable)",
     )
-    return (r_to_s_picker, inf_sat_input, vax_sat_input, inf_wane_input,
+    return (r_to_s_picker, inf_sat_input, inf_wane_input,
+            inf_immunity_init_grid, inf_immunity_start_date_input,
+            vax_immunity_init_grid,
             vax_wane_input, vax_wane_is_array, vax_wane_loaded_val,
-            vax_delay_input, vax_reset_date_input)
+            vax_delay_input, vax_reset_date_input,
+            adjust_VE_input, VE_quantile_input)
 
 
 @app.cell
@@ -3433,13 +3484,17 @@ def _schedule_and_immunity_show(
     vaccinated_compartment_reset_date_input,
     r_to_s_picker,
     inf_sat_input,
-    vax_sat_input,
     inf_wane_input,
+    inf_immunity_init_grid,
+    inf_immunity_start_date_input,
+    vax_immunity_init_grid,
     vax_wane_input,
     vax_wane_is_array,
     vax_wane_loaded_val,
     vax_delay_input,
     vax_reset_date_input,
+    adjust_VE_input,
+    VE_quantile_input,
     uses_absolute_humidity,
     uses_contact_matrix,
     uses_mobility,
@@ -3457,7 +3512,7 @@ def _schedule_and_immunity_show(
                 include_inf_immunity,
                 "Track population-level infection-induced immunity (M).\n\n"
                 "For instance, if driven by (R→S) transitions:\n\n"
-                "ΔM = (R→S / N) × (1 − inf_sat×M − vax_sat×MV) − wane×M\n\n"
+                "ΔM = (R→S / N) × (1 − inf_sat×M) − wane×M\n\n"
                 "M increases when recently-recovered individuals re-enter\n"
                 "the susceptible pool (R→S), and decays via waning.\n\n"
                 "Must be enabled for inf_reduce_param (Step 2) to have effect.",
@@ -3467,7 +3522,8 @@ def _schedule_and_immunity_show(
                 "Track population-level vaccine-induced immunity (MV).\n\n"
                 "MV grows with daily vaccine doses and decays via waning:\n\n"
                 "ΔMV = daily_vaccines − wane×MV\n\n"
-                "Must be enabled for vax_reduce_param (Step 2) to have effect.",
+                "Must be enabled for the vaccine reduction param (Step 2)\n"
+                "to have effect.",
             ),
         ], wrap=True),
     ]
@@ -3527,16 +3583,31 @@ def _schedule_and_immunity_show(
                 wtip(
                     inf_sat_input,
                     "Limits how much M can grow as immunity accumulates.\n\n"
-                    "ΔM = (R→S / N) × (1 − inf_sat×M − vax_sat×MV) − wane×M\n\n"
+                    "ΔM = (R→S / N) × (1 − inf_sat×M) − wane×M\n\n"
                     "Higher values → M saturates at a lower level.\n"
                     "0 = no saturation limit.",
                 ),
                 wtip(
-                    vax_sat_input,
-                    "How much vaccine immunity (MV) dampens further gain in M.\n\n"
-                    "ΔM = (R→S / N) × (1 − inf_sat×M − vax_sat×MV) − wane×M\n\n"
-                    "Higher values → MV reduces M accumulation more.\n"
-                    "0 = vaccine and infection immunity are independent.",
+                    inf_immunity_init_grid,
+                    "Starting level of infection-induced immunity M, per\n"
+                    "age × risk group (rows = risk groups, columns = age\n"
+                    "bands), at the date given by\n"
+                    "infection_immunity_start_date_mm_dd — or at the\n"
+                    "simulation start date if that field is blank.\n\n"
+                    "All zeros = the population starts with no prior immunity.",
+                ),
+                wtip(
+                    inf_immunity_start_date_input,
+                    "The date the M(0) value above refers to, as MM_DD.\n\n"
+                    "Blank = M(0) applies at the simulation start date.\n\n"
+                    "Earlier than the start: M(0) is decayed forward (waning\n"
+                    "only) to the start date, so an immunity estimate from a\n"
+                    "serosurvey taken weeks before the run still lines up.\n\n"
+                    "Later than the start: M starts at 0 and M(0) is added on\n"
+                    "that date instead — e.g. a mid-season immunity snapshot.\n\n"
+                    "The year is resolved to whichever adjacent year puts the\n"
+                    "date closest to the simulation start, so 01_01 in a season\n"
+                    "starting in August means the FOLLOWING January.",
                 ),
                 wtip(
                     inf_wane_input,
@@ -3547,6 +3618,20 @@ def _schedule_and_immunity_show(
                 ),
             ])
         if include_vax_immunity.value:
+            _metric_inputs.append(
+                wtip(
+                    vax_immunity_init_grid,
+                    "Starting level of vaccine-induced immunity MV, per\n"
+                    "age × risk group, at the simulation start date.\n\n"
+                    "This is a BASELINE that the model adds to, not the final\n"
+                    "MV(0): when vax_immunity_reset_date_mm_dd is set, doses\n"
+                    "administered between that date and the simulation start\n"
+                    "are accumulated (with waning) on top of what you enter\n"
+                    "here. Leave it at zero unless you have a measured level\n"
+                    "of vaccine-derived protection that the dose schedule\n"
+                    "does not already account for.",
+                )
+            )
             if vax_wane_is_array:
                 _metric_inputs.append(mo.callout(
                     mo.md(
@@ -3566,7 +3651,28 @@ def _schedule_and_immunity_show(
                         "0.01 ≈ half-life of ~70 days.",
                     )
                 )
-            _metric_inputs.extend([vax_delay_input, vax_reset_date_input])
+            _metric_inputs.extend([
+                vax_delay_input,
+                vax_reset_date_input,
+                wtip(
+                    adjust_VE_input,
+                    "Interpret the vaccine reduction params as SEASON-AVERAGE\n"
+                    "efficacy and back-derive the peak (zero-waning) value\n"
+                    "actually applied, so that averaged over the vaccination\n"
+                    "season the realized efficacy matches what you entered.\n\n"
+                    "Off = the values you enter ARE the peak efficacy.",
+                ),
+                wtip(
+                    VE_quantile_input,
+                    "Trims sparse dose tails from the vaccination season window\n"
+                    "used for the derivation above.\n\n"
+                    "The season average is unweighted over the window's days, so\n"
+                    "a long low-dose tail drags it down and inflates the derived\n"
+                    "peak. q keeps the central (1 − 2q) of cumulative doses.\n\n"
+                    "0 = use the full first-dose-to-last-dose window.\n"
+                    "0.05–0.10 are reasonable for campaign-shaped schedules.",
+                ),
+            ])
         _parts.append(mo.hstack(_metric_inputs, wrap=True))
     else:
         _parts.append(mo.md("*Dynamic immunity metrics disabled.*"))
@@ -3934,9 +4040,12 @@ def _build_config(
     param_names, param_vary_toggles, param_scalar_inputs, param_grid_inputs,
     param_grid_columns,
     include_inf_immunity, include_vax_immunity,
-    r_to_s_picker, inf_sat_input, vax_sat_input, inf_wane_input,
+    r_to_s_picker, inf_sat_input, inf_wane_input,
+    inf_immunity_init_grid, inf_immunity_start_date_input,
+    vax_immunity_init_grid,
     vax_wane_input, vax_wane_is_array, vax_wane_loaded_val,
     vax_delay_input, vax_reset_date_input,
+    adjust_VE_input, VE_quantile_input,
     vax_transfer_delay_input,
     vaccinated_compartment_reset_date_input,
     uses_absolute_humidity, uses_contact_matrix, uses_mobility, requires_immunity_metrics,
@@ -3959,7 +4068,7 @@ def _build_config(
     loaded_config,
     start_date_input, transition_vars_input,
     analysis_n_metrics_input, analysis_metric_names, analysis_metric_tvs,
-    np,
+    np, re,
 ):
     # Assembles the full model_config.json dict from every Step's widgets.
     # Roadmap of the sections below (search for the banner comments):
@@ -4034,6 +4143,13 @@ def _build_config(
     _transitions = []
     _metapop_travel_config = {}
     _config_warnings = []
+
+    # Vaccine protection is applied as (1 − MV × VE_0), where VE_0 is the peak
+    # (zero-waning) efficacy: the season-average efficacy the user names, times
+    # an inflation factor derived at model construction. Rate configs name the
+    # season-average param; the ve_derivation block below lists the params that
+    # need a factor derived for them.
+    _ve_season_params = set()
     for _i in range(_n):
         _template = t_template.value[_i]
         if _template == "constant_param":
@@ -4056,7 +4172,11 @@ def _build_config(
                 if _inf_r:
                     _rate_config["inf_reduce_param"] = _inf_r
                 if _vax_r:
+                    # This names the SEASON-AVERAGE efficacy. The peak value
+                    # actually applied is it times a derived inflation factor,
+                    # which the ve_derivation block below asks for.
                     _rate_config["vax_reduce_param"] = _vax_r
+                    _ve_season_params.add(_vax_r)
         elif _template == "force_of_infection":
             _rate_config = {
                 "beta_param": t_beta.value[_i].strip(),
@@ -4073,7 +4193,11 @@ def _build_config(
                 if _inf_r:
                     _rate_config["inf_reduce_param"] = _inf_r
                 if _vax_r:
+                    # This names the SEASON-AVERAGE efficacy. The peak value
+                    # actually applied is it times a derived inflation factor,
+                    # which the ve_derivation block below asks for.
                     _rate_config["vax_reduce_param"] = _vax_r
+                    _ve_season_params.add(_vax_r)
         elif _template == "scheduled_exact":
             _sched_name = _sched_name_of(_i)
             _rate_config = {"schedule": _sched_name}
@@ -4119,7 +4243,11 @@ def _build_config(
                 if _inf_r:
                     _rate_config["inf_reduce_param"] = _inf_r
                 if _vax_r:
+                    # This names the SEASON-AVERAGE efficacy. The peak value
+                    # actually applied is it times a derived inflation factor,
+                    # which the ve_derivation block below asks for.
                     _rate_config["vax_reduce_param"] = _vax_r
+                    _ve_season_params.add(_vax_r)
             if not _metapop_travel_config:
                 _metapop_travel_config = _travel_config
 
@@ -4305,21 +4433,36 @@ def _build_config(
                 "schedule_template": "vaccine_schedule",
                 "schedule_config": _transfer_schedule_config,
             })
+    # Age-band column labels for the M(0)/MV(0) grids — must match the ones
+    # `_epi_metric_ui` built them with.
+    _age_cols_imm_init = param_grid_columns(age_groups, _A)
+
     if include_inf_immunity.value:
         params_dict.update({
             "inf_induced_saturation": float(inf_sat_input.value),
-            "vax_induced_saturation": float(vax_sat_input.value),
             "inf_induced_immune_wane": float(inf_wane_input.value),
         })
+        # The date M(0) refers to. Blank means "the simulation start date",
+        # which is the no-op case — emit null rather than an empty string so
+        # InfInducedImmunityGeneric skips the adjustment entirely.
+        _inf_imm_start = inf_immunity_start_date_input.value.strip()
+        params_dict["infection_immunity_start_date_mm_dd"] = _inf_imm_start or None
+        if _inf_imm_start and not re.fullmatch(r"\d{2}_\d{2}", _inf_imm_start):
+            _config_warnings.append(
+                f"infection_immunity_start_date_mm_dd = '{_inf_imm_start}' is not in "
+                "MM_DD format (e.g. 09_01); the model will fail to build."
+            )
         _epi_metrics.append({
             "name": "M",
-            "init_val": np.zeros((_A, _R)).tolist(),
+            "init_val": grid_to_AR_array(
+                inf_immunity_init_grid.value, _age_cols_imm_init, _A, _R).tolist(),
             "metric_template": "infection_induced_immunity",
             "update_config": {
                 "r_to_s_transition": r_to_s_picker.value,
                 "inf_induced_saturation_param": "inf_induced_saturation",
-                "vax_induced_saturation_param": "vax_induced_saturation",
                 "inf_induced_immune_wane_param": "inf_induced_immune_wane",
+                "infection_immunity_start_date_mm_dd_param":
+                    "infection_immunity_start_date_mm_dd",
             },
         })
     if include_vax_immunity.value:
@@ -4332,7 +4475,8 @@ def _build_config(
             params_dict["vax_immunity_reset_date_mm_dd"] = vax_reset_date_input.value.strip()
         _epi_metrics.append({
             "name": "MV",
-            "init_val": np.zeros((_A, _R)).tolist(),
+            "init_val": grid_to_AR_array(
+                vax_immunity_init_grid.value, _age_cols_imm_init, _A, _R).tolist(),
             "metric_template": "vaccine_induced_immunity",
             "update_config": {
                 "daily_vaccines_schedule": "daily_vaccines",
@@ -4409,6 +4553,37 @@ def _build_config(
     )))
     _risk_fractions = [float(_x) for _x in risk_fraction_inputs.value]
 
+    # --- 7b. VE DERIVATION ---
+    # Only emitted when vaccine immunity is tracked AND some rate actually
+    # applies a vaccine reduction — otherwise there is nothing to derive.
+    _ve_derivation = {}
+    if include_vax_immunity.value and _ve_season_params:
+        _ve_quantile = float(VE_quantile_input.value or 0.0)
+        _ve_derivation = {
+            "daily_vaccines_schedule": "daily_vaccines",
+            "vax_induced_immune_wane_param": "vax_induced_immune_wane",
+            "adjust_VE_for_seasonal_waning": bool(adjust_VE_input.value),
+            "VE_season_dose_window_quantile": _ve_quantile or None,
+            "fields": sorted(_ve_season_params),
+        }
+        if vax_reset_date_input.value.strip():
+            _ve_derivation["vax_immunity_reset_date_mm_dd_param"] = (
+                "vax_immunity_reset_date_mm_dd"
+            )
+        # Every season-average param a rate refers to must exist in params.
+        # Seed any the user has not otherwise defined so the config still
+        # validates, but say so loudly -- a seeded 0.0 means NO vaccine
+        # protection, and the usual cause is a typo in the Step 2 field.
+        for _sp in sorted(_ve_season_params):
+            if _sp not in params_dict:
+                params_dict[_sp] = 0.0
+                _config_warnings.append(
+                    f"Vaccine reduction param '{_sp}' is referenced by a transition "
+                    "in Step 2 but is not defined in the parameter table, so it was "
+                    "added with value 0.0 — meaning NO vaccine protection. Define it "
+                    "in Step 1, or fix the name in Step 2 if it is a typo."
+                )
+
     # --- 8. CONFIG DICT ---
     _tvs = [v.strip() for v in transition_vars_input.value.split(",") if v.strip()]
     config_dict = {
@@ -4418,6 +4593,7 @@ def _build_config(
         "transition_groups": _transition_groups,
         "epi_metrics": _epi_metrics,
         "schedules": _schedules,
+        **({"ve_derivation": _ve_derivation} if _ve_derivation else {}),
         "age_risk": {
             "num_age_groups": _A,
             "num_risk_groups": _R,

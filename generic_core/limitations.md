@@ -130,6 +130,95 @@ historical.
 
 ---
 
+## Vaccine efficacy
+
+### `resolve_mm_dd_near_date` is duplicated in flu_core
+
+**What.** `generic_core/data_structures.py` and
+`flu_core/flu_data_structures.py` each define their own copy of
+`resolve_mm_dd_near_date` (and `INFECTION_IMMUNITY_START_DATE_WARN_DAYS`).
+
+**Why.** `generic_core` deliberately does not import `flu_core` for core
+logic, and the `flu_core` copy currently lives on the unmerged `ve_update`
+branch.
+
+**Fix when possible.** Lift the single implementation into `clt_toolkit` once
+`ve_update` merges, and have both import it from there.
+
+### Exact parity with flu_core is suspended
+
+**What.** `generic_core` implements the reworked vaccine-efficacy model
+(multiplicative `1 - MV * VE_0`, derived peak efficacy, no
+`vax_induced_saturation` in the `M` update). `flu_core` on this branch still
+implements the old additive-immunity model.
+
+**What happens.** The generic-vs-flu exact-equality tests are skipped, gated on
+`conftest.requires_flu_core_new_ve`. They re-enable automatically once
+`flu_core` gains `vax_induced_inf_risk_reduce_initial`, and must pass then.
+
+**Note.** With the vaccine efficacies and `vax_induced_saturation` set to 0 the
+two models coincide exactly, which is how the port was validated. That
+validation is not itself captured as a test — a zero-efficacy parity variant
+would restore coverage before `ve_update` merges.
+
+### The VE inflation factor is refreshed per run, not per parameter change
+
+**What.** The season-average efficacies (`vax_induced_*_risk_reduce`) are read
+live at every rate evaluation. The *inflation factor* they are multiplied by is
+recomputed by `ConfigDrivenSubpopModel.update_ve_inflation_factors` at three
+points: construction, `reset_simulation`, and the start of day 0 in
+`prepare_daily_state`.
+
+**What happens.** The day-0 refresh is what makes overrides of the dose
+schedule and `vax_induced_immune_wane` take effect, since every override path
+in this repo applies parameters *after* `reset_simulation()`. What is NOT
+covered is a change made mid-run — between `simulate_until_day(30)` and
+`simulate_until_day(60)`, say. Such a change moves the season-average
+efficacies immediately but leaves the factor at its day-0 value until the next
+reset.
+
+**Torch.** `build_generic_torch_inputs` snapshots the factor into `params_dict`
+at build time and there is no day-0 hook on that path, so a torch fit that
+optimizes `vax_induced_immune_wane` holds the factor fixed at its build value.
+Optimizing the efficacies themselves is unaffected — they are trainable leaves
+and gradients reach them through the live multiplication.
+
+**Why it matters.** The factor is *not* mildly sensitive to the waning rate: on
+the Austin dose schedule it runs 1.00 at `wane = 0`, 1.17 at 0.002, and 2.37 at
+0.016. Getting it a draw stale is a factor-of-two error in the applied `VE_0`,
+not a rounding difference.
+
+### `M(0)` and `MV(0)` adjustments are recomputed only on reset
+
+**What.** `InfInducedImmunityGeneric.adjust_initial_value` (decay-forward of
+`M(0)`) and `VaxInducedImmunityGeneric.adjust_initial_value` (pre-simulation
+dose accumulation into `MV(0)`) read `inf_induced_immune_wane` and
+`vax_induced_immune_wane` respectively. Both run at construction and in
+`reset_simulation` — not at day 0, because unlike the inflation factor they
+write state (`init_val`/`current_val`), and clobbering state at day 0 would
+overwrite a manually set `current_val`.
+
+**What happens.** A waning-rate override applied after `reset_simulation()`
+reaches the immunity *dynamics* and the VE inflation factor, but the initial
+values were computed with the previous draw's waning rate. The effect is
+second-order — it perturbs day 0 only, and decays — but it is not zero.
+
+**Fix when needed.** Re-run `reset_simulation()` after applying overrides, or
+move the init-value recomputation behind an explicit "run is starting" hook
+that is distinguishable from a user-set `current_val`.
+
+### The VE cap is not re-warned after an override
+
+**What.** `ve_derivation.warn_if_ve_initial_capped` reports age-risk groups
+whose implied `VE_0` exceeds 1 (and is therefore capped) using the
+season-average values in force at construction/reset.
+
+**What happens.** An override applied later that pushes the product over 1 is
+still capped correctly at evaluation time, but is not warned about. Warning
+per-timestep would be far noisier than it is worth.
+
+---
+
 ## Fitting
 
 ### Log-space parameters must be scalar

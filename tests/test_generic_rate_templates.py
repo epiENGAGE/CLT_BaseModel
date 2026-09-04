@@ -21,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import clt_toolkit as clt
 import flu_core as flu
 from conftest import subpop_inputs
+from conftest import requires_flu_core_new_ve
 
 from generic_core.rate_templates import (
     ConstantParamRate,
@@ -91,6 +92,24 @@ def _generic_params(flu_model) -> GenericSubpopParams:
         "IA_relative_inf":               p.IA_relative_inf,
         "relative_suscept":              np.asarray(p.relative_suscept, dtype=float),
     }
+
+    # The DERIVED peak-efficacy params that the new VE model applies. flu_core
+    # only exposes them once it is ported to the ve_update model; until then
+    # fall back to the season-average value, which is exactly what
+    # `adjust_VE_for_seasonal_waning = False` means.
+    #
+    # The generic-vs-flu parity tests that depend on the real derived value are
+    # skipped while that fallback is in force (see
+    # conftest.requires_flu_core_new_ve); the generic numpy-vs-torch tests only
+    # need the two paths to read the same number, so the fallback serves them.
+    for _name in ("vax_induced_inf_risk_reduce",
+                  "vax_induced_hosp_risk_reduce",
+                  "vax_induced_death_risk_reduce"):
+        _initial_name = f"{_name}_initial"
+        _val = getattr(p, _initial_name, None)
+        if _val is None:
+            _val = getattr(p, _name)
+        params_dict[_initial_name] = np.asarray(_val, dtype=float)
     return GenericSubpopParams(
         params=params_dict,
         num_age_groups=p.num_age_groups,
@@ -218,6 +237,7 @@ class TestParamProductRateNumpyVsFlu:
 # 3.  ImmunityModulatedRate  vs  flu get_current_rate
 # ---------------------------------------------------------------------------
 
+@requires_flu_core_new_ve
 class TestImmunityModulatedRateNumpyVsFlu:
 
     _TEMPLATE = ImmunityModulatedRate()
@@ -272,7 +292,7 @@ _FOI_RATE_CONFIG = {
     "humidity_schedule":             "absolute_humidity",
     "contact_matrix_schedule":       "flu_contact_matrix",
     "inf_reduce_param":              "inf_induced_inf_risk_reduce",
-    "vax_reduce_param":              "vax_induced_inf_risk_reduce",
+    "vax_reduce_param":      "vax_induced_inf_risk_reduce",
     "infectious_compartments": {
         "ISR": None,
         "ISH": None,
@@ -283,6 +303,7 @@ _FOI_RATE_CONFIG = {
 }
 
 
+@requires_flu_core_new_ve
 class TestForceOfInfectionRateNumpyVsFlu:
 
     def test_S_to_E(self, flu_model, gstate, gparams):

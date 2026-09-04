@@ -25,6 +25,8 @@ from functools import reduce
 import numpy as np
 import torch
 
+from .ve_derivation import ve_inflation_param_name
+
 
 def _validate_optional_param_key(rate_name: str, rate_config: dict, key: str, param_names: set) -> None:
     if key not in rate_config:
@@ -98,15 +100,18 @@ def _beta_adjusted_torch(state_dict: dict, params_dict: dict, rate_config: dict)
 
 
 def _immunity_force_np(epi_metrics: dict, params, rate_config: dict):
+    """
+    Infection-induced immunity denominator: 1 + (r_inf / (1 - r_inf)) * M.
+
+    Vaccine-induced protection is NOT part of this term -- it enters
+    multiplicatively via `_vax_immunity_factor_np`. See
+    flu_components.SusceptibleToExposed.get_current_rate.
+    """
     immunity_force = 1.0
     if "inf_reduce_param" in rate_config and "M" in epi_metrics:
         inf_reduce = params.params[rate_config["inf_reduce_param"]]
         inf_prop = inf_reduce / (1.0 - inf_reduce)
         immunity_force = immunity_force + inf_prop * epi_metrics["M"]
-    if "vax_reduce_param" in rate_config and "MV" in epi_metrics:
-        vax_reduce = params.params[rate_config["vax_reduce_param"]]
-        vax_prop = vax_reduce / (1.0 - vax_reduce)
-        immunity_force = immunity_force + vax_prop * epi_metrics["MV"]
     return immunity_force
 
 
@@ -116,11 +121,68 @@ def _immunity_force_torch(state_dict: dict, params_dict: dict, rate_config: dict
         inf_reduce = params_dict[rate_config["inf_reduce_param"]]
         inf_prop = inf_reduce / (1.0 - inf_reduce)
         immunity_force = immunity_force + inf_prop * state_dict["M"]
-    if "vax_reduce_param" in rate_config and "MV" in state_dict:
-        vax_reduce = params_dict[rate_config["vax_reduce_param"]]
-        vax_prop = vax_reduce / (1.0 - vax_reduce)
-        immunity_force = immunity_force + vax_prop * state_dict["MV"]
     return immunity_force
+
+
+def _vax_induced_peak_efficacy_np(params, rate_config: dict):
+    """
+    Peak (zero-waning) vaccine efficacy VE_0, capped at 1.0.
+
+    `vax_reduce_param` names the SEASON-AVERAGE efficacy the user supplies.
+    The peak value actually applied is that value times the derived
+    inflation factor stored alongside it by
+    `ConfigDrivenSubpopModel.update_ve_inflation_factors` (1.0 if the model
+    has no "ve_derivation" block, i.e. the input is already a peak value).
+
+    The product is formed HERE, at every rate evaluation, rather than being
+    precomputed onto params: VE_0 is linear in the season-average value, so
+    keeping the multiplication live is what lets a later override of that
+    value -- a scenario override, a fitting draw, a torch autodiff leaf --
+    actually reach the trajectory. See ve_derivation's module docstring.
+
+    The cap keeps `1 - MV * VE_0` nonnegative; `ve_derivation.
+    warn_if_ve_initial_capped` reports it once at construction/reset.
+    """
+    ve_season = params.params[rate_config["vax_reduce_param"]]
+    inflation = params.params.get(
+        ve_inflation_param_name(rate_config["vax_reduce_param"]), 1.0)
+    return np.minimum(ve_season * inflation, 1.0)
+
+
+def _vax_immunity_factor_np(epi_metrics: dict, params, rate_config: dict):
+    """
+    Multiplicative vaccine-protection factor: 1 - MV * VE_0.
+
+    Returns 1.0 when `vax_reduce_param` is absent from the rate config or
+    the model has no vaccine-immunity metric.
+    """
+    if "vax_reduce_param" not in rate_config or "MV" not in epi_metrics:
+        return 1.0
+    return 1.0 - epi_metrics["MV"] * _vax_induced_peak_efficacy_np(params, rate_config)
+
+
+def _vax_induced_peak_efficacy_torch(params_dict: dict, rate_config: dict):
+    """
+    Torch counterpart of `_vax_induced_peak_efficacy_np`.
+
+    `torch.clamp` rather than `torch.minimum` so the cap does not need a
+    same-shaped tensor, and so gradients still flow to the season-average
+    parameter everywhere below the cap.
+    """
+    ve_season = params_dict[rate_config["vax_reduce_param"]]
+    inflation = params_dict.get(
+        ve_inflation_param_name(rate_config["vax_reduce_param"]))
+    ve_initial = ve_season if inflation is None else ve_season * inflation
+    if torch.is_tensor(ve_initial):
+        return torch.clamp(ve_initial, max=1.0)
+    return min(ve_initial, 1.0)
+
+
+def _vax_immunity_factor_torch(state_dict: dict, params_dict: dict, rate_config: dict):
+    if "vax_reduce_param" not in rate_config or "MV" not in state_dict:
+        return 1.0
+    return 1.0 - state_dict["MV"] * _vax_induced_peak_efficacy_torch(
+        params_dict, rate_config)
 
 
 # ---------------------------------------------------------------------------
@@ -287,13 +349,21 @@ class ImmunityModulatedRate(RateTemplate):
     """
     Rate modulated by population-level infection- and vaccine-induced immunity.
 
-    immunity_force = 1 + (r_inf / (1 − r_inf)) × M + (r_vax / (1 − r_vax)) × MV
+    immunity_force     = 1 + (r_inf / (1 − r_inf)) × M
+    vax_immunity_factor = 1 − MV × VE_0
+        where VE_0 = min(vax_reduce_param × derived inflation factor, 1)
+
+    The modulated probability is
+        prob = (proportion / immunity_force) × vax_immunity_factor
 
     If is_complement is True  (e.g. IP→ISR — complement of hospitalization):
-        rate = base_rate × (1 − proportion / immunity_force)
+        rate = base_rate × (1 − prob)
 
     If is_complement is False (e.g. IP→ISH — hospitalization):
-        rate = base_rate × (proportion / immunity_force)
+        rate = base_rate × prob
+
+    Note that the vaccine factor multiplies the PROBABILITY, so it does not
+    simply cancel out of the complement branch.
 
     rate_config keys
     ----------------
@@ -306,7 +376,9 @@ class ImmunityModulatedRate(RateTemplate):
     inf_reduce_param : str
         Parameter name for infection-induced risk reduction (in [0, 1)).
     vax_reduce_param : str
-        Parameter name for vaccine-induced risk reduction (in [0, 1)).
+        Parameter name for the SEASON-AVERAGE vaccine-induced risk reduction.
+        The peak (zero-waning) value applied is this times the derived
+        inflation factor — see ve_derivation.compute_ve_inflation_factors.
 
     Reference: PresympToSympRecover, PresympToSympHospital,
     SympHospitalToHospRecover, SympHospitalToHospDead in
@@ -328,29 +400,37 @@ class ImmunityModulatedRate(RateTemplate):
                     f"ImmunityModulatedRate: param '{pname}' (from key '{key}') not in model params"
                 )
         _validate_optional_param_key("ImmunityModulatedRate", rate_config, "inf_reduce_param", param_names)
-        _validate_optional_param_key("ImmunityModulatedRate", rate_config, "vax_reduce_param", param_names)
+        _validate_optional_param_key(
+            "ImmunityModulatedRate", rate_config, "vax_reduce_param", param_names
+        )
 
     def numpy_rate(self, state, params, rate_config):
         base_rate = params.params[rate_config["base_rate"]]
         proportion = params.params[rate_config["proportion"]]
         is_complement = rate_config.get("is_complement", False)
         immunity_force = _immunity_force_np(state.epi_metrics, params, rate_config)
+        vax_immunity_factor = _vax_immunity_factor_np(state.epi_metrics, params, rate_config)
+
+        prob = (proportion / immunity_force) * vax_immunity_factor
 
         if is_complement:
-            return np.asarray((1.0 - proportion / immunity_force) * base_rate)
+            return np.asarray((1.0 - prob) * base_rate)
         else:
-            return np.asarray((proportion / immunity_force) * base_rate)
+            return np.asarray(prob * base_rate)
 
     def torch_rate(self, state_dict, params_dict, rate_config):
         base_rate = params_dict[rate_config["base_rate"]]
         proportion = params_dict[rate_config["proportion"]]
         is_complement = rate_config.get("is_complement", False)
         immunity_force = _immunity_force_torch(state_dict, params_dict, rate_config)
+        vax_immunity_factor = _vax_immunity_factor_torch(state_dict, params_dict, rate_config)
+
+        prob = (proportion / immunity_force) * vax_immunity_factor
 
         if is_complement:
-            return (1.0 - proportion / immunity_force) * base_rate
+            return (1.0 - prob) * base_rate
         else:
-            return (proportion / immunity_force) * base_rate
+            return prob * base_rate
 
 
 # ---------------------------------------------------------------------------
@@ -370,11 +450,13 @@ class ForceOfInfectionRate(RateTemplate):
     -------
     beta_adjusted  = beta_baseline × (1 + humidity_impact × exp(−180 × absolute_humidity))
                      if humidity is configured, else beta_baseline
-    immune_force   = 1 + optional infection-induced term + optional vaccine-induced term
+    immune_force   = 1 + optional infection-induced term
+    vax_factor     = 1 − MV × VE_0   (1 if no vaccine immunity configured)
+                     where VE_0 = min(vax_reduce_param × inflation factor, 1)
     wtd_inf_by_age = Σ_c  [rel_inf_c × Σ_R compartment_c]   (A × 1)
     wtd_inf_prop   = wtd_inf_by_age / pop_by_age              (A × 1)
     raw_exposure   = contact_matrix @ wtd_inf_prop            (A × 1)
-    rate           = relative_suscept × beta_adjusted × raw_exposure / immune_force   (A × R)
+    rate           = relative_suscept × beta_adjusted × vax_factor × raw_exposure / immune_force   (A × R)
 
     rate_config keys
     ----------------
@@ -389,7 +471,10 @@ class ForceOfInfectionRate(RateTemplate):
     inf_reduce_param : str, optional
         Parameter name for inf_induced_inf_risk_reduce.
     vax_reduce_param : str, optional
-        Parameter name for vax_induced_inf_risk_reduce.
+        Parameter name for the SEASON-AVERAGE vaccine efficacy against
+        infection. The peak (zero-waning) value applied is this times the
+        derived inflation factor — see
+        ve_derivation.compute_ve_inflation_factors.
     infectious_compartments : dict[str, str | None]
         Keys are compartment names; values are either None (relative
         infectiousness = 1.0) or a parameter name whose value gives the
@@ -429,7 +514,9 @@ class ForceOfInfectionRate(RateTemplate):
             "ForceOfInfectionRate", rate_config, schedule_names
         )
         _validate_optional_param_key("ForceOfInfectionRate", rate_config, "inf_reduce_param", param_names)
-        _validate_optional_param_key("ForceOfInfectionRate", rate_config, "vax_reduce_param", param_names)
+        _validate_optional_param_key(
+            "ForceOfInfectionRate", rate_config, "vax_reduce_param", param_names
+        )
         contact_schedule = rate_config["contact_matrix_schedule"]
         if contact_schedule not in schedule_names:
             raise ValueError(
@@ -481,6 +568,7 @@ class ForceOfInfectionRate(RateTemplate):
     def numpy_rate(self, state, params, rate_config):
         beta_adjusted = _beta_adjusted_np(state, params, rate_config)
         immune_force = _immunity_force_np(state.epi_metrics, params, rate_config)
+        vax_immunity_factor = _vax_immunity_factor_np(state.epi_metrics, params, rate_config)
 
         # --- weighted infectious proportion (A × 1) ---
         pop_by_age = np.sum(params.total_pop_age_risk, axis=1, keepdims=True)
@@ -495,11 +583,14 @@ class ForceOfInfectionRate(RateTemplate):
 
         # --- final rate (A × R) ---
         relative_suscept = params.params[rate_config["relative_susceptibility_param"]]
-        return relative_suscept * (beta_adjusted * raw_exposure / immune_force)
+        return relative_suscept * (
+            beta_adjusted * vax_immunity_factor * raw_exposure / immune_force
+        )
 
     def torch_rate(self, state_dict, params_dict, rate_config):
         beta_adjusted = _beta_adjusted_torch(state_dict, params_dict, rate_config)
         immune_force = _immunity_force_torch(state_dict, params_dict, rate_config)
+        vax_immunity_factor = _vax_immunity_factor_torch(state_dict, params_dict, rate_config)
 
         # --- weighted infectious proportion ---
         # total_pop_age_risk is (A, R); sum over R → (A, 1)
@@ -518,7 +609,9 @@ class ForceOfInfectionRate(RateTemplate):
 
         # --- final rate ---
         relative_suscept = params_dict[rate_config["relative_susceptibility_param"]]
-        return relative_suscept * (beta_adjusted * raw_exposure / immune_force)
+        return relative_suscept * (
+            beta_adjusted * vax_immunity_factor * raw_exposure / immune_force
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -579,7 +672,9 @@ class ForceOfInfectionTravelRate(RateTemplate):
             "ForceOfInfectionTravelRate", rate_config, schedule_names
         )
         _validate_optional_param_key("ForceOfInfectionTravelRate", rate_config, "inf_reduce_param", param_names)
-        _validate_optional_param_key("ForceOfInfectionTravelRate", rate_config, "vax_reduce_param", param_names)
+        _validate_optional_param_key(
+            "ForceOfInfectionTravelRate", rate_config, "vax_reduce_param", param_names
+        )
 
     def numpy_rate(self, state, params, rate_config):
         """
@@ -602,8 +697,15 @@ class ForceOfInfectionTravelRate(RateTemplate):
 
         beta_adjusted = _beta_adjusted_np(state, params, rate_config)
         immune_force = _immunity_force_np(state.epi_metrics, params, rate_config)
+        vax_immunity_factor = _vax_immunity_factor_np(state.epi_metrics, params, rate_config)
 
-        return np.asarray(beta_adjusted * total_mixing_exposure / immune_force)
+        # `total_mixing_exposure` is a torch Tensor even on the numpy path, and
+        #   np.ndarray * Tensor raises TypeError while Tensor * np.ndarray works
+        #   -- so the Tensor must stay the left operand of the first
+        #   multiplication. Mirrors flu_components.SusceptibleToExposed.
+        return np.asarray(
+            (beta_adjusted * total_mixing_exposure / immune_force) * vax_immunity_factor
+        )
 
     def torch_rate(self, state_dict, params_dict, rate_config):
         """
@@ -657,8 +759,9 @@ class ForceOfInfectionTravelRate(RateTemplate):
 
         beta_adjusted = _beta_adjusted_torch(state_dict, params_dict, rate_config)
         immune_force = _immunity_force_torch(state_dict, params_dict, rate_config)
+        vax_immunity_factor = _vax_immunity_factor_torch(state_dict, params_dict, rate_config)
 
-        return beta_adjusted * total_mixing_exposure / immune_force
+        return beta_adjusted * total_mixing_exposure * vax_immunity_factor / immune_force
 
 
 # ---------------------------------------------------------------------------

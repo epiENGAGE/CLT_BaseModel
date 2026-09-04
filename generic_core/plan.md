@@ -1,5 +1,13 @@
 # Plan: JSON-Configurable Compartmental Model with Decoupled Travel and Torch Modules
 
+> **Historical.** This is the original planning document for the
+> `generic_core` build-out, kept as a record of the intended design. It
+> is NOT maintained against the code and has drifted in places — notably
+> the vaccine-efficacy model, which was reworked after this was written
+> (`vax_saturation_param` is gone, and immunity no longer enters the
+> rate through a single `immunity_force` term). See `architecture.md`
+> for the current design and `limitations.md` for known constraints.
+
 ## Context
 
 The flu model structure (compartments, transitions, rate formulas, epi metrics) is
