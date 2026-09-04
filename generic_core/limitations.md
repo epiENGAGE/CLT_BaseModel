@@ -139,27 +139,33 @@ historical.
 `resolve_mm_dd_near_date` (and `INFECTION_IMMUNITY_START_DATE_WARN_DAYS`).
 
 **Why.** `generic_core` deliberately does not import `flu_core` for core
-logic, and the `flu_core` copy currently lives on the unmerged `ve_update`
-branch.
+logic, so the two copies were allowed to coexist while `ve_update` was still
+unmerged.
 
-**Fix when possible.** Lift the single implementation into `clt_toolkit` once
-`ve_update` merges, and have both import it from there.
+**Fix when possible.** `ve_update` has now merged, so both copies sit on the
+same branch and are free to drift apart silently. Lift the single
+implementation into `clt_toolkit` and have both import it from there.
 
-### Exact parity with flu_core is suspended
+### Exact parity with flu_core is restored (no longer a limitation)
 
 **What.** `generic_core` implements the reworked vaccine-efficacy model
 (multiplicative `1 - MV * VE_0`, derived peak efficacy, no
-`vax_induced_saturation` in the `M` update). `flu_core` on this branch still
-implements the old additive-immunity model.
+`vax_induced_saturation` in the `M` update). `flu_core` used to implement the
+old additive-immunity model, so the exact-equality tests were skipped behind
+`conftest.requires_flu_core_new_ve`.
 
-**What happens.** The generic-vs-flu exact-equality tests are skipped, gated on
-`conftest.requires_flu_core_new_ve`. They re-enable automatically once
-`flu_core` gains `vax_induced_inf_risk_reduce_initial`, and must pass then.
+**Status.** `ve_update` has merged into `main` and this branch has been synced
+to it, so `flu_core` now carries the same model. The gate evaluates true and
+every generic-vs-flu parity test runs and passes. `requires_flu_core_new_ve` is
+now a no-op and could be retired.
 
-**Note.** With the vaccine efficacies and `vax_induced_saturation` set to 0 the
-two models coincide exactly, which is how the port was validated. That
-validation is not itself captured as a test — a zero-efficacy parity variant
-would restore coverage before `ve_update` merges.
+**Note.** Where the two differ, it is in *where* the derived peak efficacy
+lives, not in the arithmetic: `flu_core` precomputes `VE_0` onto params as
+`<name>_initial`, while `generic_core` stores the inflation factor
+`VE_0 / VE_season` and forms the product at each rate evaluation, so that a
+later override of the season-average value still reaches the trajectory.
+Anything comparing the two must translate between the two representations —
+see `_generic_params` in `tests/test_generic_rate_templates.py`.
 
 ### The VE inflation factor is refreshed per run, not per parameter change
 
@@ -218,6 +224,34 @@ still capped correctly at evaluation time, but is not warned about. Warning
 per-timestep would be far noisier than it is worth.
 
 ---
+
+## Metapopulation
+
+### Torch recomputes mixing exposure every sub-timestep; numpy does it daily
+
+**What.** In the numpy path, `ConfigDrivenMetapopModel.apply_inter_subpop_updates`
+(`generic_metapop.py`) computes `total_mixing_exposure` once per simulation day
+and injects it into each travel transition's rate config. In the torch path
+there is no such hook: `ForceOfInfectionTravelRate.torch_rate`
+(`rate_templates.py`) calls `compute_total_mixing_exposure` itself, so it is
+recomputed at every sub-timestep from the current state.
+
+**What happens.** The two paths give different trajectories whenever
+`timesteps_per_day > 1`. At `timesteps_per_day = 1` — which is what every
+generic-vs-flu parity test uses — they coincide exactly, so this is invisible to
+the current test suite.
+
+**Context.** `flu_core` had the same split and resolved it in favour of daily
+(commit `03c2e9f`, threading a `total_mixing_exposure` argument down through
+`advance_timestep`), which is also what the object-oriented flu model does.
+`generic_core`'s torch path is now the only one on the per-sub-timestep
+convention.
+
+**Fix when possible.** Hoist the call out of the rate template into
+`generic_torch_simulate_full_history` / `..._calibration_target`, computing it
+once per day alongside the schedule update and passing it down the way
+`flu_core` does. Add a `timesteps_per_day > 1` parity test at the same time —
+the absence of one is why this drifted unnoticed.
 
 ## Fitting
 

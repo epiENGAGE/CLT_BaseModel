@@ -20,11 +20,11 @@ import datetime
 from typing import Tuple
 
 from collections import defaultdict
-from dataclasses import dataclass, fields, field
+from dataclasses import dataclass, fields, field, replace
 
 from .flu_data_structures import FluFullMetapopStateTensors, \
     FluFullMetapopParamsTensors, FluPrecomputedTensors, \
-    FluFullMetapopScheduleTensors
+    FluFullMetapopScheduleTensors, resolve_mm_dd_near_date
 from .flu_travel_functions import compute_total_mixing_exposure
 
 base_path = clt.utils.PROJECT_ROOT / "flu_instances" / "texas_input_files"
@@ -102,14 +102,18 @@ def compute_flu_contact_matrix(params: FluFullMetapopParamsTensors,
 def compute_S_to_E(state: FluFullMetapopStateTensors,
                    params: FluFullMetapopParamsTensors,
                    precomputed: FluPrecomputedTensors,
-                   dt: float) -> torch.Tensor:
+                   dt: float,
+                   total_mixing_exposure: torch.Tensor = None) -> torch.Tensor:
     """
     Returns:
         (torch.Tensor of size (L, A, R))
+
+    If total_mixing_exposure is provided, use it directly (for daily-update mode
+    matching the numpy metapop model). Otherwise compute it from current state.
     """
 
-    # Needs flu_contact_matrix to be in state for this
-    total_mixing_exposure = compute_total_mixing_exposure(state, params, precomputed)
+    if total_mixing_exposure is None:
+        total_mixing_exposure = compute_total_mixing_exposure(state, params, precomputed)
 
     if total_mixing_exposure.size() != torch.Size([precomputed.L,
                                                    precomputed.A,
@@ -123,13 +127,11 @@ def compute_S_to_E(state: FluFullMetapopStateTensors,
     inf_induced_inf_risk_reduce = params.inf_induced_inf_risk_reduce
     inf_induced_proportional_risk_reduce = inf_induced_inf_risk_reduce / (1 - inf_induced_inf_risk_reduce)
 
-    vax_induced_inf_risk_reduce = params.vax_induced_inf_risk_reduce
-    vax_induced_proportional_risk_reduce = vax_induced_inf_risk_reduce / (1 - vax_induced_inf_risk_reduce)
+    immune_force = 1 + inf_induced_proportional_risk_reduce * state.M
 
-    immune_force = (1 + inf_induced_proportional_risk_reduce * state.M +
-                    vax_induced_proportional_risk_reduce * state.MV)
+    vax_immunity_factor = 1 - state.MV * params.vax_induced_inf_risk_reduce_initial
 
-    rate = beta_adjusted * total_mixing_exposure / immune_force
+    rate = beta_adjusted * total_mixing_exposure * vax_immunity_factor / immune_force
 
     S_to_E = state.S * torch_approx_binom_probability_from_rate(rate, dt)
 
@@ -164,13 +166,13 @@ def compute_IP_to_ISR_rate(state: FluFullMetapopStateTensors,
     inf_induced_hosp_risk_reduce = params.inf_induced_hosp_risk_reduce
     inf_induced_proportional_risk_reduce = inf_induced_hosp_risk_reduce / (1 - inf_induced_hosp_risk_reduce)
 
-    vax_induced_hosp_risk_reduce = params.vax_induced_hosp_risk_reduce
-    vax_induced_proportional_risk_reduce = vax_induced_hosp_risk_reduce / (1 - vax_induced_hosp_risk_reduce)
+    immunity_force = 1 + inf_induced_proportional_risk_reduce * state.M
 
-    immunity_force = (1 + inf_induced_proportional_risk_reduce * state.M +
-                      vax_induced_proportional_risk_reduce * state.MV)
+    vax_immunity_factor = 1 - state.MV * params.vax_induced_hosp_risk_reduce_initial
 
-    rate = params.IP_to_IS_rate * (1 - params.IP_to_ISH_prop / immunity_force)
+    prob_hosp = (params.IP_to_ISH_prop / immunity_force) * vax_immunity_factor
+
+    rate = params.IP_to_IS_rate * (1 - prob_hosp)
 
     return rate
 
@@ -185,13 +187,13 @@ def compute_IP_to_ISH_rate(state: FluFullMetapopStateTensors,
     inf_induced_hosp_risk_reduce = params.inf_induced_hosp_risk_reduce
     inf_induced_proportional_risk_reduce = inf_induced_hosp_risk_reduce / (1 - inf_induced_hosp_risk_reduce)
 
-    vax_induced_hosp_risk_reduce = params.vax_induced_hosp_risk_reduce
-    vax_induced_proportional_risk_reduce = vax_induced_hosp_risk_reduce / (1 - vax_induced_hosp_risk_reduce)
+    immunity_force = 1 + inf_induced_proportional_risk_reduce * state.M
 
-    immunity_force = (1 + inf_induced_proportional_risk_reduce * state.M +
-                      vax_induced_proportional_risk_reduce * state.MV)
+    vax_immunity_factor = 1 - state.MV * params.vax_induced_hosp_risk_reduce_initial
 
-    rate = params.IP_to_IS_rate * (params.IP_to_ISH_prop / immunity_force)
+    prob_hosp = (params.IP_to_ISH_prop / immunity_force) * vax_immunity_factor
+
+    rate = params.IP_to_IS_rate * prob_hosp
 
     return rate
 
@@ -234,18 +236,17 @@ def compute_ISH_to_HR_rate(state: FluFullMetapopStateTensors,
     """
 
     inf_induced_death_risk_reduce = params.inf_induced_death_risk_reduce
-    vax_induced_death_risk_reduce = params.vax_induced_death_risk_reduce
 
     inf_induced_proportional_risk_reduce = \
         inf_induced_death_risk_reduce / (1 - inf_induced_death_risk_reduce)
 
-    vax_induced_proportional_risk_reduce = \
-        vax_induced_death_risk_reduce / (1 - vax_induced_death_risk_reduce)
+    immunity_force = 1 + inf_induced_proportional_risk_reduce * state.M
 
-    immunity_force = (1 + inf_induced_proportional_risk_reduce * state.M +
-                      vax_induced_proportional_risk_reduce * state.MV)
+    vax_immunity_factor = 1 - state.MV * params.vax_induced_death_risk_reduce_initial
 
-    rate = (1 - params.ISH_to_HD_prop / immunity_force) * params.ISH_to_H_rate
+    prob_death = (params.ISH_to_HD_prop / immunity_force) * vax_immunity_factor
+
+    rate = (1 - prob_death) * params.ISH_to_H_rate
 
     return rate
 
@@ -258,18 +259,17 @@ def compute_ISH_to_HD_rate(state: FluFullMetapopStateTensors,
     """
 
     inf_induced_death_risk_reduce = params.inf_induced_death_risk_reduce
-    vax_induced_death_risk_reduce = params.vax_induced_death_risk_reduce
 
     inf_induced_proportional_risk_reduce = \
         inf_induced_death_risk_reduce / (1 - inf_induced_death_risk_reduce)
 
-    vax_induced_proportional_risk_reduce = \
-        vax_induced_death_risk_reduce / (1 - vax_induced_death_risk_reduce)
+    immunity_force = 1 + inf_induced_proportional_risk_reduce * state.M
 
-    immunity_force = (1 + inf_induced_proportional_risk_reduce * state.M +
-                      vax_induced_proportional_risk_reduce * state.MV)
+    vax_immunity_factor = 1 - state.MV * params.vax_induced_death_risk_reduce_initial
 
-    rate = params.ISH_to_HD_prop / immunity_force * params.ISH_to_H_rate
+    prob_death = (params.ISH_to_HD_prop / immunity_force) * vax_immunity_factor
+
+    rate = prob_death * params.ISH_to_H_rate
 
     return rate
 
@@ -320,7 +320,7 @@ def compute_R_to_S(state: FluFullMetapopStateTensors,
 
 
 # The update rule for immunity is
-#   - dM/dt = (R_to_S_rate * R / N) * (1 - inf_induced_saturation * M - vax_induced_saturation * M_v)
+#   - dM/dt = (R_to_S_rate * R / N) * (1 - inf_induced_saturation * M)
 #                   - inf_induced_immune_wane * state.M
 #   - dMV/dt = (new vaccinations at time t - delta)/ N - vax_induced_immune_wane
 
@@ -337,7 +337,7 @@ def compute_M_change(state: FluFullMetapopStateTensors, params: FluFullMetapopPa
     R_to_S = state.R * torch_approx_binom_probability_from_rate(params.R_to_S_rate, dt)
 
     M_change = (R_to_S / precomputed.total_pop_LAR_tensor) * \
-               (1 - params.inf_induced_saturation * state.M - params.vax_induced_saturation * state.MV) - \
+               (1 - params.inf_induced_saturation * state.M) - \
                params.inf_induced_immune_wane * state.M * dt
 
     # Because R_to_S includes dt already, we do not return M_change * dt -- we only multiply
@@ -361,24 +361,103 @@ def compute_MV_change(state: FluFullMetapopStateTensors,
 
 def check_and_apply_MV_reset(state: FluFullMetapopStateTensors,
                              params: FluFullMetapopParamsTensors,
-                             day_counter: int):
+                             day_counter: int) -> FluFullMetapopStateTensors:
     """
-    Check if current date matches vax_immunity_reset_date_mm_dd
-    where vaccine-induced immunity should be reset.
-    If so, reset MV to zero.
-    """
-    
-    if params.vax_immunity_reset_date_mm_dd is not None:
-        current_date = params.start_real_date + datetime.timedelta(days=day_counter)
-        
-        # Parse reset date (format: "MM_DD")
-        month, day = params.vax_immunity_reset_date_mm_dd.split('_')
+    Torch counterpart of `VaxInducedImmunity.check_and_apply_reset`.
 
-        # Check if current date matches the reset date (month and day)
-        if current_date.month == int(month) and current_date.day == int(day):
-            # Reset vaccine-induced immunity to zero
-            state.MV = np.zeros_like(state.MV)
-            print(f"VaxInducedImmunity MV reset to 0 on {current_date}")
+    If the current date matches `vax_immunity_reset_date_mm_dd`, returns
+    a new state with vaccine-induced immunity `MV` reset to zero;
+    otherwise returns `state` unchanged. Like the numpy version, this
+    fires on every matching month/day, so it repeats each year in a
+    multi-season run.
+
+    Args:
+        state (FluFullMetapopStateTensors):
+            current state.
+        params (FluFullMetapopParamsTensors):
+            holds `vax_immunity_reset_date_mm_dd` and `start_real_date`.
+        day_counter (int):
+            days elapsed since `start_real_date`.
+
+    Returns:
+        FluFullMetapopStateTensors
+    """
+
+    if params.vax_immunity_reset_date_mm_dd is None:
+        return state
+
+    current_date = params.start_real_date + datetime.timedelta(days=day_counter)
+
+    # Parse reset date (format: "MM_DD")
+    month, day = params.vax_immunity_reset_date_mm_dd.split('_')
+
+    # Check if current date matches the reset date (month and day)
+    if current_date.month != int(month) or current_date.day != int(day):
+        return state
+
+    print(f"VaxInducedImmunity MV reset to 0 on {current_date}")
+
+    return replace(state, MV=torch.zeros_like(state.MV))
+
+
+def check_and_apply_M_injection(state: FluFullMetapopStateTensors,
+                                params: FluFullMetapopParamsTensors,
+                                day_counter: int) -> FluFullMetapopStateTensors:
+    """
+    Torch counterpart of `InfInducedImmunity.check_and_apply_injection`.
+
+    If `infection_immunity_start_date_mm_dd` falls after the simulation
+    start, the input M(0) is held back rather than applied at time zero
+    (see `InfInducedImmunity.adjust_initial_value`). When the simulation
+    reaches that date, this adds it in -- once -- and otherwise returns
+    `state` unchanged.
+
+    The amount added travels on
+    `params.infection_immunity_injection_val`, since the torch model has
+    no `InfInducedImmunity` object to read `original_init_val` from --
+    see `FluSubpopModel.update_infection_immunity_injection_val`.
+
+    Unlike the MV reset, this fires only on the specific resolved
+    calendar date (year included), matching the numpy behavior of
+    injecting exactly once even across a multi-year run.
+
+    Args:
+        state (FluFullMetapopStateTensors):
+            current state.
+        params (FluFullMetapopParamsTensors):
+            holds `infection_immunity_start_date_mm_dd`,
+            `infection_immunity_injection_val`, and `start_real_date`.
+        day_counter (int):
+            days elapsed since `start_real_date`.
+
+    Returns:
+        FluFullMetapopStateTensors
+    """
+
+    if params.infection_immunity_start_date_mm_dd is None or \
+            params.infection_immunity_injection_val is None:
+        return state
+
+    injection_date = resolve_mm_dd_near_date(
+        params.infection_immunity_start_date_mm_dd,
+        params.start_real_date,
+        param_name="infection_immunity_start_date_mm_dd")
+
+    # Only a date strictly after the start is held back -- a date on or
+    #   before the start was already folded into M(0)
+    if injection_date <= params.start_real_date:
+        return state
+
+    current_date = params.start_real_date + datetime.timedelta(days=day_counter)
+
+    if current_date != injection_date:
+        return state
+
+    print(f"InfInducedImmunity M increased by initial value on {current_date}")
+
+    injection_val = params.infection_immunity_injection_val.to(state.M.dtype)
+
+    return replace(state, M=state.M + injection_val)
 
 def update_state_with_schedules(state: FluFullMetapopStateTensors,
                                 params: FluFullMetapopParamsTensors,
@@ -432,7 +511,8 @@ def advance_timestep(state: FluFullMetapopStateTensors,
                      precomputed: FluPrecomputedTensors,
                      dt: float,
                      save_calibration_targets: bool=False,
-                     save_tvar_history: bool=False) -> Tuple[FluFullMetapopStateTensors, dict, dict]:
+                     save_tvar_history: bool=False,
+                     total_mixing_exposure: torch.Tensor = None) -> Tuple[FluFullMetapopStateTensors, dict, dict]:
     """
     Advance the simulation one timestep, with length `dt`.
     Updates state corresponding to compartments and
@@ -466,7 +546,8 @@ def advance_timestep(state: FluFullMetapopStateTensors,
             `save_tvar_history`.
     """ 
     
-    S_to_E = compute_S_to_E(state, params, precomputed, dt)
+    S_to_E = compute_S_to_E(state, params, precomputed, dt,
+                            total_mixing_exposure=total_mixing_exposure)
 
     # Deterministic multinomial implementation to match
     #   object-oriented version
@@ -598,6 +679,12 @@ def torch_simulate_full_history(state: FluFullMetapopStateTensors,
 
     for day in range(num_days):
         state = update_state_with_schedules(state, params, schedules, day)
+        # Apply the once-a-day immunity reset/injection before anything
+        #   reads M or MV, matching `FluSubpopModel.prepare_daily_state`
+        state = check_and_apply_MV_reset(state, params, day)
+        state = check_and_apply_M_injection(state, params, day)
+        # Compute mixing exposure once per day (matching numpy metapop model)
+        daily_mixing_exposure = compute_total_mixing_exposure(state, params, precomputed)
 
         for timestep in range(timesteps_per_day):
             # TODO double check whether this split makes sense
@@ -606,12 +693,14 @@ def torch_simulate_full_history(state: FluFullMetapopStateTensors,
             #   (these variables may not be used anywhere right now)
             if timestep == timesteps_per_day-1:
                 state, _, tvar_history = \
-                    advance_timestep(state, params, precomputed, dt, save_tvar_history=True)
+                    advance_timestep(state, params, precomputed, dt, save_tvar_history=True,
+                                     total_mixing_exposure=daily_mixing_exposure)
                 for key in tvar_history:
                     tvar_history_dict[key].append(tvar_history[key])
             else:
                 state, _, _ = \
-                    advance_timestep(state, params, precomputed, dt, save_tvar_history=False)
+                    advance_timestep(state, params, precomputed, dt, save_tvar_history=False,
+                                     total_mixing_exposure=daily_mixing_exposure)
 
         for field in fields(state):
             if field.name == "init_vals":
@@ -644,9 +733,21 @@ def torch_simulate_hospital_admits(state: FluFullMetapopStateTensors,
 
     for day in range(num_days):
         state = update_state_with_schedules(state, params, schedules, day)
+        # Apply the once-a-day immunity reset/injection before anything
+        #   reads M or MV, matching `FluSubpopModel.prepare_daily_state`
+        state = check_and_apply_MV_reset(state, params, day)
+        state = check_and_apply_M_injection(state, params, day)
+        # Compute mixing exposure once per day (matching numpy metapop model)
+        daily_mixing_exposure = compute_total_mixing_exposure(state, params, precomputed)
+        daily_admits = None
         for timestep in range(timesteps_per_day):
             state, calibration_targets, _ = \
-                advance_timestep(state, params, precomputed, dt, save_calibration_targets=True)
-        hospital_admits_history.append(calibration_targets["ISH_to_H"].clone())
+                advance_timestep(state, params, precomputed, dt, save_calibration_targets=True,
+                                 total_mixing_exposure=daily_mixing_exposure)
+            if daily_admits is None:
+                daily_admits = calibration_targets["ISH_to_H"].clone()
+            else:
+                daily_admits = daily_admits + calibration_targets["ISH_to_H"]
+        hospital_admits_history.append(daily_admits)
 
     return torch.stack(hospital_admits_history)

@@ -208,7 +208,7 @@
         "vax_induced_immune_wane_param":       "vax_induced_immune_wane",
         "vax_immunity_reset_date_mm_dd_param": "vax_immunity_reset_date_mm_dd",
         "adjust_VE_for_seasonal_waning":       true,
-        "VE_season_dose_window_quantile":      null,
+        "VE_season_dose_window_quantile":      0.05,
         "fields": [
             "vax_induced_inf_risk_reduce",
             "vax_induced_hosp_risk_reduce",

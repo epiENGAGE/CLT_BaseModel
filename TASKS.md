@@ -143,8 +143,8 @@ results are directly comparable to the existing demo. Keep the setup cells non-r
   `transition_type = "binom"`). In stochastic mode, add a numeric input for number of
   replicates (default 1 for speed during exploration).
 - **Parameter selector:** dropdown listing all scalar and age-vector parameters from
-  `FluSubpopParams` (e.g. `beta_baseline`, `vax_induced_saturation`,
-  `vax_immunity_reduction_hosp`, `inf_induced_immune_wane`, `E_to_IA_prop`, etc.).
+  `FluSubpopParams` (e.g. `beta_baseline`, `vax_induced_hosp_risk_reduce`,
+  `vax_induced_immune_wane`, `inf_induced_immune_wane`, `E_to_IA_prop`, etc.).
 - **Parameter value inputs:** once a parameter is selected, show either a single numeric
   slider/input (for scalar params) or one slider per age group (for age-vector params).
   Support entering up to three values simultaneously so curves for each value are overlaid
@@ -255,9 +255,9 @@ sensitive to, informing which parameters are worth including in the full ABC cal
 
 ### 7c. Sensitivity of VPH to vaccine efficacy assumptions
 
-Vaccine efficacy (VE) is encoded across several parameters: `vax_induced_saturation`,
-`vax_induced_immune_wane`, `vax_immunity_reduction_inf`, `vax_immunity_reduction_hosp`,
-`vax_immunity_reduction_death`. These are often reported with confidence intervals in the
+Vaccine efficacy (VE) is encoded across several parameters:
+`vax_induced_immune_wane`, `vax_induced_inf_risk_reduce`, `vax_induced_hosp_risk_reduce`,
+`vax_induced_death_risk_reduce`. These are often reported with confidence intervals in the
 literature.
 
 **Task:** Using the OAT or uniform sampling infrastructure, produce a dedicated sensitivity

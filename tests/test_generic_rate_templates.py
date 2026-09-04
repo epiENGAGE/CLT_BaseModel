@@ -30,6 +30,7 @@ from generic_core.rate_templates import (
     ForceOfInfectionRate,
 )
 from generic_core.data_structures import GenericSubpopState, GenericSubpopParams
+from generic_core.ve_derivation import ve_inflation_param_name
 
 NUM_DAYS_WARMUP = 50
 
@@ -93,23 +94,22 @@ def _generic_params(flu_model) -> GenericSubpopParams:
         "relative_suscept":              np.asarray(p.relative_suscept, dtype=float),
     }
 
-    # The DERIVED peak-efficacy params that the new VE model applies. flu_core
-    # only exposes them once it is ported to the ve_update model; until then
-    # fall back to the season-average value, which is exactly what
-    # `adjust_VE_for_seasonal_waning = False` means.
-    #
-    # The generic-vs-flu parity tests that depend on the real derived value are
-    # skipped while that fallback is in force (see
-    # conftest.requires_flu_core_new_ve); the generic numpy-vs-torch tests only
-    # need the two paths to read the same number, so the fallback serves them.
+    # The new VE model applies a PEAK efficacy VE_0, derived from the
+    # season-average value the user supplies. flu_core precomputes VE_0 onto
+    # params as `<name>_initial`; generic_core instead stores the inflation
+    # factor VE_0 / VE_season and forms the product live at each rate
+    # evaluation (see `_vax_induced_peak_efficacy_np`), so that overriding the
+    # season-average value still reaches the trajectory. Carry flu's derived
+    # value across in the form generic_core actually reads, so both sides
+    # apply the same VE_0.
     for _name in ("vax_induced_inf_risk_reduce",
                   "vax_induced_hosp_risk_reduce",
                   "vax_induced_death_risk_reduce"):
-        _initial_name = f"{_name}_initial"
-        _val = getattr(p, _initial_name, None)
-        if _val is None:
-            _val = getattr(p, _name)
-        params_dict[_initial_name] = np.asarray(_val, dtype=float)
+        _season = np.asarray(getattr(p, _name), dtype=float)
+        _peak = getattr(p, f"{_name}_initial", None)
+        _inflation = (np.ones_like(_season) if _peak is None
+                      else np.asarray(_peak, dtype=float) / _season)
+        params_dict[ve_inflation_param_name(_name)] = _inflation
     return GenericSubpopParams(
         params=params_dict,
         num_age_groups=p.num_age_groups,

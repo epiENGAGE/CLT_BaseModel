@@ -160,9 +160,12 @@ def _show_controls(
     ARRAY_BASELINES,
     ARRAY_PARAMS,
     SCALAR_PARAMS,
+    E_NONZERO_ENTRIES,
     array_scale_inputs,
     e_init_inputs,
+    m_scale_inputs,
     start_date_sc_inputs,
+    travel_matrix_editors,
     vax_editors,
 ):
     _n = int(num_scenarios_input.value)
@@ -213,13 +216,20 @@ def _show_controls(
         )
         for _k, (_pname, _base) in enumerate(zip(ARRAY_PARAMS, ARRAY_BASELINES))
     ]
-    from flu_example_utils import SUBPOP_CONFIG as _SC_ER
     _e_rows = [
         mo.hstack(
-            [mo.md(f"`{sp['name']}_E[2,0]`")] + [e_init_inputs[_ei][j] for j in range(_n)],
+            [mo.md(f"`{_spn}_E[{_ii},{_jj}]`")] + [e_init_inputs[_idx][j] for j in range(_n)],
             widths="equal",
         )
-        for _ei, sp in enumerate(_SC_ER)
+        for _idx, (_spn, _ii, _jj) in enumerate(E_NONZERO_ENTRIES)
+    ]
+    from flu_example_utils import SUBPOP_CONFIG as _SC_M
+    _m_rows = [
+        mo.hstack(
+            [mo.md(f"`{sp['name']}_M_scale`")] + [m_scale_inputs[_mi][j] for j in range(_n)],
+            widths="equal",
+        )
+        for _mi, sp in enumerate(_SC_M)
     ]
     _start_date_row = mo.hstack(
         [mo.md("`start_real_date`")] + [start_date_sc_inputs[j] for j in range(_n)],
@@ -237,14 +247,20 @@ def _show_controls(
             for _j in range(_n)
         ]),
     ])
+    _travel_accordion = mo.accordion(
+        {"Mobility matrix (travel proportions)": mo.vstack([
+            mo.vstack([mo.md(f"**Scenario {_j + 1}**"), travel_matrix_editors[_j]])
+            for _j in range(_n)
+        ])}
+    )
     _tab2 = mo.vstack(
         [mo.md("### Parameter overrides"), num_scenarios_input,
          _header_row, _vax_row,
          mo.md("**Vaccination coverage**"), _vax_editors_section,
          mo.md("**Scalar parameters**")] + _scalar_rows +
         [mo.md("**Array parameters** *(scale factor applied to all entries)*")] + _array_rows +
-        [mo.md("**Initial conditions**")] + _e_rows +
-        [mo.md("**Other**"), _start_date_row]
+        [mo.md("**Initial conditions**")] + _e_rows + _m_rows +
+        [mo.md("**Other**"), _start_date_row, _travel_accordion]
     )
 
     _content = _tab1 if scenario_tab.value == "Vaccination coverage" else _tab2
@@ -362,7 +378,12 @@ def _param_tab_controls(flu, inputs, mo, params):
 
     # Baseline vector formatted for display
     def _fmt(val):
-        return "[" + ", ".join(f"{x:.4g}" for x in _np.asarray(val).flatten()) + "]"
+        arr = _np.asarray(val)
+        if arr.ndim == 2:
+            return "[" + ", ".join(
+                "[" + ", ".join(f"{x:.4g}" for x in row) + "]" for row in arr
+            ) + "]"
+        return "[" + ", ".join(f"{x:.4g}" for x in arr.flatten()) + "]"
     ARRAY_BASELINES = [_fmt(getattr(params, p)) for p in ARRAY_PARAMS]
 
     # Scenario name inputs (one per possible scenario)
@@ -392,17 +413,41 @@ def _param_tab_controls(flu, inputs, mo, params):
         for _ in ARRAY_PARAMS
     ])
 
-    # Initial E(2,0) inputs: [subpop_idx][scenario_idx]
+    # Dynamically find all (i, j) positions where any subpop has non-zero E,
+    # then create inputs for every (subpop, i, j) combination.
     from flu_example_utils import SUBPOP_CONFIG as _SPCONF
+    _e_nonzero_ij = set()
+    for _sp_cfg in _SPCONF:
+        _E = _np.asarray(inputs["states"][_sp_cfg["name"]].E)
+        for _ii, _jj in zip(*_np.nonzero(_E)):
+            _e_nonzero_ij.add((int(_ii), int(_jj)))
+
+    # All subpops × non-zero (i,j) positions, sorted for stable ordering.
+    E_NONZERO_ENTRIES = [
+        (_sp_cfg["name"], _ii, _jj)
+        for _ii, _jj in sorted(_e_nonzero_ij)
+        for _sp_cfg in _SPCONF
+    ]
+
+    # Flat array: one entry per (sp_name, i, j), each containing _MAX_SC inputs.
     e_init_inputs = mo.ui.array([
         mo.ui.array([
             mo.ui.number(
                 start=0, stop=10000, step=1,
-                value=float(inputs["states"][sp["name"]].E[2][0]),
+                value=float(_np.asarray(inputs["states"][_spn].E)[_ii, _jj]),
             )
             for _ in range(_MAX_SC)
         ])
-        for sp in _SPCONF
+        for _spn, _ii, _jj in E_NONZERO_ENTRIES
+    ])
+
+    # M scale inputs: [subpop_idx][scenario_idx], default 1.0
+    m_scale_inputs = mo.ui.array([
+        mo.ui.array([
+            mo.ui.number(start=0.0, stop=5.0, step=0.01, value=1.0)
+            for _ in range(_MAX_SC)
+        ])
+        for _ in _SPCONF
     ])
 
     # Per-scenario simulation start date
@@ -411,10 +456,29 @@ def _param_tab_controls(flu, inputs, mo, params):
         for j in range(_MAX_SC)
     ])
 
+    # Travel matrix editors (one per possible scenario), seeded from mixing_params
+    _travel_mat = inputs["mixing_params"].travel_proportions
+
+    def _make_travel_rows(mat):
+        return [
+            {"from \\ to": f"Location {_i}",
+             **{f"to_{_j}": round(float(mat[_i][_j]), 4) for _j in range(len(mat[_i]))}}
+            for _i in range(len(mat))
+        ]
+
+    travel_matrix_editors = mo.ui.array([
+        mo.ui.data_editor(
+            _make_travel_rows(_travel_mat),
+            label=f"Scenario {_j + 1} travel proportions",
+        )
+        for _j in range(_MAX_SC)
+    ])
+
     return (
         ARRAY_BASELINES, ARRAY_PARAMS, SCALAR_PARAMS,
-        array_scale_inputs, e_init_inputs, param_inputs, scenario_name_inputs,
-        start_date_sc_inputs,
+        E_NONZERO_ENTRIES,
+        array_scale_inputs, e_init_inputs, m_scale_inputs, param_inputs,
+        scenario_name_inputs, start_date_sc_inputs, travel_matrix_editors,
     )
 
 
@@ -439,10 +503,12 @@ def _build_settings(clt, settings_base, sim_mode, start_date_input):
 @app.cell
 def _define_scenarios(
     ARRAY_PARAMS,
+    E_NONZERO_ENTRIES,
     SCALAR_PARAMS,
     array_scale_inputs,
     baseline_vax,
     e_init_inputs,
+    m_scale_inputs,
     inputs,
     np,
     num_scenarios_input,
@@ -451,6 +517,7 @@ def _define_scenarios(
     scenario_name_inputs,
     scenario_tab,
     start_date_sc_inputs,
+    travel_matrix_editors,
     vax_editors,
 ):
     import pandas as _pd_ds
@@ -471,6 +538,11 @@ def _define_scenarios(
                 scale_mat[_age, _risk] = float(row[f"risk_{_risk}"]) / _b if _b > 0 else 1.0
         return scale_mat
 
+    def _editor_to_travel_mat(editor_val):
+        df = editor_val if isinstance(editor_val, _pd_ds.DataFrame) else _pd_ds.DataFrame(editor_val)
+        n_loc = len(df)
+        return [[float(df.iloc[_i][f"to_{_j}"]) for _j in range(n_loc)] for _i in range(n_loc)]
+
     scenarios = {"baseline": {}}
     scenario_labels = {"baseline": "Baseline"}
 
@@ -489,7 +561,8 @@ def _define_scenarios(
                         )
                     }
                     for sp in _SC
-                }
+                },
+                "travel_proportions": _editor_to_travel_mat(travel_matrix_editors[_i].value),
             }
             scenario_labels[_sc_name] = f"Scenario {_i + 1} (\u00d7{_scale:.2f} base)"
 
@@ -508,10 +581,15 @@ def _define_scenarios(
                     for k, pname in enumerate(ARRAY_PARAMS)
                 },
                 "init_overrides": {
-                    f"{sp['name']}_E_2_0": e_init_inputs.value[_ei][j]
-                    for _ei, sp in enumerate(_SC)
+                    f"init:{_spn}:E:{_ii}:{_jj}": e_init_inputs.value[_idx][j]
+                    for _idx, (_spn, _ii, _jj) in enumerate(E_NONZERO_ENTRIES)
+                },
+                "m_scales": {
+                    sp["name"]: m_scale_inputs.value[_mi][j]
+                    for _mi, sp in enumerate(_SC)
                 },
                 "start_date": start_date_sc_inputs[j].value,
+                "travel_proportions": _editor_to_travel_mat(travel_matrix_editors[j].value),
             }
             _editor_val_j = vax_editors[j].value
             _sc_def["subpop_schedules"] = {
@@ -603,7 +681,7 @@ def _run_scenarios(
         SUBPOP_CONFIG as _SC,
         make_rng_generators,
         build_flu_metapop_model,
-        apply_init_overrides,
+        apply_general_init_overrides,
     )
 
     def _build_model(seed, scenario_def):
@@ -626,9 +704,19 @@ def _run_scenarios(
         if _array_overrides:
             _params = clt.updated_dataclass(_params, _array_overrides)
 
-        # Initial condition overrides for E(2,0)
+        # Initial condition overrides (keys: "init:{sp}:E:{i}:{j}")
         _init_ovr = scenario_def.get("init_overrides", {})
-        _states = apply_init_overrides(inputs["states"], _init_ovr, _SC) if _init_ovr else inputs["states"]
+        _states = apply_general_init_overrides(inputs["states"], _init_ovr, _SC, np) if _init_ovr else inputs["states"]
+
+        # M scale overrides
+        _m_scales = {
+            sp_name: scale
+            for sp_name, scale in scenario_def.get("m_scales", {}).items()
+            if scale != 1.0
+        }
+        if _m_scales:
+            _m_overrides = {f"M:{sp_name}": scale for sp_name, scale in _m_scales.items()}
+            _states = apply_general_init_overrides(_states, _m_overrides, _SC, np)
 
         # Per-scenario vaccine schedules (fall back to base inputs if not overridden)
         _subpop_schedules = scenario_def.get("subpop_schedules", {})
@@ -639,7 +727,15 @@ def _run_scenarios(
             for sp in _SC
         }
 
-        _inputs_for_build = {**inputs, "states": _states}
+        # Travel proportions override
+        _travel_ovr = scenario_def.get("travel_proportions")
+        _mixing_for_build = (
+            clt.updated_dataclass(inputs["mixing_params"], {"travel_proportions": np.array(_travel_ovr)})
+            if _travel_ovr is not None
+            else inputs["mixing_params"]
+        )
+
+        _inputs_for_build = {**inputs, "states": _states, "mixing_params": _mixing_for_build}
         rngs = make_rng_generators(88888, _SC, np)
         model = build_flu_metapop_model(_SC, _inputs_for_build, _params, _settings, rngs, _vax_dfs, flu)
         model.modify_random_seed(seed)
