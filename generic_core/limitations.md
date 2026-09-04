@@ -227,31 +227,34 @@ per-timestep would be far noisier than it is worth.
 
 ## Metapopulation
 
-### Torch recomputes mixing exposure every sub-timestep; numpy does it daily
+### Torch recomputed mixing exposure per sub-timestep (no longer a limitation)
 
-**What.** In the numpy path, `ConfigDrivenMetapopModel.apply_inter_subpop_updates`
-(`generic_metapop.py`) computes `total_mixing_exposure` once per simulation day
-and injects it into each travel transition's rate config. In the torch path
-there is no such hook: `ForceOfInfectionTravelRate.torch_rate`
-(`rate_templates.py`) calls `compute_total_mixing_exposure` itself, so it is
-recomputed at every sub-timestep from the current state.
+**What.** `ForceOfInfectionTravelRate.torch_rate` used to call
+`compute_total_mixing_exposure` itself, so the metapopulation mixing exposure
+was recomputed at every sub-timestep. The numpy path has always computed it
+once per simulated day, in `ConfigDrivenMetapopModel.apply_inter_subpop_updates`,
+as does `flu_core` in both its object-oriented and torch paths.
 
-**What happens.** The two paths give different trajectories whenever
-`timesteps_per_day > 1`. At `timesteps_per_day = 1` — which is what every
-generic-vs-flu parity test uses — they coincide exactly, so this is invisible to
-the current test suite.
+**What happened.** The two paths agreed exactly at `timesteps_per_day = 1` --
+one sub-timestep per day makes the two conventions identical -- and diverged
+sharply above it: on the caseB two-subpopulation fixture over 50 days, the
+worst compartment differed by 17% of peak `S` at `timesteps_per_day = 2` and
+28% at 4. Because every parity test ran at one timestep per day, nothing
+caught it. In particular torch-based fitting and numpy-based simulation of the
+same model would not have agreed at `timesteps_per_day > 1`.
 
-**Context.** `flu_core` had the same split and resolved it in favour of daily
-(commit `03c2e9f`, threading a `total_mixing_exposure` argument down through
-`advance_timestep`), which is also what the object-oriented flu model does.
-`generic_core`'s torch path is now the only one on the per-sub-timestep
-convention.
+**Fix.** `compute_daily_mixing_exposure` (torch_generic.py) evaluates it once
+per day, after the day's schedule and immunity updates, and both simulate
+loops thread the result down through `generic_advance_timestep` into the
+travel transition's rate config as `_total_mixing_exposure` -- the same key the
+numpy path injects, and the same shape of fix as `flu_core`'s `03c2e9f`. The
+template still computes it itself when nothing is injected, so direct callers
+keep working.
 
-**Fix when possible.** Hoist the call out of the rate template into
-`generic_torch_simulate_full_history` / `..._calibration_target`, computing it
-once per day alongside the schedule update and passing it down the way
-`flu_core` does. Add a `timesteps_per_day > 1` parity test at the same time —
-the absence of one is why this drifted unnoticed.
+**Regression cover.** `tests/test_generic_torch.py` now parametrizes its
+generic-vs-flu parity fixture over `timesteps_per_day` in `(1, 2)`. Disabling
+the hoist makes the `tspd2` cases fail while `tspd1` still passes, which is
+exactly the blind spot that let this through.
 
 ## Fitting
 

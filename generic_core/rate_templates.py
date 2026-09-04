@@ -717,6 +717,32 @@ class ForceOfInfectionTravelRate(RateTemplate):
         Mirrors compute_S_to_E in flu_torch_det_components.py:102–136 but
         uses generic travel functions.
         """
+        total_mixing_exposure = rate_config.get("_total_mixing_exposure")
+        if total_mixing_exposure is None:
+            total_mixing_exposure = self.compute_mixing_exposure_torch(
+                state_dict, params_dict, rate_config
+            )
+
+        beta_adjusted = _beta_adjusted_torch(state_dict, params_dict, rate_config)
+        immune_force = _immunity_force_torch(state_dict, params_dict, rate_config)
+        vax_immunity_factor = _vax_immunity_factor_torch(state_dict, params_dict, rate_config)
+
+        return beta_adjusted * total_mixing_exposure * vax_immunity_factor / immune_force
+
+    @staticmethod
+    def compute_mixing_exposure_torch(state_dict, params_dict, rate_config):
+        """
+        Compute `total_mixing_exposure` (L, A, R) from the current state.
+
+        Split out of `torch_rate` so the simulation loop can evaluate it ONCE
+        PER DAY and inject the result as `_total_mixing_exposure`, which is
+        what the numpy path already does (`ConfigDrivenMetapopModel.
+        apply_inter_subpop_updates`) and what `flu_core` does in both its
+        object-oriented and torch paths. Recomputing it every sub-timestep
+        instead changes the trajectory materially once
+        `timesteps_per_day > 1`.
+        """
+
         from .travel_functions import compute_total_mixing_exposure
 
         precomputed = rate_config.get("_precomputed")
@@ -753,15 +779,9 @@ class ForceOfInfectionTravelRate(RateTemplate):
             if rel_inf_param is not None and rel_inf_param not in param_tensors:
                 param_tensors[rel_inf_param] = params_dict[rel_inf_param]
 
-        total_mixing_exposure = compute_total_mixing_exposure(
+        return compute_total_mixing_exposure(
             compartment_tensors, param_tensors, schedule_tensors, precomputed, travel_config
         )
-
-        beta_adjusted = _beta_adjusted_torch(state_dict, params_dict, rate_config)
-        immune_force = _immunity_force_torch(state_dict, params_dict, rate_config)
-        vax_immunity_factor = _vax_immunity_factor_torch(state_dict, params_dict, rate_config)
-
-        return beta_adjusted * total_mixing_exposure * vax_immunity_factor / immune_force
 
 
 # ---------------------------------------------------------------------------

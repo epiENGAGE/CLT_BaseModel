@@ -48,6 +48,10 @@ BASE_PATH = clt.utils.PROJECT_ROOT / "tests" / "test_input_files"
 CONFIG_PATH = BASE_PATH / "caseb_flu_generic_metapop_config.json"
 
 NUM_DAYS = 50
+
+# Parity is checked at one and at several sub-timesteps per day. See the
+#   `both_torch_histories` docstring for why the `> 1` case earns its keep.
+TIMESTEPS_PER_DAY_CASES = (1, 2)
 RNG_SEED_1 = 88888
 RNG_SEED_2 = 88888 + 1
 
@@ -125,15 +129,26 @@ def _make_flu_metapop_model(settings):
 # Fixture: both torch histories computed once
 # ---------------------------------------------------------------------------
 
-@pytest.fixture(scope="module")
-def both_torch_histories():
+@pytest.fixture(scope="module", params=TIMESTEPS_PER_DAY_CASES,
+                ids=[f"tspd{n}" for n in TIMESTEPS_PER_DAY_CASES])
+def both_torch_histories(request):
     """
     Returns (flu_state_history, gen_state_history) dicts, both over NUM_DAYS.
+
+    Parametrized over `timesteps_per_day`. The `> 1` case is not redundant:
+    metapopulation mixing exposure is a once-a-day quantity, so a model that
+    recomputes it every sub-timestep still agrees with one that does not when
+    there is only one sub-timestep per day, and diverges sharply (tens of
+    percent of S over 50 days) as soon as there is more than one. Running the
+    parity assertions at a single timestep per day cannot see that class of
+    bug at all -- see `compute_daily_mixing_exposure` in torch_generic.py.
     """
+    timesteps_per_day = request.param
+
     _state, _params, _mp, settings, _sched = subpop_inputs("caseB_subpop1")
     settings = clt.updated_dataclass(settings, {
         "transition_type": clt.TransitionTypes.BINOM_DETERMINISTIC_NO_ROUND,
-        "timesteps_per_day": 1,
+        "timesteps_per_day": timesteps_per_day,
         "use_deterministic_softplus": True,
     })
 
@@ -142,7 +157,7 @@ def both_torch_histories():
     d = flu_model.get_flu_torch_inputs()
     flu_state_history, _ = flu.torch_simulate_full_history(
         d["state_tensors"], d["params_tensors"], d["precomputed"],
-        d["schedule_tensors"], NUM_DAYS, 1
+        d["schedule_tensors"], NUM_DAYS, timesteps_per_day
     )
 
     # --- generic torch ---
@@ -159,7 +174,7 @@ def both_torch_histories():
         torch_inputs["precomputed"],
         torch_inputs["schedules_dict"],
         NUM_DAYS,
-        timesteps_per_day=1,
+        timesteps_per_day=timesteps_per_day,
         start_real_date=start_date,
     )
 

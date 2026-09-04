@@ -455,17 +455,55 @@ def check_and_apply_M_injection(
 # ---------------------------------------------------------------------------
 
 def _build_torch_rate_config(
-    tc, precomputed: GenericPrecomputedTensors
+    tc, precomputed: GenericPrecomputedTensors, total_mixing_exposure=None
 ) -> dict:
     """
     Return rate_config for torch_rate, injecting _precomputed for travel
     transitions so ForceOfInfectionTravelRate can call compute_total_mixing_exposure.
+
+    When `total_mixing_exposure` is given it is injected too, and the template
+    uses it instead of recomputing from the current state -- see
+    `compute_daily_mixing_exposure`.
     """
     if tc.rate_template == "force_of_infection_travel":
         rc = dict(tc.rate_config)
         rc["_precomputed"] = precomputed
+        if total_mixing_exposure is not None:
+            rc["_total_mixing_exposure"] = total_mixing_exposure
         return rc
     return tc.rate_config
+
+
+def compute_daily_mixing_exposure(
+    state_dict: dict,
+    params_dict: dict,
+    model_config: ModelConfig,
+    rate_registry: dict,
+    precomputed: GenericPrecomputedTensors,
+):
+    """
+    Compute `total_mixing_exposure` once for the current day, or None when the
+    model has no travel transitions.
+
+    The metapopulation mixing exposure is a once-a-day quantity: the numpy path
+    computes it in `ConfigDrivenMetapopModel.apply_inter_subpop_updates`, which
+    the simulation loop calls once per simulated day, and `flu_core` does the
+    same in both its object-oriented and torch paths. Evaluating it per
+    sub-timestep instead makes the torch path disagree with the numpy path --
+    and with flu_core -- once `timesteps_per_day > 1`.
+
+    Returns
+    -------
+    Tensor of shape (L, A, R), or None if no transition uses the travel
+    rate template (in which case there is nothing to inject).
+    """
+
+    for tc in model_config.transitions:
+        if tc.rate_template == "force_of_infection_travel":
+            template = rate_registry[tc.rate_template]
+            rc = _build_torch_rate_config(tc, precomputed)
+            return template.compute_mixing_exposure_torch(state_dict, params_dict, rc)
+    return None
 
 
 def generic_advance_timestep(
@@ -479,6 +517,7 @@ def generic_advance_timestep(
     save_tvar_history: bool = False,
     calibration_transition_names: list | None = None,
     timestep_idx: int = 0,
+    total_mixing_exposure=None,
 ) -> Tuple[dict, dict, dict]:
     """
     Advance the model one dt-sized timestep.
@@ -515,6 +554,11 @@ def generic_advance_timestep(
         Used by 'scheduled_exact' transitions, which apply their full
         scheduled count only on the first timestep of each day (mirroring
         ScheduledTransferVariable in generic_model.py) and 0 otherwise.
+    total_mixing_exposure : Tensor | None
+        Metapopulation mixing exposure for the current day, from
+        `compute_daily_mixing_exposure`. When None, travel transitions
+        recompute it from the current state -- correct only at
+        `timesteps_per_day = 1`.
 
     Returns
     -------
@@ -544,7 +588,7 @@ def generic_advance_timestep(
         for tname in gc.members:
             tc = tc_by_name[tname]
             template = rate_registry[tc.rate_template]
-            rc = _build_torch_rate_config(tc, precomputed)
+            rc = _build_torch_rate_config(tc, precomputed, total_mixing_exposure)
             rates[tname] = template.torch_rate(state_dict, params_dict, rc)
 
         # All members share the same origin
@@ -582,7 +626,7 @@ def generic_advance_timestep(
             )
             continue
         template = rate_registry[tc.rate_template]
-        rc = _build_torch_rate_config(tc, precomputed)
+        rc = _build_torch_rate_config(tc, precomputed, total_mixing_exposure)
         rate = template.torch_rate(state_dict, params_dict, rc)
         origin = state_dict[tc.origin]
         transition_amounts[tc.name] = origin * torch_approx_binom_probability_from_rate(
@@ -718,6 +762,13 @@ def generic_torch_simulate_full_history(
                 state_dict, params_dict, model_config, day, start_real_date
             )
 
+        # Metapopulation mixing exposure is a once-a-day quantity -- compute it
+        #   here, after the day's schedule and immunity updates, and reuse it
+        #   for every sub-timestep (matching the numpy path and flu_core).
+        total_mixing_exposure = compute_daily_mixing_exposure(
+            state_dict, params_dict, model_config, rate_registry, precomputed
+        )
+
         for timestep in range(timesteps_per_day):
             save_last = (timestep == timesteps_per_day - 1)
             state_dict, _, step_tvars = generic_advance_timestep(
@@ -729,6 +780,7 @@ def generic_torch_simulate_full_history(
                 dt,
                 save_tvar_history=save_last,
                 timestep_idx=timestep,
+                total_mixing_exposure=total_mixing_exposure,
             )
             if save_last:
                 for tname, val in step_tvars.items():
@@ -801,6 +853,13 @@ def generic_torch_simulate_calibration_target(
                 state_dict, params_dict, model_config, day, start_real_date
             )
 
+        # Metapopulation mixing exposure is a once-a-day quantity -- compute it
+        #   here, after the day's schedule and immunity updates, and reuse it
+        #   for every sub-timestep (matching the numpy path and flu_core).
+        total_mixing_exposure = compute_daily_mixing_exposure(
+            state_dict, params_dict, model_config, rate_registry, precomputed
+        )
+
         day_tv_accum: dict = {t: None for t in calibration_transition_names}
         for timestep in range(timesteps_per_day):
             state_dict, cal_targets, _ = generic_advance_timestep(
@@ -813,6 +872,7 @@ def generic_torch_simulate_calibration_target(
                 save_calibration_targets=bool(calibration_transition_names),
                 calibration_transition_names=calibration_transition_names,
                 timestep_idx=timestep,
+                total_mixing_exposure=total_mixing_exposure,
             )
             for tname in calibration_transition_names:
                 val = cal_targets[tname]
