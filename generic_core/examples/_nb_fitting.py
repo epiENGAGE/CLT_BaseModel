@@ -1772,11 +1772,19 @@ def _fitting_build_request(
                     "mode": _t.mode,
                     "weight": _t.weight,
                     "observed": (
-                        [None if (isinstance(_v, float) and np.isnan(_v)) else _v for _v in _t.observed]
+                        [
+                            None if (isinstance(_v, float) and np.isnan(_v))
+                            else _v.item() if isinstance(_v, np.generic) else _v
+                            for _v in _t.observed
+                        ]
                         if isinstance(_t.observed, np.ndarray) else _t.observed
                     ),
                     "point_weights": (
-                        [None if (isinstance(_v, float) and np.isnan(_v)) else _v for _v in _t.point_weights]
+                        [
+                            None if (isinstance(_v, float) and np.isnan(_v))
+                            else _v.item() if isinstance(_v, np.generic) else _v
+                            for _v in _t.point_weights
+                        ]
                         if isinstance(_t.point_weights, np.ndarray) else _t.point_weights
                     ),
                     "label": _t.label,
