@@ -1452,7 +1452,8 @@ def _fitting_obs_parse(
                 _entry = {"value": float(_row["value"])}
                 for _col in ("age", "risk", "subpopulation"):
                     if _col in _df.columns and pd.notna(_row.get(_col)):
-                        _entry[_col] = _row[_col]
+                        _val = _row[_col]
+                        _entry[_col] = _val.item() if isinstance(_val, np.generic) else _val
                 _rows.append(_entry)
             fit_obs_arrays[_k] = _rows
             fit_obs_n_days[_k] = 0
