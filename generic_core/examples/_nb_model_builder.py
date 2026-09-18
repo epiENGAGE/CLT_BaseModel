@@ -1241,14 +1241,32 @@ def _schedule_and_immunity_ui(
         label="Include vaccine-induced immunity metric (MV)",
         value="MV" in _epi_names,
     )
+    def _saved_scalar_matrix(_name, _default):
+        # Only trust the loaded config's value when it's actually a 1×1
+        # matrix (an A=1 model) -- an A>1 config's matrix is the wrong shape
+        # for this scalar box and should fall back to the default instead.
+        _v = _saved_params.get(_name)
+        if isinstance(_v, list) and len(_v) == 1 and isinstance(_v[0], list) and len(_v[0]) == 1:
+            try:
+                return float(_v[0][0])
+            except (TypeError, ValueError):
+                pass
+        return _default
+
     total_contact_input = mo.ui.number(
-        start=0.0, stop=100.0, step=None, value=1.0, label="Total contact matrix value",
+        start=0.0, stop=100.0, step=None,
+        value=_saved_scalar_matrix("total_contact_matrix", 1.0),
+        label="Total contact matrix value",
     )
     school_contact_input = mo.ui.number(
-        start=0.0, stop=100.0, step=None, value=0.0, label="School contact subtraction",
+        start=0.0, stop=100.0, step=None,
+        value=_saved_scalar_matrix("school_contact_matrix", 0.0),
+        label="School contact subtraction",
     )
     work_contact_input = mo.ui.number(
-        start=0.0, stop=100.0, step=None, value=0.0, label="Work contact subtraction",
+        start=0.0, stop=100.0, step=None,
+        value=_saved_scalar_matrix("work_contact_matrix", 0.0),
+        label="Work contact subtraction",
     )
     mobility_input = mo.ui.number(
         start=0.0, stop=5.0, step=None, value=1.0, label="Mobility modifier",
@@ -2798,35 +2816,36 @@ def _build_config(
 
     # --- 3. CONTACT MATRIX PARAMS ---
     if uses_contact_matrix:
-        if _A == 1:
-            params_dict["total_contact_matrix"] = [[float(total_contact_input.value)]]
-            params_dict["school_contact_matrix"] = [[float(school_contact_input.value)]]
-            params_dict["work_contact_matrix"] = [[float(work_contact_input.value)]]
-        else:
-            # A > 1: a proper A×A contact matrix is required. Prefer the CSV,
-            # then an inline A×A list from the loaded config. Only fall back to a
-            # scalar 1×1 matrix as a last resort, and warn loudly because that is
-            # the wrong shape and will misbehave at run time.
-            _shared_fetched_check = (
-                fetched_contact_matrices.get("__shared__", {})
-                if fetched_matrices_scope == "shared" else {}
-            )
-            _per_subpop_fetched = fetched_matrices_scope == "per_subpop" and fetched_contact_matrices
-            for _label, _matrix_attr, _scalar_input in (
-                ("total", "total_contact_matrix", total_contact_input),
-                ("school", "school_contact_matrix", school_contact_input),
-                ("work", "work_contact_matrix", work_contact_input),
-            ):
-                _loaded_mat = getattr(loaded_schedule_dfs, _matrix_attr)
-                if _matrix_attr in _shared_fetched_check or _per_subpop_fetched:
-                    pass  # fetched in Population & Geography tab — applied below
-                elif _loaded_mat is not None:
-                    params_dict[_matrix_attr] = _loaded_mat
-                elif isinstance(params_dict.get(_matrix_attr), list) and \
-                        len(params_dict[_matrix_attr]) == _A:
-                    pass  # valid inline A×A matrix from loaded config — keep it
-                else:
-                    params_dict[_matrix_attr] = [[float(_scalar_input.value)]]
+        # Same fallback chain for every A (including A == 1): prefer matrices
+        # fetched in the Population & Geography tab, then a CSV, then a valid
+        # A×A inline matrix already carried in params_dict (i.e. from the
+        # loaded config -- this is what makes re-importing/re-exporting an
+        # A=1 config round-trip its real contact matrix instead of always
+        # reverting to the scalar boxes' own default). Only fall back to the
+        # scalar UI inputs as a last resort; for A > 1 that's the wrong shape
+        # and warned about loudly, for A == 1 a 1×1 scalar is the correct
+        # shape so no warning is needed.
+        _shared_fetched_check = (
+            fetched_contact_matrices.get("__shared__", {})
+            if fetched_matrices_scope == "shared" else {}
+        )
+        _per_subpop_fetched = fetched_matrices_scope == "per_subpop" and fetched_contact_matrices
+        for _label, _matrix_attr, _scalar_input in (
+            ("total", "total_contact_matrix", total_contact_input),
+            ("school", "school_contact_matrix", school_contact_input),
+            ("work", "work_contact_matrix", work_contact_input),
+        ):
+            _loaded_mat = getattr(loaded_schedule_dfs, _matrix_attr)
+            if _matrix_attr in _shared_fetched_check or _per_subpop_fetched:
+                pass  # fetched in Population & Geography tab — applied below
+            elif _loaded_mat is not None:
+                params_dict[_matrix_attr] = _loaded_mat
+            elif isinstance(params_dict.get(_matrix_attr), list) and \
+                    len(params_dict[_matrix_attr]) == _A:
+                pass  # valid inline A×A matrix from loaded config — keep it
+            else:
+                params_dict[_matrix_attr] = [[float(_scalar_input.value)]]
+                if _A > 1:
                     _config_warnings.append(
                         f"{_label.capitalize()} contact matrix: no {_A}×{_A} CSV or "
                         f"inline matrix provided for {_A} age groups; falling back to a "

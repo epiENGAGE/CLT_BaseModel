@@ -51,7 +51,8 @@ def _output_dir(output_dir_input, Path):
 @app.cell
 def _tab_header_display(
     main_tab, output_dir_input, mo,
-    shared_import_upload, shared_import_upload_note, shared_import_type_sels,
+    shared_import_upload, shared_import_upload_note, shared_import_rows,
+    shared_import_dupe_warning,
     shared_import_apply_btn, shared_import_apply_note,
 ):
     mo.vstack([
@@ -61,8 +62,9 @@ def _tab_header_display(
             "Import config files": mo.vstack([
                 shared_import_upload,
                 shared_import_upload_note,
-                mo.vstack(list(shared_import_type_sels)) if len(shared_import_type_sels) else mo.md(""),
-                shared_import_apply_btn if len(shared_import_type_sels) else mo.md(""),
+                mo.vstack(shared_import_rows) if shared_import_rows else mo.md(""),
+                shared_import_dupe_warning,
+                shared_import_apply_btn if shared_import_rows else mo.md(""),
                 shared_import_apply_note,
             ]),
         }),

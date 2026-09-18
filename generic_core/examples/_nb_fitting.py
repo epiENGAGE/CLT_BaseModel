@@ -2099,7 +2099,7 @@ def _fitting_load_uploaded(fit_upload_result, set_fit_result_state, fit_result_f
 def _run_fitting(
     fit_run_button, fit_obs_arrays, fit_obs_n_days,
     get_target_slots,
-    fit_target_vars, fit_target_mode, fit_params_multiselect,
+    fit_target_vars, fit_params_multiselect,
     fit_targets, fit_config_obj, fit_compartment_init, fit_run_kwargs,
     fit_run_config_signature, set_fit_result_state,
     config_dict, compartments, is_metapop, loaded_schedule_dfs,
@@ -2129,7 +2129,11 @@ def _run_fitting(
             not list(fit_params_multiselect.value),
             mo.callout(mo.md("**No parameters to fit.** Select parameters above."), kind="warn"),
         )
-        _ts_days = [fit_obs_n_days.get(_k, 0) for _k in _slots if fit_target_mode.value[_k] == "ts"]
+        _ts_days = [
+            fit_obs_n_days.get(_k, 0)
+            for _pos, _k in enumerate(_slots)
+            if fit_targets[_pos].mode == "ts"
+        ]
         mo.stop(
             len(set(_ts_days)) > 1,
             mo.callout(
@@ -2138,7 +2142,7 @@ def _run_fitting(
                     + ", ".join(
                         f"Target {_pos + 1}: {fit_obs_n_days.get(_k, 0)} days"
                         for _pos, _k in enumerate(_slots)
-                        if fit_target_mode.value[_k] == "ts"
+                        if fit_targets[_pos].mode == "ts"
                     )
                     + ". All timeseries targets must have the same number of observations."
                 ),

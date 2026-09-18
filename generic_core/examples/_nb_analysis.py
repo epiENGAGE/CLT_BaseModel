@@ -2265,7 +2265,8 @@ def _analysis_autosave(analysis_results, output_dir, json, np):
 
 
 @app.cell
-def _analysis_export_full_button(mo):
+def _analysis_export_full_button(main_tab, mo):
+    mo.stop(main_tab.value != "Analysis", None)
     analysis_export_full_button = mo.ui.run_button(label="Export full results (Parquet)")
     mo.vstack([
         mo.md(
@@ -2279,8 +2280,7 @@ def _analysis_export_full_button(mo):
             "`results`/`results_full` schema the Export tab's "
             "`run_simulation.py` produces, so either source opens in the "
             "Results Explorer notebook (`results_explorer_notebook.py`) "
-            "without conversion — Parquet loads there far faster than "
-            "SQLite and takes a fraction of the disk space.*"
+            "without conversion.*"
         ),
         analysis_export_full_button,
     ])

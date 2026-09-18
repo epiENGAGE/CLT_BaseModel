@@ -916,7 +916,8 @@ def _output_dir(output_dir_input, Path):
 @app.cell
 def _tab_header_display(
     main_tab, output_dir_input, mo,
-    shared_import_upload, shared_import_upload_note, shared_import_type_sels,
+    shared_import_upload, shared_import_upload_note, shared_import_rows,
+    shared_import_dupe_warning,
     shared_import_apply_btn, shared_import_apply_note,
 ):
     mo.vstack([
@@ -926,8 +927,9 @@ def _tab_header_display(
             "Import config files": mo.vstack([
                 shared_import_upload,
                 shared_import_upload_note,
-                mo.vstack(list(shared_import_type_sels)) if len(shared_import_type_sels) else mo.md(""),
-                shared_import_apply_btn if len(shared_import_type_sels) else mo.md(""),
+                mo.vstack(shared_import_rows) if shared_import_rows else mo.md(""),
+                shared_import_dupe_warning,
+                shared_import_apply_btn if shared_import_rows else mo.md(""),
                 shared_import_apply_note,
             ]),
         }),
@@ -2765,14 +2767,32 @@ def _schedule_and_immunity_ui(
         label="Include vaccine-induced immunity metric (MV)",
         value="MV" in _epi_names,
     )
+    def _saved_scalar_matrix(_name, _default):
+        # Only trust the loaded config's value when it's actually a 1×1
+        # matrix (an A=1 model) -- an A>1 config's matrix is the wrong shape
+        # for this scalar box and should fall back to the default instead.
+        _v = _saved_params.get(_name)
+        if isinstance(_v, list) and len(_v) == 1 and isinstance(_v[0], list) and len(_v[0]) == 1:
+            try:
+                return float(_v[0][0])
+            except (TypeError, ValueError):
+                pass
+        return _default
+
     total_contact_input = mo.ui.number(
-        start=0.0, stop=100.0, step=None, value=1.0, label="Total contact matrix value",
+        start=0.0, stop=100.0, step=None,
+        value=_saved_scalar_matrix("total_contact_matrix", 1.0),
+        label="Total contact matrix value",
     )
     school_contact_input = mo.ui.number(
-        start=0.0, stop=100.0, step=None, value=0.0, label="School contact subtraction",
+        start=0.0, stop=100.0, step=None,
+        value=_saved_scalar_matrix("school_contact_matrix", 0.0),
+        label="School contact subtraction",
     )
     work_contact_input = mo.ui.number(
-        start=0.0, stop=100.0, step=None, value=0.0, label="Work contact subtraction",
+        start=0.0, stop=100.0, step=None,
+        value=_saved_scalar_matrix("work_contact_matrix", 0.0),
+        label="Work contact subtraction",
     )
     mobility_input = mo.ui.number(
         start=0.0, stop=5.0, step=None, value=1.0, label="Mobility modifier",
@@ -4322,35 +4342,36 @@ def _build_config(
 
     # --- 3. CONTACT MATRIX PARAMS ---
     if uses_contact_matrix:
-        if _A == 1:
-            params_dict["total_contact_matrix"] = [[float(total_contact_input.value)]]
-            params_dict["school_contact_matrix"] = [[float(school_contact_input.value)]]
-            params_dict["work_contact_matrix"] = [[float(work_contact_input.value)]]
-        else:
-            # A > 1: a proper A×A contact matrix is required. Prefer the CSV,
-            # then an inline A×A list from the loaded config. Only fall back to a
-            # scalar 1×1 matrix as a last resort, and warn loudly because that is
-            # the wrong shape and will misbehave at run time.
-            _shared_fetched_check = (
-                fetched_contact_matrices.get("__shared__", {})
-                if fetched_matrices_scope == "shared" else {}
-            )
-            _per_subpop_fetched = fetched_matrices_scope == "per_subpop" and fetched_contact_matrices
-            for _label, _matrix_attr, _scalar_input in (
-                ("total", "total_contact_matrix", total_contact_input),
-                ("school", "school_contact_matrix", school_contact_input),
-                ("work", "work_contact_matrix", work_contact_input),
-            ):
-                _loaded_mat = getattr(loaded_schedule_dfs, _matrix_attr)
-                if _matrix_attr in _shared_fetched_check or _per_subpop_fetched:
-                    pass  # fetched in Population & Geography tab — applied below
-                elif _loaded_mat is not None:
-                    params_dict[_matrix_attr] = _loaded_mat
-                elif isinstance(params_dict.get(_matrix_attr), list) and \
-                        len(params_dict[_matrix_attr]) == _A:
-                    pass  # valid inline A×A matrix from loaded config — keep it
-                else:
-                    params_dict[_matrix_attr] = [[float(_scalar_input.value)]]
+        # Same fallback chain for every A (including A == 1): prefer matrices
+        # fetched in the Population & Geography tab, then a CSV, then a valid
+        # A×A inline matrix already carried in params_dict (i.e. from the
+        # loaded config -- this is what makes re-importing/re-exporting an
+        # A=1 config round-trip its real contact matrix instead of always
+        # reverting to the scalar boxes' own default). Only fall back to the
+        # scalar UI inputs as a last resort; for A > 1 that's the wrong shape
+        # and warned about loudly, for A == 1 a 1×1 scalar is the correct
+        # shape so no warning is needed.
+        _shared_fetched_check = (
+            fetched_contact_matrices.get("__shared__", {})
+            if fetched_matrices_scope == "shared" else {}
+        )
+        _per_subpop_fetched = fetched_matrices_scope == "per_subpop" and fetched_contact_matrices
+        for _label, _matrix_attr, _scalar_input in (
+            ("total", "total_contact_matrix", total_contact_input),
+            ("school", "school_contact_matrix", school_contact_input),
+            ("work", "work_contact_matrix", work_contact_input),
+        ):
+            _loaded_mat = getattr(loaded_schedule_dfs, _matrix_attr)
+            if _matrix_attr in _shared_fetched_check or _per_subpop_fetched:
+                pass  # fetched in Population & Geography tab — applied below
+            elif _loaded_mat is not None:
+                params_dict[_matrix_attr] = _loaded_mat
+            elif isinstance(params_dict.get(_matrix_attr), list) and \
+                    len(params_dict[_matrix_attr]) == _A:
+                pass  # valid inline A×A matrix from loaded config — keep it
+            else:
+                params_dict[_matrix_attr] = [[float(_scalar_input.value)]]
+                if _A > 1:
                     _config_warnings.append(
                         f"{_label.capitalize()} contact matrix: no {_A}×{_A} CSV or "
                         f"inline matrix provided for {_A} age groups; falling back to a "
@@ -7342,7 +7363,7 @@ def _fitting_load_uploaded(fit_upload_result, set_fit_result_state, fit_result_f
 def _run_fitting(
     fit_run_button, fit_obs_arrays, fit_obs_n_days,
     get_target_slots,
-    fit_target_vars, fit_target_mode, fit_params_multiselect,
+    fit_target_vars, fit_params_multiselect,
     fit_targets, fit_config_obj, fit_compartment_init, fit_run_kwargs,
     fit_run_config_signature, set_fit_result_state,
     config_dict, compartments, is_metapop, loaded_schedule_dfs,
@@ -7372,7 +7393,11 @@ def _run_fitting(
             not list(fit_params_multiselect.value),
             mo.callout(mo.md("**No parameters to fit.** Select parameters above."), kind="warn"),
         )
-        _ts_days = [fit_obs_n_days.get(_k, 0) for _k in _slots if fit_target_mode.value[_k] == "ts"]
+        _ts_days = [
+            fit_obs_n_days.get(_k, 0)
+            for _pos, _k in enumerate(_slots)
+            if fit_targets[_pos].mode == "ts"
+        ]
         mo.stop(
             len(set(_ts_days)) > 1,
             mo.callout(
@@ -7381,7 +7406,7 @@ def _run_fitting(
                     + ", ".join(
                         f"Target {_pos + 1}: {fit_obs_n_days.get(_k, 0)} days"
                         for _pos, _k in enumerate(_slots)
-                        if fit_target_mode.value[_k] == "ts"
+                        if fit_targets[_pos].mode == "ts"
                     )
                     + ". All timeseries targets must have the same number of observations."
                 ),
@@ -12383,7 +12408,8 @@ def _analysis_autosave(analysis_results, output_dir, json, np):
 
 
 @app.cell
-def _analysis_export_full_button(mo):
+def _analysis_export_full_button(main_tab, mo):
+    mo.stop(main_tab.value != "Analysis", None)
     analysis_export_full_button = mo.ui.run_button(label="Export full results (Parquet)")
     mo.vstack([
         mo.md(
@@ -12397,8 +12423,7 @@ def _analysis_export_full_button(mo):
             "`results`/`results_full` schema the Export tab's "
             "`run_simulation.py` produces, so either source opens in the "
             "Results Explorer notebook (`results_explorer_notebook.py`) "
-            "without conversion — Parquet loads there far faster than "
-            "SQLite and takes a fraction of the disk space.*"
+            "without conversion.*"
         ),
         analysis_export_full_button,
     ])
@@ -13298,32 +13323,76 @@ def _shared_import_state(mo):
     # one-shot "apply, don't keep re-applying on every unrelated rerun"
     # semantics (same as each tab's own upload widget).
     get_shared_imports, set_shared_imports = mo.state({})
-    return get_shared_imports, set_shared_imports
+    # Staged files awaiting Apply: [{"name": str, "contents": bytes, "type":
+    # str}, ...]. Built additively across possibly-many browse actions (see
+    # _shared_import_upload_ui) rather than read straight off the file
+    # widget's .value, since re-opening the browser dialog replaces .value
+    # wholesale -- without this, picking files from a second folder would
+    # silently drop whatever was picked from the first.
+    get_shared_import_files, set_shared_import_files = mo.state([])
+    return (
+        get_shared_imports, set_shared_imports,
+        get_shared_import_files, set_shared_import_files,
+    )
 
 
 @app.cell
-def _shared_import_ui(mo):
+def _shared_import_upload_ui(
+    mo, detect_config_type, get_shared_import_files, set_shared_import_files,
+):
+    # Runs only on a genuine file-selection event from the browser (mo.ui.file
+    # calls on_change from its own _update(), never from an unrelated cell
+    # rerun) -- same reasoning as the Fitting tab's bulk CSV uploader. That's
+    # what makes this additive: each browse only ever hands us the files
+    # picked in that one dialog, so merging them into the staged list (rather
+    # than replacing it) is what lets the user pick files from separate
+    # folders across more than one browse.
+    def _on_upload(_files):
+        _files = _files or ()
+        if not _files:
+            return
+        def _update(_cur):
+            _new = list(_cur)
+            _seen = {(_e["name"], _e["contents"]) for _e in _new}
+            for _f in _files:
+                _key = (_f.name, _f.contents)
+                if _key in _seen:
+                    continue
+                _new.append({
+                    "name": _f.name,
+                    "contents": _f.contents,
+                    "type": detect_config_type(_f.name),
+                })
+                _seen.add(_key)
+            return _new
+        set_shared_import_files(_update)
+
     shared_import_upload = mo.ui.file(
         multiple=True,
         filetypes=[".json"],
         label="Import config files",
+        on_change=_on_upload,
     )
     shared_import_upload_note = mo.md(
         "Drop any combination of a model config, fit config, fitted "
-        "params / fit result, and scenario config. Once you confirm each "
-        "file's type below, click Apply to import it."
+        "params / fit result, and scenario config -- browsing again adds "
+        "to the files below rather than replacing them, so files from "
+        "separate folders can be picked one browse at a time. Once you "
+        "confirm each file's type below, click Apply to import it."
     )
     return shared_import_upload, shared_import_upload_note
 
 
 @app.cell
-def _shared_import_type_dropdowns(mo, shared_import_upload, detect_config_type):
-    # One dropdown per uploaded file, pre-set to a filename-based guess (see
-    # detect_config_type) but always user-confirmable before Apply -- the
-    # guess is just a time-saver, never applied blind. Rebuilt fresh whenever
-    # the file selection changes, same as the Fitting tab's per-slot target
-    # widgets; there's nothing here worth persisting past a single import.
-    _files = shared_import_upload.value or ()
+def _shared_import_rows_ui(mo, get_shared_import_files, set_shared_import_files):
+    # One dropdown + remove button per staged file. The dropdown is pre-set
+    # to a filename-based guess (see detect_config_type) but always
+    # user-confirmable before Apply -- the guess is just a time-saver, never
+    # applied blind. Selecting a type writes straight into the staged-files
+    # state (rather than being read back out by the Apply cell via a
+    # separate array), so a file's chosen type survives later browses/
+    # removals instead of resetting to the guess every time this cell
+    # rebuilds.
     _type_opts = {
         "Model config": "model_config",
         "Fit config": "fit_config",
@@ -13332,15 +13401,68 @@ def _shared_import_type_dropdowns(mo, shared_import_upload, detect_config_type):
         "Skip (ignore this file)": "skip",
     }
     _label_by_value = {v: k for k, v in _type_opts.items()}
+    _singular_types = {"model_config", "fit_config", "fitted_params", "scenario_config"}
+
+    def _set_type(_idx):
+        def _on_change(_val):
+            def _update(_cur):
+                if _idx >= len(_cur):
+                    return _cur
+                _new = list(_cur)
+                _new[_idx] = {**_new[_idx], "type": _val}
+                return _new
+            set_shared_import_files(_update)
+        return _on_change
+
+    def _remove(_idx):
+        def _on_click(_):
+            def _update(_cur):
+                return _cur[:_idx] + _cur[_idx + 1:]
+            set_shared_import_files(_update)
+        return _on_click
+
+    _files = get_shared_import_files()
     shared_import_type_sels = mo.ui.array([
         mo.ui.dropdown(
             options=_type_opts,
-            value=_label_by_value.get(detect_config_type(_f.name), "Skip (ignore this file)"),
-            label=_f.name,
+            value=_label_by_value.get(_e["type"], "Skip (ignore this file)"),
+            label=_e["name"],
+            on_change=_set_type(_i),
         )
-        for _f in _files
+        for _i, _e in enumerate(_files)
     ])
-    return (shared_import_type_sels,)
+    shared_import_remove_btns = [
+        mo.ui.button(label="✕", tooltip=f"Remove {_e['name']}", on_click=_remove(_i))
+        for _i, _e in enumerate(_files)
+    ]
+    shared_import_rows = [
+        mo.hstack([_dd, _btn], justify="start", align="center", gap=1)
+        for _dd, _btn in zip(shared_import_type_sels, shared_import_remove_btns)
+    ]
+
+    # Guard against e.g. two Fit config files being staged at once -- Apply
+    # only ever applies one file per type (see _shared_import_apply), so
+    # surface the conflict here before the user clicks it.
+    _type_counts = {}
+    for _e in _files:
+        if _e["type"] in _singular_types:
+            _type_counts[_e["type"]] = _type_counts.get(_e["type"], 0) + 1
+    _dupe_labels = [_label_by_value[_t] for _t, _c in _type_counts.items() if _c > 1]
+    shared_import_dupe_warning = (
+        mo.callout(
+            mo.md(
+                "More than one file is set to: " + ", ".join(_dupe_labels) + ". "
+                "Only one file per type is applied -- change the type on all "
+                "but one (or remove it) before clicking Apply."
+            ),
+            kind="warn",
+        )
+        if _dupe_labels else mo.md("")
+    )
+    return (
+        shared_import_type_sels, shared_import_remove_btns,
+        shared_import_rows, shared_import_dupe_warning,
+    )
 
 
 @app.cell
@@ -13352,7 +13474,8 @@ def _shared_import_apply_button(mo):
 @app.cell
 def _shared_import_apply(
     mo, json,
-    shared_import_apply_btn, shared_import_upload, shared_import_type_sels,
+    shared_import_apply_btn,
+    get_shared_import_files, set_shared_import_files,
     get_shared_imports, set_shared_imports,
     parse_fit_config_targets, partition_scenario_state,
     set_target_slots, set_restored_target_data, set_restore_error, set_restored_config,
@@ -13361,21 +13484,46 @@ def _shared_import_apply(
     set_scenario_dose_state, set_scenario_subpop_state, set_scenario_restore_error,
     set_config_path,
 ):
+    _TYPE_LABELS = {
+        "model_config": "Model config",
+        "fit_config": "Fit config",
+        "fitted_params": "Fitted params / fit result",
+        "scenario_config": "Scenario config",
+    }
     shared_import_apply_note = mo.md("")
     if shared_import_apply_btn.value:
-        _files = shared_import_upload.value or ()
+        _entries = get_shared_import_files()
         _bytes_by_type = dict(get_shared_imports())
         _applied = []
         _errors = []
+        # Entries that stay staged after this click -- only ones that
+        # couldn't be applied (parse error, or a same-type conflict), so the
+        # user can fix and re-apply without having to re-browse everything.
+        _kept = []
 
-        for _f, _sel in zip(_files, shared_import_type_sels):
-            _kind = _sel.value
+        _type_counts = {}
+        for _e in _entries:
+            if _e["type"] in _TYPE_LABELS:
+                _type_counts[_e["type"]] = _type_counts.get(_e["type"], 0) + 1
+        _dupe_types = {t for t, c in _type_counts.items() if c > 1}
+
+        for _e in _entries:
+            _kind = _e["type"]
+            _name = _e["name"]
             if _kind == "skip":
                 continue
+            if _kind in _dupe_types:
+                _errors.append(
+                    f"**{_name}**: multiple {_TYPE_LABELS[_kind]} files staged "
+                    "-- resolve before applying"
+                )
+                _kept.append(_e)
+                continue
             try:
-                _raw = json.loads(_f.contents.decode("utf-8"))
+                _raw = json.loads(_e["contents"].decode("utf-8"))
             except Exception as _exc:
-                _errors.append(f"**{_f.name}**: JSON parse error: {_exc}")
+                _errors.append(f"**{_name}**: JSON parse error: {_exc}")
+                _kept.append(_e)
                 continue
 
             if _kind == "model_config":
@@ -13386,13 +13534,14 @@ def _shared_import_apply(
                 # path text box are empty, and the path box defaults to the
                 # bundled example config (non-empty) -- so without clearing
                 # it here, the import would silently never take effect.
-                _bytes_by_type["model_config"] = {"name": _f.name, "contents": _f.contents}
+                _bytes_by_type["model_config"] = {"name": _name, "contents": _e["contents"]}
                 set_config_path("")
             elif _kind == "fit_config":
                 try:
                     _new_slots, _new_data = parse_fit_config_targets(_raw)
                 except Exception as _exc:
-                    _errors.append(f"**{_f.name}**: {_exc}")
+                    _errors.append(f"**{_name}**: {_exc}")
+                    _kept.append(_e)
                     continue
                 set_target_slots(_new_slots)
                 set_restored_target_data(_new_data)
@@ -13406,12 +13555,14 @@ def _shared_import_apply(
                     _for_fit = _raw if "best_params" in _raw else {"best_params": _raw}
                     _loaded = fit_result_from_dict(_for_fit)
                 except Exception as _exc:
-                    _errors.append(f"**{_f.name}**: {_exc}")
+                    _errors.append(f"**{_name}**: {_exc}")
+                    _kept.append(_e)
                     continue
                 set_fit_result_state({"result": _loaded, "signature": None, "source": "uploaded"})
             elif _kind == "scenario_config":
                 if not isinstance(_raw, dict):
-                    _errors.append(f"**{_f.name}**: expected a JSON object")
+                    _errors.append(f"**{_name}**: expected a JSON object")
+                    _kept.append(_e)
                     continue
                 _groups = partition_scenario_state(_raw)
                 set_scenario_controls_state(_groups["controls"])
@@ -13420,9 +13571,10 @@ def _shared_import_apply(
                 set_scenario_subpop_state(_groups["subpop"])
                 set_scenario_restore_error(None)
 
-            _applied.append(f"**{_f.name}** → {_kind}")
+            _applied.append(f"**{_name}** → {_TYPE_LABELS.get(_kind, _kind)}")
 
         set_shared_imports(_bytes_by_type)
+        set_shared_import_files(_kept)
 
         _parts = []
         if _applied:
@@ -13430,7 +13582,7 @@ def _shared_import_apply(
         if _errors:
             _parts.append("Failed: " + "; ".join(_errors))
         if not _applied and not _errors:
-            _parts.append("Nothing to import -- set a type per file above (or upload files first).")
+            _parts.append("Nothing to import -- set a type per file above (or add files first).")
         shared_import_apply_note = mo.callout(
             mo.md(" ".join(_parts)),
             kind="warn" if _errors else ("success" if _applied else "info"),
