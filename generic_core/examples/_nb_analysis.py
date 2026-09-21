@@ -2290,7 +2290,7 @@ def _analysis_export_full_button(main_tab, mo):
 @app.cell
 def _analysis_export_full(
     analysis_export_full_button, analysis_results, output_dir, config_dict,
-    duckdb, np, pd, mo, rex,
+    duckdb, np, pd, mo, results_io,
 ):
     mo.stop(not analysis_export_full_button.value)
     mo.stop(
@@ -2336,7 +2336,7 @@ def _analysis_export_full(
     _stage_path = output_dir / ".analysis_results_full_stage.duckdb"
     _stage_path.unlink(missing_ok=True)
     _con = duckdb.connect(str(_stage_path))
-    rex.create_results_tables(_con)
+    results_io.create_results_tables(_con)
 
     with mo.status.spinner("Writing full results…"):
         for _scen, _reps in analysis_results["scenarios"].items():
@@ -2404,7 +2404,7 @@ def _analysis_export_full(
             "param_set_indices": _psets,
         }
 
-        rex.write_results_parquet(_con, _out_dir, meta=_meta)
+        results_io.write_results_parquet(_con, _out_dir, meta=_meta)
         _con.close()
     _stage_path.unlink(missing_ok=True)
 

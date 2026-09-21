@@ -9,6 +9,7 @@ generic_core/fitting.py and by exported standalone scripts).
 
 from __future__ import annotations
 
+import io
 import json
 import warnings
 from pathlib import Path
@@ -160,6 +161,106 @@ def config_schedule_df_attributes(config) -> set[str]:
         for _k, _v in (_s.get("schedule_config", {}) or {}).items():
             if _k.endswith("df_attribute") and isinstance(_v, str):
                 _out.add(_v)
+    return _out
+
+
+# input_files key -> schedule df attribute, for the base (single-population)
+# schedules. Additional scheduled_exact schedules use "<slug>_schedule_csv" ->
+# "<slug>_df" and are handled separately in input_file_schedule_paths.
+_INPUT_FILE_SCHEDULE_KEYS = {
+    "absolute_humidity_csv": "absolute_humidity_df",
+    "school_work_calendar_csv": "school_work_calendar_df",
+    "mobility_csv": "mobility_df",
+    "vaccines_csv": "daily_vaccines_df",
+}
+
+
+def _resolve_input_file(folder: str, name: str, search_roots) -> Path | None:
+    """Locate an ``input_files`` entry on disk.
+
+    Mirrors the notebook's ``resolve_input_path`` (``name`` joined onto
+    ``folder``; an absolute ``name`` overrides it). A relative result is tried
+    against each of ``search_roots`` in order, since the notebook resolves it
+    against its own working directory (normally the repo root) while a script
+    may be run from anywhere. Returns None if no candidate exists."""
+    _rel = Path(folder.strip()) / name.strip() if folder and folder.strip() else Path(name.strip())
+    if _rel.is_absolute():
+        return _rel if _rel.is_file() else None
+    for _root in search_roots:
+        _cand = Path(_root) / _rel
+        if _cand.is_file():
+            return _cand
+    return None
+
+
+def input_file_schedule_paths(config, search_roots) -> dict:
+    """``{df_attribute: (csv_entry, Path | None)}`` for every schedule CSV named
+    in ``config["input_files"]`` — the Path is None when the file can't be
+    found under any of ``search_roots``."""
+    _inf = (config or {}).get("input_files", {}) or {}
+    _folder = _inf.get("input_folder", "") or ""
+    _out = {}
+    for _key, _name in _inf.items():
+        if not isinstance(_name, str) or not _name.strip():
+            continue
+        if _key in _INPUT_FILE_SCHEDULE_KEYS:
+            _attr = _INPUT_FILE_SCHEDULE_KEYS[_key]
+        elif _key.endswith("_schedule_csv"):
+            _attr = _key[: -len("_schedule_csv")] + "_df"
+        else:
+            continue
+        _out[_attr] = (_name, _resolve_input_file(_folder, _name, search_roots))
+    return _out
+
+
+def load_schedule_csv_texts(config, snapshot_path=None, search_roots=(), verbose=True) -> dict:
+    """``{df_attribute: csv_text}`` of the base schedule CSVs for a standalone
+    run of ``config``.
+
+    The CSV files named in ``config["input_files"]`` are the source of truth
+    and are read fresh from disk. ``snapshot_path`` (the Export tab's
+    ``schedules.json``) is only a fallback, for a schedule whose file can't be
+    found (e.g. the script was copied to another machine) or one the config
+    doesn't name a file for. Whenever both exist and disagree, the file wins
+    and a notice says the snapshot is stale. The snapshot's reserved
+    ``"__scenario_overrides__"`` entry (per-scenario replacement CSVs, which
+    live nowhere else) is passed through unchanged.
+    """
+    _snapshot = {}
+    if snapshot_path is not None:
+        _sp = Path(snapshot_path)
+        if _sp.is_file():
+            with open(_sp) as _f:
+                _snapshot = json.load(_f) or {}
+    _snap_name = Path(snapshot_path).name if snapshot_path is not None else "the exported snapshot"
+    _say = print if verbose else (lambda *_a, **_k: None)
+    _out = dict(_snapshot)
+    for _attr, (_name, _path) in sorted(input_file_schedule_paths(config, search_roots).items()):
+        if _path is None:
+            if _attr in _snapshot:
+                _say(
+                    f"Warning: schedule CSV '{_name}' ({_attr}) not found — using the copy "
+                    f"in {_snap_name} from the last notebook export, which may be "
+                    "stale."
+                )
+            else:
+                _say(
+                    f"Warning: schedule CSV '{_name}' ({_attr}) not found and no exported copy "
+                    "exists — falling back to a flat constant schedule."
+                )
+            continue
+        _text = _path.read_text()
+        if _attr in _snapshot:
+            try:
+                _same = pd.read_csv(io.StringIO(_snapshot[_attr])).equals(pd.read_csv(io.StringIO(_text)))
+            except Exception:
+                _same = False
+            if not _same:
+                _say(
+                    f"Note: {_snap_name} has an out-of-date copy of {_attr}; "
+                    f"using the current file {_path}."
+                )
+        _out[_attr] = _text
     return _out
 
 

@@ -60,7 +60,9 @@ from generic_core.generic_model import (
     ConfigDrivenSubpopModel, build_state_from_config, build_params_from_config,
 )
 from generic_core.generic_metapop import ConfigDrivenMetapopModel
-from generic_core.model_factory import build_compartment_init, scale_dose_schedule_df
+from generic_core.model_factory import (
+    build_compartment_init, scale_dose_schedule_df, load_schedule_csv_texts,
+)
 from generic_core.fitting import (
     _scale_compartment_init, _inject_tv_transmission, _tv_knot_days,
     build_transmission_multiplier_array, prepare_param_sets,
@@ -167,16 +169,25 @@ def _build_tvm_df(base_inputs, num_days, start_date=START_DATE):
     return pd.DataFrame({"date": dates, "transmission_multiplier": m_full})
 
 
-def _load_schedule_csvs(schedules_file: str = SCHEDULES_FILE):
-    if not schedules_file:
-        return {}
-    p = _HERE / schedules_file
-    if not p.exists():
-        print(f"Warning: {schedules_file} not found next to counterfactual_generic.py -- "
-              "falling back to flat constant schedules (no seasonal forcing, no vaccination).")
-        return {}
-    with open(p) as f:
-        return json.load(f)
+_SCHEDULE_CSVS_CACHE = {}
+
+
+def _load_schedule_csvs(schedules_file: str = SCHEDULES_FILE,
+                        model_config_file: str = MODEL_CONFIG_FILE):
+    """{df_attribute: csv_text} of the base schedules. The CSVs named in the
+    model config's input_files are read fresh from disk; `schedules_file` (the
+    notebook's exported snapshot) only fills in files that can't be found (see
+    generic_core.model_factory.load_schedule_csv_texts). Cached per process."""
+    key = (schedules_file, model_config_file)
+    if key not in _SCHEDULE_CSVS_CACHE:
+        with open(_HERE / model_config_file) as f:
+            config = json.load(f)
+        _SCHEDULE_CSVS_CACHE[key] = load_schedule_csv_texts(
+            config,
+            snapshot_path=(_HERE / schedules_file) if schedules_file else None,
+            search_roots=[Path.cwd(), _HERE, *_HERE.parents],
+        )
+    return _SCHEDULE_CSVS_CACHE[key]
 
 
 def _build_schedules(base_inputs, start_date, num_days, dose_mult=None):

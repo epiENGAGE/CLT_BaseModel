@@ -34,3 +34,4 @@ generic_core/examples/MA_vax/presentation_2026_08_24/
 generic_core/examples/MA_vax/MA_scenario_config_VE_hosp_only.json
 generic_core/examples/MA_vax/analysis/VE hosp expected vs simulated.xlsx
 .tmp/
+temp/

@@ -15,6 +15,8 @@ dependencies = [
     "corner>=2.2.3",
     "emcee>=3.1.6",
     "pyabc>=0.12.18",
+    "sciris>=3.2.4",
+    "torch>=2.9.1",
     "xarray>=2026.4.0",
     # Pygments 2.20.0 made HtmlFormatter escape its `filename` option
     # (`html.escape(options.get('filename', ''))`). pymdown-extensions passes

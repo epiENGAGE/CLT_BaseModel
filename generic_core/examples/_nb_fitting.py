@@ -1886,21 +1886,12 @@ def _fitting_export_display(fit_run_config, mo, main_tab, json):
     Reads model_config.json + fit_config.json from this directory and writes
     fitted_params.json.
 
-    Location: this file must sit exactly two directory levels below the
-    repo root that contains generic_core/ — e.g. <repo_root>/some_folder/
-    some_subfolder/run_fitting.py — since it adds
-    Path(__file__).parent.parent.parent to sys.path to import generic_core.
-    model_config.json and fit_config.json must sit alongside it in that
-    same directory.
-    If you move this file, update the sys.path.insert(...) line below:
-    count how many directories separate this file from the repo root
-    (the one containing generic_core/), then use that many + 1 .parent
-    calls from __file__ (equivalently, .parent calls on _HERE equal to
-    that count). Also make sure model_config.json / fit_config.json are
-    still next to this file.
+    Requirements: the CLT_BaseModel repo installed into the active Python
+    environment (from the repo root: pip install -e .), which makes
+    generic_core importable from anywhere -- so this file can live in any
+    folder. model_config.json and fit_config.json must sit alongside it.
     \"\"\"
 
-    import sys
     import json
     import io
     from pathlib import Path
@@ -1911,7 +1902,6 @@ def _fitting_export_display(fit_run_config, mo, main_tab, json):
     OUTPUT_FILE = "fitted_params.json"
 
     _HERE = Path(__file__).parent
-    sys.path.insert(0, str(_HERE.parent.parent))
 
     import numpy as np
     import pandas as pd

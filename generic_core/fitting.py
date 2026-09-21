@@ -239,6 +239,10 @@ def fit_result_to_dict(result: "FitResult") -> dict:
         "target_weights": result.target_weights,
         "target_modes": result.target_modes,
         "r2_threshold": result.r2_threshold,
+        # Explicit count of parameter sets in accepted_params — derived, but
+        # recorded so a saved file is self-describing without having to parse
+        # accepted_params (which sits alongside the much larger sim_trajectories).
+        "n_accepted": len(result.accepted_params),
         "n_ar_accepted": result.n_ar_accepted,
         "scale_groups": result.scale_groups,
         "log_params": result.log_params,
