@@ -1,4 +1,4 @@
-"""Turn results.db (written by run_simulations_MA_vax.py) into the
+"""Turn a results source (written by run_simulations_MA_vax.py) into the
 counterfactual vaccination-impact tables that counterfactual_notebook_generic.py
 loads via `cf.load_saved_tables`.
 
@@ -9,7 +9,10 @@ This is the missing link between two things already in this folder:
                                   runs every scenario in its SCENARIOS dict and
                                   writes per-replicate, per-subpop, per-age-group,
                                   per-risk-group daily compartment/transition
-                                  history to simulation_output/results.db.
+                                  history to simulation_output/ (a Hive-partitioned
+                                  Parquet directory by default, or a SQLite
+                                  results.db from an older run / the notebook's
+                                  Analysis tab SQLite export).
   counterfactual_notebook_generic.py -- displays Tables S.A.1-S.A.6 + the
                                   vaccine-efficacy check, but only ever reads
                                   already-computed CSVs from a results folder
@@ -19,8 +22,11 @@ This is the missing link between two things already in this folder:
 Unlike counterfactual_generic.py's own `save_all_tables` (which reimplements
 build_model/scenario-running against generic_core directly -- a second,
 independently-defined simulation pipeline), this script computes the exact
-same tables purely by reading results.db: the notebook-exported script is the
-only thing that ever runs a simulation. The pure numeric helpers that turn
+same tables purely by reading the results source: the notebook-exported
+script is the only thing that ever runs a simulation. Reading goes through
+`generic_core.results_io.load_source`, the same loader the results-explorer
+notebook uses, so this script works unchanged whether `--db` points at a
+Parquet directory or a SQLite `.db` file. The pure numeric helpers that turn
 already-simulated (reps, day, age) arrays into table rows (`averted_summary`,
 `_rate_ratio_col`, `_matched_cohort_ratio_col`, ...) are reused unchanged from
 MA_vax.counterfactual, same as counterfactual_generic.py does -- they don't
@@ -29,12 +35,12 @@ care which pipeline produced the arrays.
 Usage:
     cd generic_core/examples/MA_vax
     python run_simulations_MA_vax.py
-    python build_counterfactual_tables_from_db.py
+    python build_counterfactual_tables_from_db.py --db simulation_output/results_parquet
 
-Requires a results.db with a `results_full` table (per-subpop/age-group/
+Requires a results source with a `results_full` table (per-subpop/age-group/
 risk-group history -- added alongside the population-summed `results` table
 so per-age-group tables like S.A.2/S.A.3/S.A.5/S.A.6/VAX_CHECK are possible
-at all). Re-run run_simulations_MA_vax.py if results.db predates that table.
+at all). Re-run run_simulations_MA_vax.py if your source predates that table.
 
 Table S.A.6 additionally needs two scenarios beyond what the Model Builder
 notebook's Analysis tab exports on its own -- "Low VE + 70% coverage (all
@@ -64,7 +70,6 @@ import argparse
 import datetime
 import json
 import os
-import sqlite3
 import sys
 from pathlib import Path
 
@@ -81,9 +86,10 @@ from ma_vax_shared import (
 )
 
 import counterfactual_generic as cf  # table_S_A_4 (parameter-only), plus the scheduled-dose helpers
+from generic_core import results_io
 
 MODEL_CONFIG_FILE = _HERE / "model_config.json"
-DEFAULT_DB = _HERE / "simulation_output" / "results.db"
+DEFAULT_DB = _HERE / "simulation_output" / "results_parquet"
 DEFAULT_OUT = _HERE / "counterfactual_tables_from_db"
 
 # Named-scenario -> results.db `scenario` column value. Matches the literal
@@ -110,8 +116,8 @@ VE_SCENARIO_DB_NAMES = {
 VE_TOTALS_DB_NAME = {"low_ve": "Low VE", "baseline_ve": "baseline", "high_ve": "High VE"}
 
 
-def load_population() -> np.ndarray:
-    with open(MODEL_CONFIG_FILE) as f:
+def load_population(model_config_file=MODEL_CONFIG_FILE) -> np.ndarray:
+    with open(model_config_file) as f:
         config_dict = json.load(f)
     ic_entry = (config_dict.get("initial_conditions", {}) or {}).get("aggregate_pop", {})
     return np.asarray(
@@ -129,26 +135,16 @@ class ResultsDB:
 
     def __init__(self, db_path: str):
         self.path = db_path
-        self._con = sqlite3.connect(db_path)
-        _cols = {r[1] for r in self._con.execute("PRAGMA table_info(results_full)")}
-        if not _cols:
-            raise SystemExit(
-                f"{db_path} has no `results_full` table -- it was written by an "
-                "older version of run_simulations_MA_vax.py (before per-age-group/"
-                "subpop/risk-group history was saved alongside the population-summed "
-                "totals). Re-run run_simulations_MA_vax.py to regenerate results.db."
-            )
-        # results_full can be hundreds of millions of rows for a parameter-
-        # uncertainty run; without an index every (scenario, compartment)
-        # lookup is a full table scan. Older results.db files predate the
-        # index run_simulations_MA_vax*.py now creates, so add it here too
-        # (idempotent -- a no-op once it already exists).
-        _idx = {r[0] for r in self._con.execute("SELECT name FROM sqlite_master WHERE type='index'")}
-        if "idx_results_full_scenario_compartment" not in _idx:
-            self._con.execute(
-                "CREATE INDEX idx_results_full_scenario_compartment ON results_full (scenario, compartment)"
-            )
-            self._con.commit()
+        # results_io.load_source handles a Hive-partitioned Parquet directory
+        # (current output format), a SQLite .db (older runs / the notebook's
+        # Analysis tab SQLite export) or a legacy .json export uniformly,
+        # returning a duckdb connection exposing `results`/`results_full`
+        # views -- it also raises a clear error if `results_full` is missing,
+        # so no separate check is needed here.
+        try:
+            self._con = results_io.load_source(db_path)
+        except results_io.ResultsExplorerError as exc:
+            raise SystemExit(str(exc)) from exc
         # The table builders re-query the same scenario's arrays several
         # times across different tables (e.g. "baseline" is used by S.A.1,
         # S.A.2, S.A.3, S.A.5, S.A.6, and VAX_CHECK) -- cache per (scenario,
@@ -156,11 +152,11 @@ class ResultsDB:
         self._cache: dict[str, dict[str, np.ndarray]] = {}
 
     def scenarios_present(self) -> set[str]:
-        return {r[0] for r in self._con.execute("SELECT DISTINCT scenario FROM results_full")}
+        return {r[0] for r in self._con.execute("SELECT DISTINCT scenario FROM results_full").fetchall()}
 
     def n_reps(self, scenario: str) -> int:
         return self._con.execute(
-            "SELECT COUNT(DISTINCT rep) FROM results_full WHERE scenario = ?", (scenario,)
+            "SELECT COUNT(DISTINCT rep) FROM results_full WHERE scenario = ?", [scenario]
         ).fetchone()[0]
 
     def arrays(self, scenario: str, names: list[str]) -> dict[str, np.ndarray]:
@@ -172,12 +168,12 @@ class ResultsDB:
         missing = [n for n in names if n not in cached]
         if missing:
             placeholders = ",".join("?" * len(missing))
-            df = pd.read_sql_query(
+            df = self._con.execute(
                 f"SELECT rep, compartment, age_group, day, SUM(value) AS value FROM results_full "
                 f"WHERE scenario = ? AND compartment IN ({placeholders}) "
                 f"GROUP BY rep, compartment, age_group, day",
-                self._con, params=[scenario, *missing],
-            )
+                [scenario, *missing],
+            ).df()
             if df.empty:
                 raise ValueError(
                     f"No rows for scenario {scenario!r} in results_full -- check it's "
@@ -245,11 +241,12 @@ def _sched_doses(totals: dict, doses) -> dict:
     return {**totals, "doses": np.asarray(doses, dtype=float)}
 
 
-def table_S_A_1(db: ResultsDB, population: np.ndarray) -> pd.DataFrame:
+def table_S_A_1(db: ResultsDB, population: np.ndarray,
+                 model_config_file=MODEL_CONFIG_FILE) -> pd.DataFrame:
     no_vax = scenario_totals(db, SCENARIO_DB_NAME["no vax"], population)
     inf_only = scenario_totals(db, SCENARIO_DB_NAME["Infection protection only"], population)
     full = scenario_totals(db, SCENARIO_DB_NAME["baseline"], population)
-    sched = cf.scheduled_doses(population)
+    sched = cf.scheduled_doses(population, model_config_file=model_config_file)
     no_vax = _sched_doses(no_vax, np.zeros_like(sched))
     inf_only, full = _sched_doses(inf_only, sched), _sched_doses(full, sched)
     reduced_infection = averted_summary(no_vax, inf_only).add_suffix("_reduced_infection")
@@ -263,9 +260,10 @@ def table_S_A_1(db: ResultsDB, population: np.ndarray) -> pd.DataFrame:
     return reduced_infection.join(reduced_severity).join(total)
 
 
-def table_S_A_2(db: ResultsDB, population: np.ndarray) -> dict[str, pd.DataFrame]:
+def table_S_A_2(db: ResultsDB, population: np.ndarray,
+                 model_config_file=MODEL_CONFIG_FILE) -> dict[str, pd.DataFrame]:
     no_vax = scenario_totals(db, SCENARIO_DB_NAME["no vax"], population)
-    sched = cf.scheduled_doses(population)
+    sched = cf.scheduled_doses(population, model_config_file=model_config_file)
     no_vax = _sched_doses(no_vax, np.zeros_like(sched))
     cols = {}
     for i, label in enumerate(AGE_GROUPS):
@@ -282,13 +280,15 @@ def table_S_A_2(db: ResultsDB, population: np.ndarray) -> dict[str, pd.DataFrame
     baseline = _sched_doses(scenario_totals(db, SCENARIO_DB_NAME["baseline"], population), sched)
     cols["All"] = averted_summary(no_vax, baseline)
     return {
+        "absolute": pd.DataFrame({l: df["averted"] for l, df in cols.items()}),
         "pct_reduction": pd.DataFrame({l: df["pct_averted"] for l, df in cols.items()}),
         "per_100k": pd.DataFrame({l: df["per100k_averted"] for l, df in cols.items()}),
         "per_100k_doses": pd.DataFrame({l: df["per100k_doses_averted"] for l, df in cols.items()}),
     }
 
 
-def table_S_A_3(db: ResultsDB, population: np.ndarray) -> dict[str, pd.DataFrame]:
+def table_S_A_3(db: ResultsDB, population: np.ndarray,
+                 model_config_file=MODEL_CONFIG_FILE) -> dict[str, pd.DataFrame]:
     baseline = scenario_totals(db, SCENARIO_DB_NAME["baseline"], population)
     cols = {}
     for i, label in enumerate(AGE_GROUPS):
@@ -306,7 +306,8 @@ def table_S_A_3(db: ResultsDB, population: np.ndarray) -> dict[str, pd.DataFrame
         #    incidental dose produced absurd magnitudes (~9,800 per 100K doses).
         # The scheduled figure is exact, replication-invariant, and reduces to
         # max(0, 0.70 - baseline coverage) * population.
-        col_doses = cf.additional_scheduled_doses_for_target(population, 0.70, i)
+        col_doses = cf.additional_scheduled_doses_for_target(
+            population, 0.70, i, model_config_file=model_config_file)
         cols[label] = averted_summary(baseline, scen, doses_override=col_doses)
     all_scen = scenario_totals(db, SCENARIO_DB_NAME["70% coverage (all ages)"], population)
     # The "All ages" column raises four groups and leaves three untouched, so a
@@ -316,16 +317,19 @@ def table_S_A_3(db: ResultsDB, population: np.ndarray) -> dict[str, pd.DataFrame
     # 100K doses of the whole 70% push". Rows then also sum to the "All" row.
     # (Table S.A.2's "All" column keeps per-row denominators -- there every group
     # does receive doses, and it has to match table S.A.1's per-dose columns.)
-    extra = float(cf.additional_scheduled_doses_for_target(population, 0.70).sum())
+    extra = float(cf.additional_scheduled_doses_for_target(
+        population, 0.70, model_config_file=model_config_file).sum())
     cols["All"] = averted_summary(baseline, all_scen, doses_override=extra)
     return {
+        "absolute": pd.DataFrame({l: df["averted"] for l, df in cols.items()}),
         "pct_reduction": pd.DataFrame({l: df["pct_averted"] for l, df in cols.items()}),
         "per_100k": pd.DataFrame({l: df["per100k_averted"] for l, df in cols.items()}),
         "per_100k_doses": pd.DataFrame({l: df["per100k_doses_averted"] for l, df in cols.items()}),
     }
 
 
-def table_dose_accounting(db: ResultsDB, population: np.ndarray) -> pd.DataFrame:
+def table_dose_accounting(db: ResultsDB, population: np.ndarray,
+                           model_config_file=MODEL_CONFIG_FILE) -> pd.DataFrame:
     """Scheduled vs. delivered doses under the baseline schedule, by age group.
 
     "Scheduled" is what the vaccination schedule ships: `scheduled_coverage *
@@ -336,7 +340,7 @@ def table_dose_accounting(db: ResultsDB, population: np.ndarray) -> pd.DataFrame
     This is the reconciliation between the two dose figures, and it is why the
     per-100K-doses panels use the scheduled count as their denominator.
     """
-    sched = cf.scheduled_doses(population)
+    sched = cf.scheduled_doses(population, model_config_file=model_config_file)
     delivered = np.median(scenario_totals(db, SCENARIO_DB_NAME["baseline"], population)["doses"],
                            axis=0)
     wasted = sched - delivered
@@ -366,6 +370,7 @@ def table_S_A_5(db: ResultsDB, population: np.ndarray) -> dict[str, pd.DataFrame
         for name, db_name in VE_TOTALS_DB_NAME.items()
     }
     return {
+        "absolute": pd.DataFrame({l: df["averted"] for l, df in cols.items()}),
         "pct_reduction": pd.DataFrame({n: df["pct_averted"] for n, df in cols.items()}),
         "per_100k": pd.DataFrame({n: df["per100k_averted"] for n, df in cols.items()}),
     }
@@ -378,6 +383,7 @@ def table_S_A_6(db: ResultsDB, population: np.ndarray) -> dict[str, pd.DataFrame
         target70 = scenario_totals(db, target_name, population)
         cols[name] = averted_summary(baseline, target70)
     return {
+        "absolute": pd.DataFrame({l: df["averted"] for l, df in cols.items()}),
         "pct_reduction": pd.DataFrame({n: df["pct_averted"] for n, df in cols.items()}),
         "per_100k": pd.DataFrame({n: df["per100k_averted"] for n, df in cols.items()}),
     }
@@ -417,24 +423,34 @@ def table_vax_efficacy_check(db: ResultsDB) -> dict[str, pd.DataFrame]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--db", default=str(DEFAULT_DB),
-                         help="results.db written by run_simulations_MA_vax.py")
+                         help="results source written by run_simulations_MA_vax.py -- a "
+                              "results_parquet/ directory (current default output) or a "
+                              "SQLite results.db (older runs / the notebook's Analysis tab "
+                              "SQLite export)")
     parser.add_argument("--out", default=str(DEFAULT_OUT),
                          help="output folder for the CSVs counterfactual_notebook_generic.py reads "
-                              "(a relative path is taken relative to this script's folder)")
+                              "(a relative path is taken relative to the current working directory)")
+    parser.add_argument("--model-config", default=str(MODEL_CONFIG_FILE),
+                         help="model config JSON (population, params) -- for a run against a "
+                              "differently-named/located config than this folder's default "
+                              "model_config.json")
+    parser.add_argument("--fitted-params", default=str(_HERE / cf.FITTED_PARAMS_FILE),
+                         help="fitted params JSON merged over --model-config's baseline params for "
+                              "Table S.A.4 (best point estimate) -- a path that doesn't exist is "
+                              "silently skipped, same as run_simulations_MA_vax.py's own handling")
     args = parser.parse_args()
 
-    # A relative --out is interpreted relative to THIS script's folder, not to
-    # whatever the current working directory happens to be, so the tables land
-    # next to the script (and next to the results folders the notebook reads)
-    # however the script is invoked. An absolute --out is used as-is. Same
-    # convention as run_simulations_MA_vax.py's OUTPUT_DIR.
-    if not os.path.isabs(args.out):
-        args.out = str(_HERE / args.out)
+    # Resolved to absolute paths up front: load_population() and cf.load_base_inputs()
+    # would otherwise interpret a relative path against two different base directories
+    # (the current working directory vs. counterfactual_generic.py's own folder).
+    args.model_config = os.path.abspath(args.model_config)
+    args.fitted_params = os.path.abspath(args.fitted_params)
 
     if not os.path.exists(args.db):
-        raise SystemExit(f"{args.db} not found -- run run_simulations_MA_vax.py first.")
+        raise SystemExit(f"{args.db} not found -- run run_simulations_MA_vax.py first "
+                          "(or pass --db pointing at its results_parquet/ or results.db).")
 
-    population = load_population()
+    population = load_population(args.model_config)
     db = ResultsDB(args.db)
 
     required = set(SCENARIO_DB_NAME.values()) | {
@@ -444,28 +460,32 @@ def main() -> None:
     if missing:
         db.close()
         raise SystemExit(
-            "results.db is missing these scenarios -- add them to run_simulations_MA_vax.py's "
+            f"{args.db} is missing these scenarios -- add them to run_simulations_MA_vax.py's "
             f"SCENARIOS (and DOSE_MULTIPLIER, if they vaccinate) and re-run it:\n  " + "\n  ".join(missing)
         )
 
     os.makedirs(args.out, exist_ok=True)
 
     print("[1/7] Table S.A.1 (infection vs severity protection) ...")
-    table_S_A_1(db, population).to_csv(os.path.join(args.out, "S_A_1.csv"))
+    table_S_A_1(db, population, model_config_file=args.model_config).to_csv(
+        os.path.join(args.out, "S_A_1.csv"))
 
     print("[2/7] Table S.A.2 (age group vaccinated) ...")
-    for sub, df in table_S_A_2(db, population).items():
+    for sub, df in table_S_A_2(db, population, model_config_file=args.model_config).items():
         df.to_csv(os.path.join(args.out, f"S_A_2_{sub}.csv"))
 
     print("[3/7] Table S.A.3 (70% coverage, single age group) ...")
-    for sub, df in table_S_A_3(db, population).items():
+    for sub, df in table_S_A_3(db, population, model_config_file=args.model_config).items():
         df.to_csv(os.path.join(args.out, f"S_A_3_{sub}.csv"))
 
     print("[4/7] Table S.A.4 (VE sensitivity parameters) ...")
-    cf.table_S_A_4(cf.load_base_inputs()).to_csv(os.path.join(args.out, "S_A_4.csv"))
+    cf.table_S_A_4(cf.load_base_inputs(
+        model_config_file=args.model_config, fitted_params_file=args.fitted_params,
+    )).to_csv(os.path.join(args.out, "S_A_4.csv"))
 
     print("[4b/7] Dose accounting (scheduled vs. delivered) ...")
-    table_dose_accounting(db, population).to_csv(os.path.join(args.out, "DOSE_ACCOUNTING.csv"))
+    table_dose_accounting(db, population, model_config_file=args.model_config).to_csv(
+        os.path.join(args.out, "DOSE_ACCOUNTING.csv"))
 
     print("[5/7] Table S.A.5 (VE sensitivity, vs no vaccine) ...")
     for sub, df in table_S_A_5(db, population).items():
@@ -481,10 +501,10 @@ def main() -> None:
 
     with open(os.path.join(args.out, "meta.json"), "w") as f:
         json.dump({
-            "source": "run_simulations_MA_vax.py -> results.db (results_by_age table)",
+            "source": "run_simulations_MA_vax.py -> results source (results_full table)",
             "db": os.path.abspath(args.db),
-            "model_config_file": "model_config.json",
-            "fitted_params_file": "fitted_params.json",
+            "model_config_file": args.model_config,
+            "fitted_params_file": args.fitted_params,
             "n_reps": db.n_reps(SCENARIO_DB_NAME["baseline"]),
             "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         }, f, indent=2)

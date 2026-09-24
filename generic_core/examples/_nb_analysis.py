@@ -2290,7 +2290,7 @@ def _analysis_export_full_button(main_tab, mo):
 @app.cell
 def _analysis_export_full(
     analysis_export_full_button, analysis_results, output_dir, config_dict,
-    duckdb, np, pd, mo, results_io,
+    duckdb, np, mo, results_io,
 ):
     mo.stop(not analysis_export_full_button.value)
     mo.stop(
@@ -2315,12 +2315,16 @@ def _analysis_export_full(
     # Explorer notebook opens either source with no conversion and no format
     # branch.
     #
-    # Rows are appended per array as a small DataFrame as the loops walk the
-    # results, rather than accumulated into one big list and serialized at
-    # the end (what the earlier JSON export did). That keeps peak memory
-    # bounded by a single (days, A, R) array instead of growing with the size
+    # Rows are appended a replicate at a time via results_io.append_replicate
+    # (two bulk inserts per replicate), rather than accumulated into one big
+    # list and serialized at the end (what the earlier JSON export did). Peak
+    # memory stays bounded by one replicate instead of growing with the size
     # of the whole export: the JSON path measured ~5.5x the output size in
     # peak RSS and scaled linearly with it (~8 GB to write a 1.4 GB export).
+    # Appending per individual array would bound it tighter still, but costs
+    # one insert per (compartment, subpop) -- measured ~3x slower on a
+    # single-population model and ~5x on a 40-subpop one. Worth revisiting
+    # only if a very wide metapop export starts running out of memory here.
     # A native DuckDB table (rather than SQLite) so `con.append(table, df)`
     # can do the insert as one bulk columnar write instead of a Python-level
     # executemany, which measured ~10s per 100k rows against DuckDB (DuckDB
@@ -2342,31 +2346,26 @@ def _analysis_export_full(
         for _scen, _reps in analysis_results["scenarios"].items():
             for _ri, _rep in enumerate(_reps):
                 _psi = _psets[_ri] if _ri < len(_psets) else None
+                # This tab holds a replicate as {subpop: {key: array}};
+                # append_replicate (like extract_history_full, which the
+                # exported script feeds it) wants the inverse nesting, so
+                # transpose on the way in. The running sum over subpops is
+                # the population total the `results` table stores -- the
+                # exported script gets the same thing precomputed from
+                # extract_history.
+                _by_key = {}
                 _agg_by_key = {}
-                for _sp_data in _rep.values():
-                    for _key, _arr in _sp_data.items():
-                        _arr = np.asarray(_arr)
-                        _agg_by_key[_key] = _arr if _key not in _agg_by_key else _agg_by_key[_key] + _arr
-                for _key, _arr in _agg_by_key.items():
-                    _totals = _arr.sum(axis=(1, 2))  # (days,)
-                    _con.append("results", pd.DataFrame({
-                        "scenario": _scen, "rep": _ri, "param_set": _psi,
-                        "compartment": _key, "kind": _kind_of(_key),
-                        "day": np.arange(1, len(_totals) + 1),
-                        "value": _totals.astype(float),
-                    }))
                 for _sp_name, _sp_data in _rep.items():
                     for _key, _arr in _sp_data.items():
                         _arr = np.asarray(_arr)
-                        _d_idx, _a_idx, _r_idx = np.indices(_arr.shape)
-                        _con.append("results_full", pd.DataFrame({
-                            "scenario": _scen, "rep": _ri, "param_set": _psi,
-                            "compartment": _key, "kind": _kind_of(_key),
-                            "subpop": _sp_name,
-                            "age_group": _a_idx.ravel(), "risk_group": _r_idx.ravel(),
-                            "day": _d_idx.ravel() + 1,
-                            "value": _arr.ravel().astype(float),
-                        }))
+                        _by_key.setdefault(_key, {})[_sp_name] = _arr
+                        _agg_by_key[_key] = _arr if _key not in _agg_by_key else _agg_by_key[_key] + _arr
+                results_io.append_replicate(
+                    _con, scenario=_scen, rep=_ri, param_set=_psi,
+                    h={_k: _a.sum(axis=(1, 2)) for _k, _a in _agg_by_key.items()},
+                    h_full=_by_key,
+                    kinds={_k: _kind_of(_k) for _k in _by_key},
+                )
 
         # Run-level metadata the rows themselves cannot carry. Without this a
         # reader only sees day indices and 0-based age/risk indices, so it

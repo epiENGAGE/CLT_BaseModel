@@ -360,7 +360,8 @@ def ve_scenarios(base_inputs: dict) -> dict[str, dict]:
     }
 
 
-def scheduled_coverage(age_idx: int | None = None) -> np.ndarray | float:
+def scheduled_coverage(age_idx: int | None = None,
+                        model_config_file: str = MODEL_CONFIG_FILE) -> np.ndarray | float:
     """Cumulative coverage each age group's BASELINE dose schedule asks for
     over the simulation window -- the sum of the daily vaccination
     proportions in `daily_vaccines_df`, before the model's per-step S-cap
@@ -370,8 +371,12 @@ def scheduled_coverage(age_idx: int | None = None) -> np.ndarray | float:
     It is a property of the input schedule alone, so it is identical for
     every parameter draw and every replicate -- unlike realized coverage
     (`S_to_SV` summed over a run), which depends on how many susceptibles
-    the epidemic left available for the cap to hand a dose to."""
-    csvs = _load_schedule_csvs()
+    the epidemic left available for the cap to hand a dose to.
+
+    `model_config_file` only matters for finding the schedule CSVs (via
+    `config["input_files"]`); pass the same one `load_base_inputs` was given
+    if it's not this folder's default."""
+    csvs = _load_schedule_csvs(model_config_file=model_config_file)
     if "daily_vaccines_df" not in csvs:
         raise ValueError("no daily_vaccines_df schedule to derive coverage from")
     df = pd.read_csv(io.StringIO(csvs["daily_vaccines_df"]))
@@ -384,7 +389,8 @@ def scheduled_coverage(age_idx: int | None = None) -> np.ndarray | float:
     return cov if age_idx is None else float(cov[age_idx])
 
 
-def scheduled_doses(population, age_idx: int | None = None):
+def scheduled_doses(population, age_idx: int | None = None,
+                     model_config_file: str = MODEL_CONFIG_FILE):
     """Doses the BASELINE schedule ships to each age group over the window:
     `scheduled_coverage() * population`.
 
@@ -400,18 +406,19 @@ def scheduled_doses(population, age_idx: int | None = None):
     parameter draws and replicates -- unlike realized doses, which vary by
     1-3% across the posterior even when the schedule is byte-identical.
     """
-    cov = scheduled_coverage()
+    cov = scheduled_coverage(model_config_file=model_config_file)
     doses = np.asarray(cov, dtype=float) * np.asarray(population, dtype=float)
     return doses if age_idx is None else float(doses[age_idx])
 
 
 def additional_scheduled_doses_for_target(population, target: float = 0.70,
-                                           age_idx: int | None = None):
+                                           age_idx: int | None = None,
+                                           model_config_file: str = MODEL_CONFIG_FILE):
     """Extra doses the `target`-coverage schedule ships relative to baseline:
     `max(0, target - scheduled_coverage) * population`, i.e. how many more
     people must be vaccinated to reach `target`. Zero for age groups already
     above it, which `coverage_multiplier_for_target` leaves untouched."""
-    cov = np.asarray(scheduled_coverage(), dtype=float)
+    cov = np.asarray(scheduled_coverage(model_config_file=model_config_file), dtype=float)
     extra = np.maximum(0.0, target - cov) * np.asarray(population, dtype=float)
     return extra if age_idx is None else float(extra[age_idx])
 
@@ -567,6 +574,7 @@ def table_S_A_2(base_inputs: dict, n_reps: int = 200, seed: int = 0,
         no_vax, scenario_totals(base_inputs, baseline_scenario(), n_reps, seed, stochastic=stochastic))
 
     return {
+        "absolute": pd.DataFrame({label: df["averted"] for label, df in cols.items()}),
         "pct_reduction": pd.DataFrame({label: df["pct_averted"] for label, df in cols.items()}),
         "per_100k": pd.DataFrame({label: df["per100k_averted"] for label, df in cols.items()}),
         "per_100k_doses": pd.DataFrame({label: df["per100k_doses_averted"] for label, df in cols.items()}),
@@ -586,6 +594,7 @@ def table_S_A_3(base_inputs: dict, n_reps: int = 200, seed: int = 0,
     cols["All"] = averted_summary(baseline, all_scen)
 
     return {
+        "absolute": pd.DataFrame({label: df["averted"] for label, df in cols.items()}),
         "pct_reduction": pd.DataFrame({label: df["pct_averted"] for label, df in cols.items()}),
         "per_100k": pd.DataFrame({label: df["per100k_averted"] for label, df in cols.items()}),
         "per_100k_doses": pd.DataFrame({label: df["per100k_doses_averted"] for label, df in cols.items()}),
@@ -626,6 +635,7 @@ def table_S_A_5(base_inputs: dict, n_reps: int = 200, seed: int = 0,
         for name, scen in ve_scenarios(base_inputs).items()
     }
     return {
+        "absolute": pd.DataFrame({name: df["averted"] for name, df in cols.items()}),
         "pct_reduction": pd.DataFrame({name: df["pct_averted"] for name, df in cols.items()}),
         "per_100k": pd.DataFrame({name: df["per100k_averted"] for name, df in cols.items()}),
     }
@@ -648,6 +658,7 @@ def table_S_A_6(base_inputs: dict, n_reps: int = 200, seed: int = 0,
             stochastic=stochastic)
         cols[name] = averted_summary(baseline, target70)
     return {
+        "absolute": pd.DataFrame({name: df["averted"] for name, df in cols.items()}),
         "pct_reduction": pd.DataFrame({name: df["pct_averted"] for name, df in cols.items()}),
         "per_100k": pd.DataFrame({name: df["per100k_averted"] for name, df in cols.items()}),
     }

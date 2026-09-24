@@ -123,8 +123,13 @@ def averted_summary(reference: dict, scenario: dict, by_age: bool = True,
             doses_str = "—"
         pm, pl, ph = _summ(pct)
         rm, rl, rh = _summ(per100k)
+        am, al, ah = _summ(averted_col)
         return {
             "age_group": label,
+            # Absolute head-count averted, alongside the rate columns: the
+            # percentages and per-100K figures alone hide how large (or small)
+            # a group's burden is, so every table also reports raw counts.
+            "averted": f"{am:,.0f} [{al:,.0f} - {ah:,.0f}]",
             "pct_averted": f"{pm:.1f}% [{pl:.1f}% - {ph:.1f}%]",
             "per100k_averted": f"{rm:.1f} [{rl:.1f} - {rh:.1f}]",
             "per100k_doses_averted": doses_str,
@@ -232,10 +237,10 @@ def _matched_cohort_ratio_col(S: np.ndarray, SV: np.ndarray, S_to_E: np.ndarray,
 # ── Saved-table I/O (from MA_vax/counterfactual.py) ──────────────────────────
 
 DICT_TABLES = {
-    "S_A_2": ["pct_reduction", "per_100k", "per_100k_doses"],
-    "S_A_3": ["pct_reduction", "per_100k", "per_100k_doses"],
-    "S_A_5": ["pct_reduction", "per_100k"],
-    "S_A_6": ["pct_reduction", "per_100k"],
+    "S_A_2": ["absolute", "pct_reduction", "per_100k", "per_100k_doses"],
+    "S_A_3": ["absolute", "pct_reduction", "per_100k", "per_100k_doses"],
+    "S_A_5": ["absolute", "pct_reduction", "per_100k"],
+    "S_A_6": ["absolute", "pct_reduction", "per_100k"],
     "VAX_CHECK": ["infection_reduction", "matched_cohort_infection_reduction", "hospitalization_reduction"],
 }
 

@@ -231,6 +231,115 @@ def create_results_tables(con: duckdb.DuckDBPyConnection) -> None:
     )
 
 
+def append_replicate(
+    con: duckdb.DuckDBPyConnection, *,
+    scenario: str, rep: int, param_set: int | None,
+    h: dict[str, Any], h_full: dict[str, dict[str, Any]],
+    kinds: dict[str, str],
+) -> None:
+    """Append one replicate's history to ``results``/``results_full`` as a
+    single bulk insert per table.
+
+    ``h`` is ``{name: (day,) array}`` and ``h_full`` is
+    ``{name: {subpop: (day, age_group, risk_group) array}}`` -- i.e. exactly
+    what ``model_factory.extract_history`` / ``extract_history_full`` return.
+
+    One frame per table rather than one per array: a replicate spans
+    compartments x subpops arrays, and appending each separately makes the
+    insert cost scale with that product instead of with the row count. The
+    repeated label columns are built as categoricals so the strings are stored
+    once per replicate rather than once per row.
+    """
+    import numpy as np
+    import pandas as pd
+
+    def _labels(codes, categories):
+        # from_codes (not a Python list of repeated strings): the label is
+        # materialised once, and only the narrow code array scales with rows.
+        return pd.Categorical.from_codes(codes, categories=categories)
+
+    def _scalar_int(value, n):
+        # An INTEGER column that has to accept NULL: param_set is None for
+        # runs whose uncertainty doesn't come from a parameter set.
+        if value is None:
+            return np.full(n, None, dtype=object)
+        return np.full(n, value, dtype=np.int64)
+
+    names = [_c for _c in h if h[_c] is not None]
+    if names:
+        _arrs = [np.asarray(h[_c], dtype=float).ravel() for _c in names]
+        _lens = [_a.size for _a in _arrs]
+        _total = int(sum(_lens))
+        _kind_cats = sorted({kinds[_c] for _c in names})
+        con.append("results", pd.DataFrame({
+            "scenario": _labels(np.zeros(_total, dtype=np.int8), [scenario]),
+            "rep": np.full(_total, rep, dtype=np.int64),
+            "param_set": _scalar_int(param_set, _total),
+            "compartment": _labels(
+                np.repeat(np.arange(len(names)), _lens), names),
+            "kind": _labels(
+                np.repeat([_kind_cats.index(kinds[_c]) for _c in names], _lens),
+                _kind_cats),
+            # Per-array rather than one arange over the total: the series are
+            # not all guaranteed to be the same length (a transition variable
+            # whose history doesn't divide evenly into days stays at
+            # sub-timestep resolution -- see extract_history).
+            "day": np.concatenate([np.arange(1, _n + 1) for _n in _lens]),
+            "value": np.concatenate(_arrs),
+        }))
+
+    # Flattened to (compartment, subpop) pairs first: the subpop set is not
+    # the same for every key -- a transition variable is absent from subpops
+    # that don't define it -- so this can't assume a rectangular layout.
+    _pairs = [
+        (_c, _spname, np.asarray(_arr))
+        for _c, _sp_map in h_full.items()
+        for _spname, _arr in _sp_map.items()
+    ]
+    if not _pairs:
+        return
+
+    _comp_cats = sorted({_c for _c, _, _ in _pairs})
+    _sp_cats = sorted({_sp for _, _sp, _ in _pairs})
+    _kind_cats = sorted({kinds[_c] for _c, _, _ in _pairs})
+    _lens = [_a.size for _, _, _a in _pairs]
+    _total = int(sum(_lens))
+
+    # np.indices is shape-dependent only, and in practice every array here
+    # shares one shape -- build it once per distinct shape instead of once
+    # per (compartment, subpop) pair.
+    _idx_cache: dict[tuple[int, ...], tuple[Any, Any, Any]] = {}
+    _days, _ages, _risks = [], [], []
+    for _, _, _a in _pairs:
+        _cached = _idx_cache.get(_a.shape)
+        if _cached is None:
+            _d_idx, _a_idx, _r_idx = np.indices(_a.shape)
+            _cached = (_d_idx.ravel() + 1, _a_idx.ravel(), _r_idx.ravel())
+            _idx_cache[_a.shape] = _cached
+        _days.append(_cached[0])
+        _ages.append(_cached[1])
+        _risks.append(_cached[2])
+
+    con.append("results_full", pd.DataFrame({
+        "scenario": _labels(np.zeros(_total, dtype=np.int8), [scenario]),
+        "rep": np.full(_total, rep, dtype=np.int64),
+        "param_set": _scalar_int(param_set, _total),
+        "compartment": _labels(
+            np.repeat([_comp_cats.index(_c) for _c, _, _ in _pairs], _lens),
+            _comp_cats),
+        "kind": _labels(
+            np.repeat([_kind_cats.index(kinds[_c]) for _c, _, _ in _pairs], _lens),
+            _kind_cats),
+        "subpop": _labels(
+            np.repeat([_sp_cats.index(_sp) for _, _sp, _ in _pairs], _lens),
+            _sp_cats),
+        "age_group": np.concatenate(_ages),
+        "risk_group": np.concatenate(_risks),
+        "day": np.concatenate(_days),
+        "value": np.concatenate([_a.ravel().astype(float) for _, _, _a in _pairs]),
+    }))
+
+
 def write_results_parquet(
     con: duckdb.DuckDBPyConnection, out_dir: str | Path, *,
     meta: dict[str, Any] | None = None, progress=None,

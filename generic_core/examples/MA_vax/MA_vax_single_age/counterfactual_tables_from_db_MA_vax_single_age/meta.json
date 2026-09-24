@@ -1,0 +1,16 @@
+{
+  "source": "run_simulations_MA_vax_single_age.py -> results source (results_full table)",
+  "db": "/Users/rfp437/Work/CityLevelTransmission/CLT_BaseModel/generic_core/examples/MA_vax/MA_vax_single_age/simulation_output_single_age/results_parquet",
+  "model_config_file": "/Users/rfp437/Work/CityLevelTransmission/CLT_BaseModel/generic_core/examples/MA_vax/MA_vax_single_age/model_config_MA_single_age.json",
+  "fitted_params_file": "/Users/rfp437/Work/CityLevelTransmission/CLT_BaseModel/generic_core/examples/MA_vax/MA_vax_single_age/fitted_params_MA_single_age.json",
+  "age_groups": [
+    "0+"
+  ],
+  "n_reps": 495,
+  "generated_at": "2026-09-22T20:10:03.602174+00:00",
+  "omitted_tables": [
+    "S_A_2",
+    "S_A_3"
+  ],
+  "omitted_reason": "no per-age-group scenarios in a single-age-group model"
+}

@@ -14,6 +14,7 @@ import io
 import os
 import json
 import copy
+import time
 import numpy as np
 import pandas as pd
 from datetime import datetime
@@ -22,8 +23,8 @@ from types import SimpleNamespace
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 # ---- Configurable ----
-MODEL_CONFIG_FILE = "model_config.json"
-FITTED_PARAMS_FILE = "fitted_params.json"  # set to None to skip
+MODEL_CONFIG_FILE = "model_config_MA_vax.json"
+FITTED_PARAMS_FILE = "fitted_params_MA_vax.json"  # set to None to skip
 # Schedule CSVs (humidity / school-work calendar / mobility / vaccination),
 # single-population only. The files named in the model config's "input_files"
 # are read fresh from disk each run (resolved against the working directory,
@@ -38,7 +39,7 @@ SCHEDULES_FILE = "schedules.json"
 # alongside the compartments. None = every transition in model_config.json;
 # set to a list to record only some, or [] for compartments only.
 TRANSITION_VARS = None
-OUTPUT_DIR = Path("simulation_output_param_set_stochastic")
+OUTPUT_DIR = Path("simulation_output_MA_vax_param_set_stochastic")
 NUM_DAYS = 250
 NUM_REPS = 1
 STOCHASTIC = True
@@ -76,7 +77,7 @@ NUM_WORKERS = None
 # set, and both are ignored when STOCHASTIC is False (deterministic always runs
 # once, with the best set).
 UNCERTAINTY_SOURCE = "parameters"
-NUM_PARAM_SETS = 638
+NUM_PARAM_SETS = 627
 # Whether the transition engine itself is stochastic. Derived, not a setting:
 # the "parameters" mode is stochastic in the sense that it samples the
 # posterior, but each run's transitions are deterministic.
@@ -874,32 +875,6 @@ if __name__ == "__main__":
     _n_workers = min(_n_workers, len(_tasks)) or 1
     print(f"Running {len(_tasks)} simulation(s) across {_n_workers} worker process(es)")
 
-    all_results = {_scen: [] for _scen in SCENARIOS}
-    if _n_workers == 1:
-        # Serial fallback (NUM_WORKERS = 1) -- also handy for debugging,
-        # since a worker-process traceback is otherwise harder to inspect.
-        for _t in _tasks:
-            _scen, _rep, _psi, _h, _h_full, _kinds = _run_one(*_t)
-            all_results[_scen].append((_rep, _h, _h_full, _kinds, _psi))
-    else:
-        with ProcessPoolExecutor(max_workers=_n_workers) as _ex:
-            _futures = {_ex.submit(_run_one, *_t): _t for _t in _tasks}
-            for _fut in as_completed(_futures):
-                _scen_name = _futures[_fut][0]
-                _scen, _rep, _psi, _h, _h_full, _kinds = _fut.result()
-                print(f"Finished scenario={_scen_name} rep={_rep}")
-                all_results[_scen].append((_rep, _h, _h_full, _kinds, _psi))
-
-    # Pool completion order is nondeterministic; sort each scenario's
-    # replicates back into run-schedule order so the `rep` column
-    # written to results_parquet/ below matches what a serial run would
-    # have produced.
-    for _scen in all_results:
-        all_results[_scen] = [
-            (_h, _h_full, _kinds, _psi)
-            for (_rep, _h, _h_full, _kinds, _psi) in sorted(all_results[_scen], key=lambda _r: _r[0])
-        ]
-
     # Every run of this script writes a FRESH results directory, never
     # appends to one already on disk: two runs sharing one would both
     # write rep=0, rep=1, ... under the same scenario names, and a
@@ -933,38 +908,68 @@ if __name__ == "__main__":
     _stage_path.unlink(missing_ok=True)
     _con = duckdb.connect(str(_stage_path))
     results_io.create_results_tables(_con)
-    print(f"Writing results for {len(all_results)} scenario(s) to {_out_dir}")
-    for _si, (_scen, _reps_data) in enumerate(all_results.items(), start=1):
-        _n_reps = len(_reps_data)
-        for _ri, (_h, _h_full, _kinds, _psi) in enumerate(_reps_data):
-            for _c, _arr in _h.items():
-                _con.append("results", pd.DataFrame({
-                    "scenario": _scen, "rep": _ri, "param_set": _psi,
-                    "compartment": _c, "kind": _kinds[_c],
-                    "day": np.arange(1, len(_arr) + 1),
-                    "value": np.asarray(_arr, dtype=float),
-                }))
-            for _c, _sp_map in _h_full.items():
-                for _spname, _arr_full in _sp_map.items():
-                    # Vectorized index construction (numpy) instead of a
-                    # triple-nested Python for-loop over day/age_group/
-                    # risk_group -- meaningfully faster once that product
-                    # runs into the hundreds of thousands of rows across
-                    # many stochastic replicates.
-                    _d_idx, _a_idx, _r_idx = np.indices(_arr_full.shape)
-                    _con.append("results_full", pd.DataFrame({
-                        "scenario": _scen, "rep": _ri, "param_set": _psi,
-                        "compartment": _c, "kind": _kinds[_c], "subpop": _spname,
-                        "age_group": _a_idx.ravel(), "risk_group": _r_idx.ravel(),
-                        "day": _d_idx.ravel() + 1,
-                        "value": _arr_full.ravel().astype(float),
-                    }))
-            # Progress within a scenario's replicates, so a long
-            # stochastic run (hundreds of reps) doesn't look stuck
-            # between per-scenario lines below.
-            if _n_reps > 20 and (_ri + 1) % 20 == 0:
-                print(f"  [{_si}/{len(all_results)}] {_scen}: wrote {_ri + 1}/{_n_reps} replicate(s)")
-        print(f"[{_si}/{len(all_results)}] {_scen}: wrote {_n_reps} replicate(s)")
+    print(f"Writing results for {len(SCENARIOS)} scenario(s) to {_out_dir}")
+
+    # Collected as results arrive, since no replicate's history is kept
+    # around to be scanned for these at the end.
+    _subpop_names_seen: set[str] = set()
+    _n_reps = len(RUN_SCHEDULE)
+    _written = {_scen: 0 for _scen in SCENARIOS}
+    _sim_secs = 0.0
+    _write_secs = 0.0
+
+    def _store(_scen, _rep, _psi, _h, _h_full, _kinds):
+        # `rep` is written straight from the run schedule rather than
+        # recovered by sorting the finished runs: RUN_SCHEDULE is
+        # enumerated per scenario, so a scenario's reps are exactly
+        # 0..n-1 and each arrives exactly once. Rows therefore land in
+        # completion order rather than rep order, which no reader depends
+        # on -- the Parquet export never sorted either (a global sort
+        # needs an external-sort spill), and queries group and filter.
+        global _write_secs
+        _t0 = time.perf_counter()
+        results_io.append_replicate(
+            _con, scenario=_scen, rep=_rep, param_set=_psi,
+            h=_h, h_full=_h_full, kinds=_kinds)
+        _write_secs += time.perf_counter() - _t0
+        for _sp_map in _h_full.values():
+            _subpop_names_seen.update(_sp_map)
+        _written[_scen] += 1
+        # Progress within a scenario's replicates, so a long stochastic
+        # run (hundreds of reps) doesn't look stuck.
+        if _n_reps > 20 and _written[_scen] % 20 == 0:
+            print(f"  {_scen}: wrote {_written[_scen]}/{_n_reps} replicate(s)")
+
+    _t_start = time.perf_counter()
+    if _n_workers == 1:
+        # Serial fallback (NUM_WORKERS = 1) -- also handy for debugging,
+        # since a worker-process traceback is otherwise harder to inspect.
+        for _t in _tasks:
+            _store(*_run_one(*_t))
+    else:
+        with ProcessPoolExecutor(max_workers=_n_workers) as _ex:
+            _futures = {_ex.submit(_run_one, *_t) for _t in _tasks}
+            # as_completed copies the set it is given, so discarding from
+            # ours below is safe and is what actually frees each finished
+            # future (as_completed drops only its own reference).
+            for _fut in as_completed(_futures):
+                _scen, _rep, _psi, _h, _h_full, _kinds = _fut.result()
+                print(f"Finished scenario={_scen} rep={_rep}")
+                # Appended here, while the remaining runs are still going,
+                # rather than after the pool closes. DuckDB allows a single
+                # writer connection, so these appends cannot themselves run
+                # in parallel -- but running them in the gaps of an
+                # unfinished pool hides most of their cost instead of
+                # adding it to the end of the run, and lets each
+                # replicate's arrays be freed as soon as they are on disk
+                # rather than holding the whole ensemble in the parent.
+                _store(_scen, _rep, _psi, _h, _h_full, _kinds)
+                _futures.discard(_fut)
+                del _h, _h_full, _kinds, _fut
+    _sim_secs = time.perf_counter() - _t_start
+    for _scen, _n in _written.items():
+        print(f"{_scen}: wrote {_n} replicate(s)")
+
     # Run-level metadata the result rows themselves cannot carry: they
     # only hold day indices and 0-based age/risk indices, so without this
     # a reader (e.g. results_explorer_notebook.py) cannot plot real dates
@@ -977,13 +982,7 @@ if __name__ == "__main__":
     # Key/value JSON so keys can be added later without migrating the
     # schema. Readers must tolerate meta.json being absent (files written
     # before it existed) and individual keys being missing.
-    _subpop_names = sorted({
-        _spname
-        for _reps_data in all_results.values()
-        for (_h, _h_full, _kinds, _psi) in _reps_data
-        for _sp_map in _h_full.values()
-        for _spname in _sp_map
-    })
+    _subpop_names = sorted(_subpop_names_seen)
     _meta = {
         "schema_version": 1,
         "source": "run_simulation_script",
@@ -1016,7 +1015,15 @@ if __name__ == "__main__":
         "param_set_indices": list(RUN_SCHEDULE),
     }
     print(f"Writing Parquet to {_out_dir}")
+    _t0 = time.perf_counter()
     results_io.write_results_parquet(_con, _out_dir, meta=_meta)
     _con.close()
     _stage_path.unlink(missing_ok=True)
+    _parquet_secs = time.perf_counter() - _t0
     print(f"Results saved to {_out_dir}")
+    # Staging appends are reported separately from the simulate-and-stage
+    # wall clock they run inside: the gap between them is what overlapping
+    # the pool actually bought.
+    print(f"Timing: simulate+stage {_sim_secs:.1f}s "
+          f"(staging appends {_write_secs:.1f}s of that), "
+          f"Parquet export {_parquet_secs:.1f}s")

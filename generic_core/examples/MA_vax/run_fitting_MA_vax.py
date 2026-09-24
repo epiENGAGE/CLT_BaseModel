@@ -16,8 +16,8 @@ import io
 from pathlib import Path
 from types import SimpleNamespace
 
-MODEL_CONFIG_FILE = "model_config.json"
-FIT_CONFIG_FILE = "MA_fit_config.json"
+MODEL_CONFIG_FILE = "model_config_MA_vax.json"
+FIT_CONFIG_FILE = "fit_config_MA_vax.json"
 OUTPUT_FILE = "fitted_params_MA_vax.json"
 
 _HERE = Path(__file__).parent

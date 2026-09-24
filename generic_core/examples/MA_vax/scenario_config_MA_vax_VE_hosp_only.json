@@ -1,0 +1,22 @@
+{
+  "n_scenarios": 3,
+  "name::0": "baseline",
+  "name::1": "no vax",
+  "name::2": "VE hospital only",
+  "age_scale_toggle::IV_to_H_prop": false,
+  "age_scale_toggle::vax_susceptibility": true,
+  "age_scale::vax_susceptibility::0::2": 1.754385965,
+  "age_scale::vax_susceptibility::1::2": 1.754385965,
+  "age_scale::vax_susceptibility::2::2": 1.754385965,
+  "age_scale::vax_susceptibility::3::2": 1.754385965,
+  "age_scale::vax_susceptibility::4::2": 1.265822785,
+  "age_scale::vax_susceptibility::5::2": 1.265822785,
+  "dose_toggle": true,
+  "dose::1::0": 0,
+  "dose::1::1": 0,
+  "dose::1::2": 0,
+  "dose::1::3": 0,
+  "dose::1::4": 0,
+  "dose::1::5": 0,
+  "dose::1::6": 0
+}

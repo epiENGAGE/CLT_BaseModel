@@ -1,0 +1,4 @@
+scenario,age_group,VE_infection,VE_hosp_infection,VE_hosp_given_infection,VE_transmission_blocking
+low_ve,0+,10%,-116%,-140%,0%
+baseline_ve,0+,22%,22%,0%,0%
+high_ve,0+,34%,-37%,-108%,0%

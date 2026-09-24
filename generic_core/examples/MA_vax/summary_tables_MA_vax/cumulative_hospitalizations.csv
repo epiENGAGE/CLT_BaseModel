@@ -1,0 +1,25 @@
+﻿Scenario,Age Group,Hospitalizations
+baseline,0,36 [22 – 48]
+baseline,1-4,153 [104 – 201]
+baseline,5-12,156 [111 – 204]
+baseline,13-17,95 [63 – 123]
+baseline,18-49,746 [582 – 895]
+baseline,50-64,753 [595 – 911]
+baseline,65+,"4,125 [3,700 – 4,555]"
+baseline,All,"6,070 [5,569 – 6,549]"
+Infection protection only,0,36 [23 – 49]
+Infection protection only,1-4,157 [106 – 205]
+Infection protection only,5-12,159 [112 – 207]
+Infection protection only,13-17,97 [64 – 125]
+Infection protection only,18-49,758 [590 – 909]
+Infection protection only,50-64,770 [608 – 931]
+Infection protection only,65+,"4,845 [4,348 – 5,356]"
+Infection protection only,All,"6,829 [6,263 – 7,394]"
+no vax,0,76 [47 – 101]
+no vax,1-4,364 [248 – 461]
+no vax,5-12,348 [239 – 454]
+no vax,13-17,212 [140 – 283]
+no vax,18-49,"1,496 [1,165 – 1,843]"
+no vax,50-64,"1,563 [1,225 – 1,891]"
+no vax,65+,"9,255 [8,272 – 10,460]"
+no vax,All,"13,370 [11,947 – 14,577]"
