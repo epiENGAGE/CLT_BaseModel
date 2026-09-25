@@ -616,9 +616,14 @@ def generic_advance_timestep(
             # absolute count (matches the existing vaccine_schedule input
             # format and ScheduledTransferVariable in generic_model.py) --
             # convert before clamping to the available origin population.
+            # dose_pool="total_population" takes the proportion of the whole
+            # subpopulation instead (see ScheduledTransferVariable).
             origin = state_dict[tc.origin]
-            destination = state_dict[tc.destination]
-            scheduled_count = state_dict[schedule_name] * (origin + destination)
+            if tc.rate_config.get("dose_pool", "susceptible") == "total_population":
+                pool = sum(state_dict[c] for c in model_config.compartments)
+            else:
+                pool = origin + state_dict[tc.destination]
+            scheduled_count = state_dict[schedule_name] * pool
             transition_amounts[tc.name] = (
                 torch.minimum(scheduled_count, origin)
                 if is_first_timestep_of_day

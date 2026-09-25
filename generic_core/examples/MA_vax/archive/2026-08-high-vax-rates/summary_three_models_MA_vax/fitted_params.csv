@@ -1,0 +1,5 @@
+﻿Parameter,No initial immunity,"20% R, doses of S+SV","20% R, doses of total population"
+beta_baseline,0.03656 [0.03078 – 0.04275] (best 0.03786),0.0388 [0.03301 – 0.04548] (best 0.03834),0.03403 [0.03008 – 0.03949] (best 0.03231)
+humidity_impact,0.595 [0.2543 – 0.9554] (best 0.8756),0.6304 [0.2027 – 0.9725] (best 0.4192),0.7006 [0.2969 – 0.9812] (best 0.5228)
+seed_scale_E,1.531 [0.4614 – 4.48] (best 1.367),2.107 [0.7094 – 5.743] (best 2.512),2.928 [1.025 – 6.641] (best 5.385)
+posterior draws / simulations per scenario,638 / 638,638 / 638,627 / 627

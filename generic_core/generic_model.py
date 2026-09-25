@@ -87,11 +87,25 @@ class ScheduledTransferVariable(clt.TransitionVariable):
     that schedule's current value as an exact compartment transfer,
     bypassing the rate-to-probability machinery used by every other
     TransitionVariable in this codebase.
+
+    The schedule value is a daily *proportion*, converted to a count against a
+    pool chosen by the transition's ``dose_pool`` rate_config key:
+
+    - ``"susceptible"`` (default): origin + destination, i.e. everyone not yet
+      infected. ``pool_compartments`` is None.
+    - ``"total_population"``: every compartment of the subpopulation (passed
+      as ``pool_compartments``), so the count is proportion x N regardless of
+      how many people are immune -- e.g. when part of the population starts
+      the season in R, their share of the doses is still delivered to S.
+
+    Either way the count is capped at what is left in the origin.
     """
 
-    def __init__(self, origin: clt.Compartment, destination: clt.Compartment, schedule_name: str):
+    def __init__(self, origin: clt.Compartment, destination: clt.Compartment, schedule_name: str,
+                 pool_compartments: list[clt.Compartment] | None = None):
         super().__init__(origin, destination, "scheduled_exact", is_jointly_distributed=False)
         self.schedule_name = schedule_name
+        self.pool_compartments = pool_compartments
         self._timestep_in_day = 0
 
     def get_current_rate(self, state, params) -> np.ndarray:
@@ -109,11 +123,15 @@ class ScheduledTransferVariable(clt.TransitionVariable):
         origin_val = np.asarray(self.origin.current_val)
         if not is_first_timestep:
             return np.zeros_like(origin_val)
-        # vax_pool="susceptible": proportion applies to origin+destination (the
-        # not-yet-infected pool), not origin alone -- vaccinating someone doesn't
-        # shrink the base future proportions are applied to, only infection does.
-        destination_val = np.asarray(self.destination.current_val)
-        scheduled_count = np.rint(np.asarray(self.current_rate) * (origin_val + destination_val))
+        if self.pool_compartments is not None:
+            # dose_pool="total_population": proportion of everyone in the subpop.
+            pool = sum(np.asarray(c.current_val) for c in self.pool_compartments)
+        else:
+            # dose_pool="susceptible": proportion applies to origin+destination (the
+            # not-yet-infected pool), not origin alone -- vaccinating someone doesn't
+            # shrink the base future proportions are applied to, only infection does.
+            pool = origin_val + np.asarray(self.destination.current_val)
+        scheduled_count = np.rint(np.asarray(self.current_rate) * pool)
         return np.minimum(scheduled_count, origin_val)
 
     def reset(self) -> None:
@@ -432,10 +450,18 @@ class ConfigDrivenSubpopModel(clt.SubpopModel):
                 self._state_init._cvals.get(tc.origin, np.zeros((A, R))), dtype=float
             )
             moved_total = np.zeros_like(remaining)
+            # dose_pool="total_population": the whole (closed) subpopulation,
+            # constant over the replayed history.
+            total_pool = None
+            if tc.rate_config.get("dose_pool", "susceptible") == "total_population":
+                total_pool = sum(
+                    np.asarray(self._state_init._cvals.get(c, np.zeros((A, R))), dtype=float)
+                    for c in self.model_config.compartments
+                )
             for proportion in relevant:
-                # Same vax_pool="susceptible" rule as get_scheduled_exact_realization:
-                # proportion applies to origin+destination (remaining + moved_total).
-                pool = remaining + moved_total
+                # Same pool rule as get_scheduled_exact_realization: origin+
+                # destination (remaining + moved_total) by default.
+                pool = total_pool if total_pool is not None else remaining + moved_total
                 moved = np.minimum(np.rint(np.asarray(proportion, dtype=float) * pool), remaining)
                 remaining = remaining - moved
                 moved_total = moved_total + moved
@@ -475,6 +501,11 @@ class ConfigDrivenSubpopModel(clt.SubpopModel):
                     origin=origin,
                     destination=dest,
                     schedule_name=tc.rate_config["schedule"],
+                    pool_compartments=(
+                        list(self.compartments.values())
+                        if tc.rate_config.get("dose_pool", "susceptible") == "total_population"
+                        else None
+                    ),
                 )
                 continue
 

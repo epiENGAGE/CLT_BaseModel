@@ -3862,14 +3862,11 @@ def _init_ui(mo, pop_subpop_names):
 @app.cell
 def _init_show(
     compartments, get_seed_values, set_seed_values, ic_subpop_selector,
-    population_by_subpop, pop_subpop_names,
-    num_age_groups, num_risk_groups, age_groups,
-    param_grid_columns, grid_to_AR_array, default_seed_row_data,
-    is_metapop, mo, main_tab, np, pd, loaded_config,
-    step_header, section_card, CLT_ACCENT,
+    pop_subpop_names, num_age_groups, num_risk_groups, age_groups,
+    param_grid_columns, default_seed_row_data,
+    is_metapop, mo, main_tab, loaded_config,
 ):
     mo.stop(main_tab.value != "Model Builder", None)
-    _ACC = CLT_ACCENT["builder"]
     _A = int(num_age_groups)
     _R = int(num_risk_groups)
     _seed_comps = compartments[1:] if len(compartments) > 1 else []
@@ -3900,11 +3897,6 @@ def _init_show(
             kind="info",
         ))
 
-    _pop = population_by_subpop.get(_sp)
-    if _pop is None:
-        _pop = np.zeros((_A, _R))
-    _pop = np.asarray(_pop, dtype=float)
-
     _seed_values = get_seed_values()
 
     def _make_on_change(_key):
@@ -3912,7 +3904,6 @@ def _init_show(
             set_seed_values({**get_seed_values(), _key: _new_value})
         return _cb
 
-    _seed_total = np.zeros((_A, _R))
     for _ci, _c in enumerate(_seed_comps):
         _key = f"{_sp}::{_c}"
         _data = _seed_values.get(_key)
@@ -3926,8 +3917,47 @@ def _init_show(
         )
         _parts.append(mo.md(f"**{_c}**"))
         _parts.append(_ed)
+
+    ic_seed_parts = _parts
+    ic_selected_subpop = _sp
+    return ic_seed_parts, ic_selected_subpop
+
+
+@app.cell
+def _init_render(
+    ic_seed_parts, ic_selected_subpop, compartments, get_seed_values,
+    population_by_subpop, num_age_groups, num_risk_groups, age_groups,
+    param_grid_columns, grid_to_AR_array, default_seed_row_data,
+    mo, main_tab, np, pd, loaded_config,
+    step_header, section_card, CLT_ACCENT,
+):
+    # Kept separate from _init_show on purpose: marimo never re-runs the cell
+    # whose UI element's on_change called a state setter, so if the
+    # remainder table lived in _init_show it would not refresh when a seed
+    # grid is edited. This cell only reads get_seed_values, so it re-runs.
+    mo.stop(main_tab.value != "Model Builder", None)
+    _ACC = CLT_ACCENT["builder"]
+    _A = int(num_age_groups)
+    _R = int(num_risk_groups)
+    _seed_comps = compartments[1:] if len(compartments) > 1 else []
+    _age_cols = param_grid_columns(age_groups, _A)
+    _saved_ic = loaded_config.get("initial_conditions", {}) or {}
+    _sp = ic_selected_subpop
+
+    _pop = population_by_subpop.get(_sp)
+    if _pop is None:
+        _pop = np.zeros((_A, _R))
+    _pop = np.asarray(_pop, dtype=float)
+
+    _seed_values = get_seed_values()
+    _seed_total = np.zeros((_A, _R))
+    for _ci, _c in enumerate(_seed_comps):
+        _data = _seed_values.get(f"{_sp}::{_c}")
+        if _data is None:
+            _data = default_seed_row_data(_saved_ic, _sp, _c, _age_cols, _R, _ci == 0)
         _seed_total = _seed_total + grid_to_AR_array(_data, _age_cols, _A, _R)
 
+    _parts = list(ic_seed_parts)
     _remainder = _pop - _seed_total
     _first = compartments[0] if compartments else "?"
     _first_df = pd.DataFrame(

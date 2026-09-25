@@ -1,0 +1,8 @@
+{
+  "source": "run_simulations_MA_vax.py -> results source (results_full table)",
+  "db": "/Users/rfp437/Work/CityLevelTransmission/CLT_BaseModel/generic_core/examples/MA_vax/archive/2026-08-high-vax-rates/simulation_output_MA_vax_old_vax_initial_R_20pct_vax_total_pop_param_set_stochastic/results_parquet",
+  "model_config_file": "/Users/rfp437/Work/CityLevelTransmission/CLT_BaseModel/generic_core/examples/MA_vax/archive/2026-08-high-vax-rates/model_config_MA_vax_old_vax_initial_R_20pct_vax_total_pop.json",
+  "fitted_params_file": "/Users/rfp437/Work/CityLevelTransmission/CLT_BaseModel/generic_core/examples/MA_vax/archive/2026-08-high-vax-rates/fitted_params_MA_vax_old_vax_initial_R_20pct_vax_total_pop.json",
+  "n_reps": 627,
+  "generated_at": "2026-09-25T03:53:26.744581+00:00"
+}

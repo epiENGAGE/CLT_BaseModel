@@ -102,6 +102,38 @@ def test_scheduled_exact_pool_count_still_capped_at_origin():
     np.testing.assert_array_equal(realized, np.array([[50.0]]))
 
 
+def test_scheduled_exact_total_population_pool():
+    # dose_pool="total_population": the proportion is taken against every
+    # compartment, so people outside origin+destination (here R) still count.
+    # (700 + 100 + 200) * 0.1 = 100, vs. (700 + 100) * 0.1 = 80 by default.
+    origin = clt.Compartment(np.array([[700.0]]))
+    destination = clt.Compartment(np.array([[100.0]]))
+    recovered = clt.Compartment(np.array([[200.0]]))
+    stv = ScheduledTransferVariable(origin, destination, schedule_name="vax_sched",
+                                    pool_compartments=[origin, destination, recovered])
+    stv.current_rate = np.array([[0.1]])
+    np.testing.assert_array_equal(stv.get_scheduled_exact_realization(None, num_timesteps=1),
+                                  np.array([[100.0]]))
+
+
+def test_scheduled_exact_total_population_pool_still_capped_at_origin():
+    origin = clt.Compartment(np.array([[30.0]]))
+    destination = clt.Compartment(np.array([[0.0]]))
+    recovered = clt.Compartment(np.array([[970.0]]))
+    stv = ScheduledTransferVariable(origin, destination, schedule_name="vax_sched",
+                                    pool_compartments=[origin, destination, recovered])
+    stv.current_rate = np.array([[0.5]])
+    np.testing.assert_array_equal(stv.get_scheduled_exact_realization(None, num_timesteps=1),
+                                  np.array([[30.0]]))
+
+
+def test_scheduled_exact_rejects_unknown_dose_pool():
+    from generic_core.rate_templates import ScheduledExactTransferRate
+    with pytest.raises(ValueError, match="dose_pool"):
+        ScheduledExactTransferRate().validate_config(
+            {"schedule": "vax_sched", "dose_pool": "everyone"}, set(), set(), {"vax_sched"})
+
+
 def test_scheduled_exact_reset_restores_day_counter():
     stv = _make_stv([[100.0]], [[0.1]])
     num_timesteps = 3
@@ -203,9 +235,12 @@ def test_scheduled_exact_rejected_in_jointly_distributed():
 #     values -- exercised directly against generic_core, no notebook involved.
 # ---------------------------------------------------------------------------
 
-def _build_scheduled_exact_model(start_date, reset_param_value, *, with_reset_key=True):
+def _build_scheduled_exact_model(start_date, reset_param_value, *, with_reset_key=True,
+                                 dose_pool=None, r_init=None):
     """Build a minimal S->V ConfigDrivenSubpopModel with a vaccine_schedule CSV
-    starting well before start_date, to exercise pre-simulation accounting."""
+    starting well before start_date, to exercise pre-simulation accounting.
+    `r_init` adds a transition-free R compartment holding that many people
+    (e.g. prior immunity); `dose_pool` sets the transition's dose_pool."""
     import pandas as pd
     from generic_core.generic_model import (
         ConfigDrivenSubpopModel,
@@ -216,9 +251,11 @@ def _build_scheduled_exact_model(start_date, reset_param_value, *, with_reset_ke
     rate_config = {"schedule": "vax_sched"}
     if with_reset_key:
         rate_config["compartment_reset_date_mm_dd_param"] = "vaccinated_compartment_reset_date_mm_dd"
+    if dose_pool is not None:
+        rate_config["dose_pool"] = dose_pool
 
     config_dict = {
-        "compartments": ["S", "V"],
+        "compartments": ["S", "V"] + (["R"] if r_init is not None else []),
         "params": {
             "num_age_groups": 1,
             "num_risk_groups": 1,
@@ -263,6 +300,8 @@ def _build_scheduled_exact_model(start_date, reset_param_value, *, with_reset_ke
     A, R = 1, 1
 
     compartment_init = {"S": np.array([[1000.0]]), "V": np.array([[0.0]])}
+    if r_init is not None:
+        compartment_init["R"] = np.array([[float(r_init)]])
     state_init = build_state_from_config(model_config, compartment_init, {})
     params = build_params_from_config(model_config, num_age_groups=A, num_risk_groups=R)
 
@@ -304,6 +343,24 @@ def test_scheduled_exact_replays_pre_simulation_history_into_compartments():
     assert moved_total == 500.0  # 5 days x 100, no depletion of the pool
     np.testing.assert_allclose(model.compartments["V"].current_val, [[moved_total]])
     np.testing.assert_allclose(model.compartments["S"].current_val, [[1000.0 - moved_total]])
+
+
+@pytest.mark.parametrize("dose_pool, expected_moved", [
+    # default: 0.1 x (S + V) = 0.1 x 1000 = 100/day
+    (None, 500.0),
+    # total population: 0.1 x (S + V + R) = 0.1 x 1250 = 125/day
+    ("total_population", 625.0),
+])
+def test_scheduled_exact_pre_simulation_history_dose_pool(dose_pool, expected_moved):
+    """The pre-simulation replay uses the same pool as the in-simulation
+    transfer: with 250 people in R, dose_pool="total_population" moves
+    0.1 x 1250 per day instead of 0.1 x 1000."""
+    model = _build_scheduled_exact_model(
+        start_date=datetime.date(2024, 10, 1), reset_param_value=None,
+        dose_pool=dose_pool, r_init=250.0,
+    )
+    np.testing.assert_allclose(model.compartments["V"].current_val, [[expected_moved]])
+    np.testing.assert_allclose(model.compartments["S"].current_val, [[1000.0 - expected_moved]])
 
 
 def test_scheduled_exact_reset_date_excludes_history_before_it():

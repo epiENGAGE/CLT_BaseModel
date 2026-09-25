@@ -1,0 +1,313 @@
+﻿Metric,Model,Age group,Value
+Doses delivered (baseline),No initial immunity,0,"31,409 [31,190 – 31,518]"
+Doses delivered (baseline),No initial immunity,1-4,"251,202 [249,542 – 252,051]"
+Doses delivered (baseline),No initial immunity,5-12,"421,409 [416,976 – 423,781]"
+Doses delivered (baseline),No initial immunity,13-17,"222,816 [220,695 – 223,972]"
+Doses delivered (baseline),No initial immunity,18-49,"1,154,627 [1,139,790 – 1,162,143]"
+Doses delivered (baseline),No initial immunity,50-64,"827,816 [819,445 – 832,044]"
+Doses delivered (baseline),No initial immunity,65+,"868,876 [864,287 – 871,177]"
+Doses delivered (baseline),No initial immunity,All,"3,778,182 [3,741,571 – 3,796,678]"
+Doses delivered (baseline),"20% R, doses of S+SV",0,"25,066 [24,871 – 25,160]"
+Doses delivered (baseline),"20% R, doses of S+SV",1-4,"200,464 [198,913 – 201,218]"
+Doses delivered (baseline),"20% R, doses of S+SV",5-12,"335,772 [331,584 – 337,870]"
+Doses delivered (baseline),"20% R, doses of S+SV",13-17,"177,595 [175,555 – 178,620]"
+Doses delivered (baseline),"20% R, doses of S+SV",18-49,"919,221 [906,052 – 925,830]"
+Doses delivered (baseline),"20% R, doses of S+SV",50-64,"659,698 [652,202 – 663,451]"
+Doses delivered (baseline),"20% R, doses of S+SV",65+,"693,708 [689,608 – 695,762]"
+Doses delivered (baseline),"20% R, doses of S+SV",All,"3,011,544 [2,978,607 – 3,027,793]"
+Doses delivered (baseline),"20% R, doses of total population",0,"31,787 [31,787 – 31,787]"
+Doses delivered (baseline),"20% R, doses of total population",1-4,"221,572 [220,524 – 222,234]"
+Doses delivered (baseline),"20% R, doses of total population",5-12,"429,737 [429,737 – 429,737]"
+Doses delivered (baseline),"20% R, doses of total population",13-17,"226,884 [226,884 – 226,884]"
+Doses delivered (baseline),"20% R, doses of total population",18-49,"1,181,355 [1,181,355 – 1,181,355]"
+Doses delivered (baseline),"20% R, doses of total population",50-64,"842,877 [842,877 – 842,877]"
+Doses delivered (baseline),"20% R, doses of total population",65+,"876,988 [876,988 – 876,988]"
+Doses delivered (baseline),"20% R, doses of total population",All,"3,811,200 [3,810,152 – 3,811,862]"
+"Hospitalizations averted, infection protection only",No initial immunity,0,82 [53 – 107]
+"Hospitalizations averted, infection protection only",No initial immunity,1-4,472 [351 – 569]
+"Hospitalizations averted, infection protection only",No initial immunity,5-12,426 [286 – 573]
+"Hospitalizations averted, infection protection only",No initial immunity,13-17,206 [138 – 302]
+"Hospitalizations averted, infection protection only",No initial immunity,18-49,"1,332 [949 – 1,765]"
+"Hospitalizations averted, infection protection only",No initial immunity,50-64,"1,464 [1,038 – 1,942]"
+"Hospitalizations averted, infection protection only",No initial immunity,65+,"8,569 [6,624 – 10,407]"
+"Hospitalizations averted, infection protection only",No initial immunity,All,"12,608 [9,872 – 14,997]"
+"Hospitalizations averted, infection protection only","20% R, doses of S+SV",0,79 [53 – 99]
+"Hospitalizations averted, infection protection only","20% R, doses of S+SV",1-4,421 [306 – 502]
+"Hospitalizations averted, infection protection only","20% R, doses of S+SV",5-12,380 [250 – 509]
+"Hospitalizations averted, infection protection only","20% R, doses of S+SV",13-17,183 [118 – 262]
+"Hospitalizations averted, infection protection only","20% R, doses of S+SV",18-49,"1,197 [851 – 1,564]"
+"Hospitalizations averted, infection protection only","20% R, doses of S+SV",50-64,"1,320 [931 – 1,760]"
+"Hospitalizations averted, infection protection only","20% R, doses of S+SV",65+,"7,683 [5,823 – 9,258]"
+"Hospitalizations averted, infection protection only","20% R, doses of S+SV",All,"11,299 [8,561 – 13,403]"
+"Hospitalizations averted, infection protection only","20% R, doses of total population",0,101 [61 – 132]
+"Hospitalizations averted, infection protection only","20% R, doses of total population",1-4,581 [445 – 689]
+"Hospitalizations averted, infection protection only","20% R, doses of total population",5-12,525 [346 – 679]
+"Hospitalizations averted, infection protection only","20% R, doses of total population",13-17,250 [164 – 357]
+"Hospitalizations averted, infection protection only","20% R, doses of total population",18-49,"1,542 [1,146 – 2,006]"
+"Hospitalizations averted, infection protection only","20% R, doses of total population",50-64,"1,762 [1,295 – 2,342]"
+"Hospitalizations averted, infection protection only","20% R, doses of total population",65+,"10,601 [8,156 – 12,935]"
+"Hospitalizations averted, infection protection only","20% R, doses of total population",All,"15,370 [12,126 – 18,459]"
+"% of no-vax hospitalizations averted, infection protection only",No initial immunity,0,69.0% [63.8% – 72.5%]
+"% of no-vax hospitalizations averted, infection protection only",No initial immunity,1-4,74.5% [70.0% – 77.6%]
+"% of no-vax hospitalizations averted, infection protection only",No initial immunity,5-12,71.8% [66.2% – 75.6%]
+"% of no-vax hospitalizations averted, infection protection only",No initial immunity,13-17,69.1% [63.0% – 73.2%]
+"% of no-vax hospitalizations averted, infection protection only",No initial immunity,18-49,64.0% [57.6% – 68.3%]
+"% of no-vax hospitalizations averted, infection protection only",No initial immunity,50-64,65.4% [59.5% – 69.4%]
+"% of no-vax hospitalizations averted, infection protection only",No initial immunity,65+,63.0% [57.1% – 67.0%]
+"% of no-vax hospitalizations averted, infection protection only",No initial immunity,All,64.1% [58.4% – 68.1%]
+"% of no-vax hospitalizations averted, infection protection only","20% R, doses of S+SV",0,66.8% [61.2% – 70.3%]
+"% of no-vax hospitalizations averted, infection protection only","20% R, doses of S+SV",1-4,72.7% [67.6% – 75.7%]
+"% of no-vax hospitalizations averted, infection protection only","20% R, doses of S+SV",5-12,69.5% [63.4% – 73.2%]
+"% of no-vax hospitalizations averted, infection protection only","20% R, doses of S+SV",13-17,66.6% [60.0% – 70.6%]
+"% of no-vax hospitalizations averted, infection protection only","20% R, doses of S+SV",18-49,61.3% [54.4% – 65.6%]
+"% of no-vax hospitalizations averted, infection protection only","20% R, doses of S+SV",50-64,62.9% [56.4% – 66.9%]
+"% of no-vax hospitalizations averted, infection protection only","20% R, doses of S+SV",65+,60.5% [54.1% – 64.5%]
+"% of no-vax hospitalizations averted, infection protection only","20% R, doses of S+SV",All,61.7% [55.3% – 65.5%]
+"% of no-vax hospitalizations averted, infection protection only","20% R, doses of total population",0,73.1% [68.5% – 76.4%]
+"% of no-vax hospitalizations averted, infection protection only","20% R, doses of total population",1-4,79.1% [75.2% – 81.8%]
+"% of no-vax hospitalizations averted, infection protection only","20% R, doses of total population",5-12,75.8% [70.9% – 79.1%]
+"% of no-vax hospitalizations averted, infection protection only","20% R, doses of total population",13-17,72.7% [67.3% – 76.4%]
+"% of no-vax hospitalizations averted, infection protection only","20% R, doses of total population",18-49,67.1% [61.0% – 71.2%]
+"% of no-vax hospitalizations averted, infection protection only","20% R, doses of total population",50-64,68.9% [63.3% – 72.7%]
+"% of no-vax hospitalizations averted, infection protection only","20% R, doses of total population",65+,66.5% [61.0% – 70.3%]
+"% of no-vax hospitalizations averted, infection protection only","20% R, doses of total population",All,67.7% [62.1% – 71.4%]
+"Hospitalizations averted, hospitalization reduction",No initial immunity,0,1 [1 – 1]
+"Hospitalizations averted, hospitalization reduction",No initial immunity,1-4,8 [6 – 11]
+"Hospitalizations averted, hospitalization reduction",No initial immunity,5-12,6 [4 – 8]
+"Hospitalizations averted, hospitalization reduction",No initial immunity,13-17,3 [2 – 4]
+"Hospitalizations averted, hospitalization reduction",No initial immunity,18-49,17 [14 – 20]
+"Hospitalizations averted, hospitalization reduction",No initial immunity,50-64,27 [22 – 33]
+"Hospitalizations averted, hospitalization reduction",No initial immunity,65+,909 [825 – 990]
+"Hospitalizations averted, hospitalization reduction",No initial immunity,All,"971 [886 – 1,052]"
+"Hospitalizations averted, hospitalization reduction","20% R, doses of S+SV",0,1 [1 – 1]
+"Hospitalizations averted, hospitalization reduction","20% R, doses of S+SV",1-4,8 [6 – 10]
+"Hospitalizations averted, hospitalization reduction","20% R, doses of S+SV",5-12,6 [4 – 8]
+"Hospitalizations averted, hospitalization reduction","20% R, doses of S+SV",13-17,3 [2 – 3]
+"Hospitalizations averted, hospitalization reduction","20% R, doses of S+SV",18-49,17 [14 – 21]
+"Hospitalizations averted, hospitalization reduction","20% R, doses of S+SV",50-64,28 [22 – 33]
+"Hospitalizations averted, hospitalization reduction","20% R, doses of S+SV",65+,905 [824 – 984]
+"Hospitalizations averted, hospitalization reduction","20% R, doses of S+SV",All,"968 [884 – 1,046]"
+"Hospitalizations averted, hospitalization reduction","20% R, doses of total population",0,1 [1 – 1]
+"Hospitalizations averted, hospitalization reduction","20% R, doses of total population",1-4,11 [8 – 14]
+"Hospitalizations averted, hospitalization reduction","20% R, doses of total population",5-12,8 [6 – 10]
+"Hospitalizations averted, hospitalization reduction","20% R, doses of total population",13-17,4 [2 – 5]
+"Hospitalizations averted, hospitalization reduction","20% R, doses of total population",18-49,22 [17 – 26]
+"Hospitalizations averted, hospitalization reduction","20% R, doses of total population",50-64,36 [29 – 44]
+"Hospitalizations averted, hospitalization reduction","20% R, doses of total population",65+,"1,208 [1,089 – 1,329]"
+"Hospitalizations averted, hospitalization reduction","20% R, doses of total population",All,"1,289 [1,172 – 1,410]"
+"% of no-vax hospitalizations averted, hospitalization reduction",No initial immunity,0,0.6% [0.6% – 0.8%]
+"% of no-vax hospitalizations averted, hospitalization reduction",No initial immunity,1-4,1.3% [1.1% – 1.5%]
+"% of no-vax hospitalizations averted, hospitalization reduction",No initial immunity,5-12,1.0% [0.9% – 1.2%]
+"% of no-vax hospitalizations averted, hospitalization reduction",No initial immunity,13-17,0.9% [0.7% – 1.0%]
+"% of no-vax hospitalizations averted, hospitalization reduction",No initial immunity,18-49,0.8% [0.7% – 0.9%]
+"% of no-vax hospitalizations averted, hospitalization reduction",No initial immunity,50-64,1.2% [1.1% – 1.4%]
+"% of no-vax hospitalizations averted, hospitalization reduction",No initial immunity,65+,6.7% [6.0% – 7.7%]
+"% of no-vax hospitalizations averted, hospitalization reduction",No initial immunity,All,4.9% [4.4% – 5.8%]
+"% of no-vax hospitalizations averted, hospitalization reduction","20% R, doses of S+SV",0,0.7% [0.6% – 0.8%]
+"% of no-vax hospitalizations averted, hospitalization reduction","20% R, doses of S+SV",1-4,1.4% [1.2% – 1.6%]
+"% of no-vax hospitalizations averted, hospitalization reduction","20% R, doses of S+SV",5-12,1.1% [1.0% – 1.3%]
+"% of no-vax hospitalizations averted, hospitalization reduction","20% R, doses of S+SV",13-17,0.9% [0.8% – 1.1%]
+"% of no-vax hospitalizations averted, hospitalization reduction","20% R, doses of S+SV",18-49,0.9% [0.8% – 1.0%]
+"% of no-vax hospitalizations averted, hospitalization reduction","20% R, doses of S+SV",50-64,1.3% [1.2% – 1.5%]
+"% of no-vax hospitalizations averted, hospitalization reduction","20% R, doses of S+SV",65+,7.1% [6.4% – 8.3%]
+"% of no-vax hospitalizations averted, hospitalization reduction","20% R, doses of S+SV",All,5.3% [4.7% – 6.2%]
+"% of no-vax hospitalizations averted, hospitalization reduction","20% R, doses of total population",0,0.7% [0.7% – 0.9%]
+"% of no-vax hospitalizations averted, hospitalization reduction","20% R, doses of total population",1-4,1.5% [1.3% – 1.7%]
+"% of no-vax hospitalizations averted, hospitalization reduction","20% R, doses of total population",5-12,1.2% [1.0% – 1.4%]
+"% of no-vax hospitalizations averted, hospitalization reduction","20% R, doses of total population",13-17,1.0% [0.9% – 1.2%]
+"% of no-vax hospitalizations averted, hospitalization reduction","20% R, doses of total population",18-49,0.9% [0.8% – 1.1%]
+"% of no-vax hospitalizations averted, hospitalization reduction","20% R, doses of total population",50-64,1.4% [1.2% – 1.7%]
+"% of no-vax hospitalizations averted, hospitalization reduction","20% R, doses of total population",65+,7.6% [6.7% – 8.9%]
+"% of no-vax hospitalizations averted, hospitalization reduction","20% R, doses of total population",All,5.7% [5.0% – 6.6%]
+"Hospitalizations averted, total",No initial immunity,0,83 [53 – 108]
+"Hospitalizations averted, total",No initial immunity,1-4,480 [357 – 580]
+"Hospitalizations averted, total",No initial immunity,5-12,432 [292 – 581]
+"Hospitalizations averted, total",No initial immunity,13-17,208 [140 – 305]
+"Hospitalizations averted, total",No initial immunity,18-49,"1,348 [965 – 1,783]"
+"Hospitalizations averted, total",No initial immunity,50-64,"1,492 [1,063 – 1,975]"
+"Hospitalizations averted, total",No initial immunity,65+,"9,481 [7,589 – 11,327]"
+"Hospitalizations averted, total",No initial immunity,All,"13,584 [10,817 – 15,997]"
+"Hospitalizations averted, total","20% R, doses of S+SV",0,79 [53 – 100]
+"Hospitalizations averted, total","20% R, doses of S+SV",1-4,429 [313 – 511]
+"Hospitalizations averted, total","20% R, doses of S+SV",5-12,385 [256 – 516]
+"Hospitalizations averted, total","20% R, doses of S+SV",13-17,186 [120 – 265]
+"Hospitalizations averted, total","20% R, doses of S+SV",18-49,"1,215 [864 – 1,582]"
+"Hospitalizations averted, total","20% R, doses of S+SV",50-64,"1,347 [952 – 1,791]"
+"Hospitalizations averted, total","20% R, doses of S+SV",65+,"8,581 [6,683 – 10,218]"
+"Hospitalizations averted, total","20% R, doses of S+SV",All,"12,284 [9,539 – 14,405]"
+"Hospitalizations averted, total","20% R, doses of total population",0,102 [61 – 133]
+"Hospitalizations averted, total","20% R, doses of total population",1-4,591 [454 – 703]
+"Hospitalizations averted, total","20% R, doses of total population",5-12,534 [351 – 689]
+"Hospitalizations averted, total","20% R, doses of total population",13-17,253 [167 – 362]
+"Hospitalizations averted, total","20% R, doses of total population",18-49,"1,563 [1,165 – 2,031]"
+"Hospitalizations averted, total","20% R, doses of total population",50-64,"1,799 [1,328 – 2,381]"
+"Hospitalizations averted, total","20% R, doses of total population",65+,"11,835 [9,253 – 14,223]"
+"Hospitalizations averted, total","20% R, doses of total population",All,"16,663 [13,378 – 19,732]"
+"% of no-vax hospitalizations averted, total",No initial immunity,0,69.6% [64.6% – 73.0%]
+"% of no-vax hospitalizations averted, total",No initial immunity,1-4,75.8% [71.5% – 78.8%]
+"% of no-vax hospitalizations averted, total",No initial immunity,5-12,72.8% [67.4% – 76.5%]
+"% of no-vax hospitalizations averted, total",No initial immunity,13-17,70.0% [64.1% – 74.0%]
+"% of no-vax hospitalizations averted, total",No initial immunity,18-49,64.8% [58.6% – 69.0%]
+"% of no-vax hospitalizations averted, total",No initial immunity,50-64,66.6% [60.9% – 70.5%]
+"% of no-vax hospitalizations averted, total",No initial immunity,65+,69.7% [64.8% – 72.9%]
+"% of no-vax hospitalizations averted, total",No initial immunity,All,69.1% [64.1% – 72.5%]
+"% of no-vax hospitalizations averted, total","20% R, doses of S+SV",0,67.5% [62.0% – 70.9%]
+"% of no-vax hospitalizations averted, total","20% R, doses of S+SV",1-4,74.1% [69.3% – 77.0%]
+"% of no-vax hospitalizations averted, total","20% R, doses of S+SV",5-12,70.6% [64.7% – 74.2%]
+"% of no-vax hospitalizations averted, total","20% R, doses of S+SV",13-17,67.5% [61.1% – 71.5%]
+"% of no-vax hospitalizations averted, total","20% R, doses of S+SV",18-49,62.2% [55.4% – 66.3%]
+"% of no-vax hospitalizations averted, total","20% R, doses of S+SV",50-64,64.2% [58.0% – 68.0%]
+"% of no-vax hospitalizations averted, total","20% R, doses of S+SV",65+,67.6% [62.4% – 70.9%]
+"% of no-vax hospitalizations averted, total","20% R, doses of S+SV",All,66.9% [61.4% – 70.3%]
+"% of no-vax hospitalizations averted, total","20% R, doses of total population",0,73.9% [69.4% – 77.0%]
+"% of no-vax hospitalizations averted, total","20% R, doses of total population",1-4,80.6% [76.9% – 83.1%]
+"% of no-vax hospitalizations averted, total","20% R, doses of total population",5-12,77.0% [72.4% – 80.2%]
+"% of no-vax hospitalizations averted, total","20% R, doses of total population",13-17,73.7% [68.5% – 77.3%]
+"% of no-vax hospitalizations averted, total","20% R, doses of total population",18-49,68.0% [62.1% – 72.0%]
+"% of no-vax hospitalizations averted, total","20% R, doses of total population",50-64,70.3% [65.0% – 74.0%]
+"% of no-vax hospitalizations averted, total","20% R, doses of total population",65+,74.1% [69.8% – 77.1%]
+"% of no-vax hospitalizations averted, total","20% R, doses of total population",All,73.3% [68.7% – 76.4%]
+"Hospitalizations, baseline",No initial immunity,0,36 [24 – 50]
+"Hospitalizations, baseline",No initial immunity,1-4,155 [108 – 203]
+"Hospitalizations, baseline",No initial immunity,5-12,162 [118 – 212]
+"Hospitalizations, baseline",No initial immunity,13-17,91 [63 – 124]
+"Hospitalizations, baseline",No initial immunity,18-49,740 [596 – 903]
+"Hospitalizations, baseline",No initial immunity,50-64,753 [600 – 913]
+"Hospitalizations, baseline",No initial immunity,65+,"4,144 [3,748 – 4,506]"
+"Hospitalizations, baseline",No initial immunity,All,"6,068 [5,628 – 6,525]"
+"Hospitalizations, baseline","20% R, doses of S+SV",0,37 [27 – 52]
+"Hospitalizations, baseline","20% R, doses of S+SV",1-4,151 [108 – 193]
+"Hospitalizations, baseline","20% R, doses of S+SV",5-12,163 [119 – 208]
+"Hospitalizations, baseline","20% R, doses of S+SV",13-17,90 [60 – 122]
+"Hospitalizations, baseline","20% R, doses of S+SV",18-49,738 [603 – 917]
+"Hospitalizations, baseline","20% R, doses of S+SV",50-64,756 [610 – 915]
+"Hospitalizations, baseline","20% R, doses of S+SV",65+,"4,119 [3,766 – 4,476]"
+"Hospitalizations, baseline","20% R, doses of S+SV",All,"6,071 [5,648 – 6,481]"
+"Hospitalizations, baseline","20% R, doses of total population",0,36 [21 – 49]
+"Hospitalizations, baseline","20% R, doses of total population",1-4,143 [105 – 187]
+"Hospitalizations, baseline","20% R, doses of total population",5-12,158 [112 – 205]
+"Hospitalizations, baseline","20% R, doses of total population",13-17,91 [63 – 119]
+"Hospitalizations, baseline","20% R, doses of total population",18-49,739 [595 – 885]
+"Hospitalizations, baseline","20% R, doses of total population",50-64,760 [613 – 929]
+"Hospitalizations, baseline","20% R, doses of total population",65+,"4,137 [3,720 – 4,534]"
+"Hospitalizations, baseline","20% R, doses of total population",All,"6,054 [5,640 – 6,507]"
+"Hospitalizations, no vax",No initial immunity,0,118 [77 – 156]
+"Hospitalizations, no vax",No initial immunity,1-4,636 [476 – 773]
+"Hospitalizations, no vax",No initial immunity,5-12,593 [422 – 785]
+"Hospitalizations, no vax",No initial immunity,13-17,299 [209 – 422]
+"Hospitalizations, no vax",No initial immunity,18-49,"2,080 [1,610 – 2,642]"
+"Hospitalizations, no vax",No initial immunity,50-64,"2,233 [1,680 – 2,871]"
+"Hospitalizations, no vax",No initial immunity,65+,"13,591 [11,519 – 15,562]"
+"Hospitalizations, no vax",No initial immunity,All,"19,615 [16,830 – 22,221]"
+"Hospitalizations, no vax","20% R, doses of S+SV",0,117 [79 – 151]
+"Hospitalizations, no vax","20% R, doses of S+SV",1-4,579 [432 – 697]
+"Hospitalizations, no vax","20% R, doses of S+SV",5-12,547 [392 – 711]
+"Hospitalizations, no vax","20% R, doses of S+SV",13-17,274 [186 – 382]
+"Hospitalizations, no vax","20% R, doses of S+SV",18-49,"1,946 [1,509 – 2,428]"
+"Hospitalizations, no vax","20% R, doses of S+SV",50-64,"2,101 [1,584 – 2,690]"
+"Hospitalizations, no vax","20% R, doses of S+SV",65+,"12,684 [10,542 – 14,497]"
+"Hospitalizations, no vax","20% R, doses of S+SV",All,"18,348 [15,339 – 20,553]"
+"Hospitalizations, no vax","20% R, doses of total population",0,138 [83 – 179]
+"Hospitalizations, no vax","20% R, doses of total population",1-4,734 [563 – 885]
+"Hospitalizations, no vax","20% R, doses of total population",5-12,695 [469 – 889]
+"Hospitalizations, no vax","20% R, doses of total population",13-17,345 [240 – 479]
+"Hospitalizations, no vax","20% R, doses of total population",18-49,"2,303 [1,811 – 2,880]"
+"Hospitalizations, no vax","20% R, doses of total population",50-64,"2,562 [1,995 – 3,273]"
+"Hospitalizations, no vax","20% R, doses of total population",65+,"15,974 [13,171 – 18,587]"
+"Hospitalizations, no vax","20% R, doses of total population",All,"22,761 [19,404 – 25,931]"
+"Attack rate, baseline",No initial immunity,0,5.1% [3.7% – 8.0%]
+"Attack rate, baseline",No initial immunity,1-4,5.0% [3.6% – 7.8%]
+"Attack rate, baseline",No initial immunity,5-12,7.7% [5.6% – 12.0%]
+"Attack rate, baseline",No initial immunity,13-17,8.7% [6.3% – 13.4%]
+"Attack rate, baseline",No initial immunity,18-49,8.7% [6.3% – 13.4%]
+"Attack rate, baseline",No initial immunity,50-64,7.4% [5.4% – 11.5%]
+"Attack rate, baseline",No initial immunity,65+,4.8% [3.5% – 7.6%]
+"Attack rate, baseline",No initial immunity,All,7.5% [5.4% – 11.6%]
+"Attack rate, baseline","20% R, doses of S+SV",0,5.0% [3.7% – 7.6%]
+"Attack rate, baseline","20% R, doses of S+SV",1-4,4.9% [3.6% – 7.4%]
+"Attack rate, baseline","20% R, doses of S+SV",5-12,7.5% [5.6% – 11.3%]
+"Attack rate, baseline","20% R, doses of S+SV",13-17,8.5% [6.3% – 12.7%]
+"Attack rate, baseline","20% R, doses of S+SV",18-49,8.5% [6.3% – 12.7%]
+"Attack rate, baseline","20% R, doses of S+SV",50-64,7.2% [5.4% – 10.8%]
+"Attack rate, baseline","20% R, doses of S+SV",65+,4.8% [3.5% – 7.2%]
+"Attack rate, baseline","20% R, doses of S+SV",All,7.3% [5.4% – 11.0%]
+"Attack rate, baseline","20% R, doses of total population",0,5.2% [3.8% – 7.3%]
+"Attack rate, baseline","20% R, doses of total population",1-4,4.7% [3.5% – 6.6%]
+"Attack rate, baseline","20% R, doses of total population",5-12,7.2% [5.4% – 10.3%]
+"Attack rate, baseline","20% R, doses of total population",13-17,8.4% [6.3% – 11.8%]
+"Attack rate, baseline","20% R, doses of total population",18-49,9.0% [6.7% – 12.6%]
+"Attack rate, baseline","20% R, doses of total population",50-64,7.6% [5.6% – 10.7%]
+"Attack rate, baseline","20% R, doses of total population",65+,5.2% [3.8% – 7.3%]
+"Attack rate, baseline","20% R, doses of total population",All,7.6% [5.7% – 10.8%]
+"Attack rate, no vax",No initial immunity,0,16.6% [13.4% – 22.3%]
+"Attack rate, no vax",No initial immunity,1-4,19.7% [16.0% – 26.1%]
+"Attack rate, no vax",No initial immunity,5-12,27.6% [22.9% – 35.2%]
+"Attack rate, no vax",No initial immunity,13-17,28.3% [23.5% – 36.1%]
+"Attack rate, no vax",No initial immunity,18-49,24.3% [19.9% – 32.0%]
+"Attack rate, no vax",No initial immunity,50-64,21.4% [17.4% – 28.5%]
+"Attack rate, no vax",No initial immunity,65+,13.1% [10.5% – 17.9%]
+"Attack rate, no vax",No initial immunity,All,22.0% [18.0% – 29.0%]
+"Attack rate, no vax","20% R, doses of S+SV",0,15.2% [12.4% – 19.5%]
+"Attack rate, no vax","20% R, doses of S+SV",1-4,17.8% [14.8% – 22.7%]
+"Attack rate, no vax","20% R, doses of S+SV",5-12,24.7% [20.8% – 30.6%]
+"Attack rate, no vax","20% R, doses of S+SV",13-17,25.3% [21.4% – 31.4%]
+"Attack rate, no vax","20% R, doses of S+SV",18-49,22.0% [18.3% – 27.8%]
+"Attack rate, no vax","20% R, doses of S+SV",50-64,19.5% [16.1% – 24.8%]
+"Attack rate, no vax","20% R, doses of S+SV",65+,12.0% [9.8% – 15.7%]
+"Attack rate, no vax","20% R, doses of S+SV",All,19.9% [16.6% – 25.3%]
+"Attack rate, no vax","20% R, doses of total population",0,19.2% [15.9% – 23.5%]
+"Attack rate, no vax","20% R, doses of total population",1-4,22.3% [18.8% – 26.9%]
+"Attack rate, no vax","20% R, doses of total population",5-12,30.0% [25.8% – 35.2%]
+"Attack rate, no vax","20% R, doses of total population",13-17,30.7% [26.4% – 36.0%]
+"Attack rate, no vax","20% R, doses of total population",18-49,27.3% [23.1% – 32.7%]
+"Attack rate, no vax","20% R, doses of total population",50-64,24.4% [20.5% – 29.6%]
+"Attack rate, no vax","20% R, doses of total population",65+,15.4% [12.7% – 19.1%]
+"Attack rate, no vax","20% R, doses of total population",All,24.8% [21.0% – 29.8%]
+"IHR, unvaccinated (I_to_H)",No initial immunity,0,1.023% [0.601% – 1.365%]
+"IHR, unvaccinated (I_to_H)",No initial immunity,1-4,1.170% [0.765% – 1.380%]
+"IHR, unvaccinated (I_to_H)",No initial immunity,5-12,0.355% [0.209% – 0.511%]
+"IHR, unvaccinated (I_to_H)",No initial immunity,13-17,0.252% [0.153% – 0.414%]
+"IHR, unvaccinated (I_to_H)",No initial immunity,18-49,0.288% [0.176% – 0.422%]
+"IHR, unvaccinated (I_to_H)",No initial immunity,50-64,0.731% [0.438% – 1.077%]
+"IHR, unvaccinated (I_to_H)",No initial immunity,65+,8.527% [5.466% – 11.865%]
+"IHR, unvaccinated (I_to_H)",No initial immunity,All,n/a
+"IHR, unvaccinated (I_to_H)","20% R, doses of S+SV",0,1.127% [0.676% – 1.378%]
+"IHR, unvaccinated (I_to_H)","20% R, doses of S+SV",1-4,1.177% [0.744% – 1.385%]
+"IHR, unvaccinated (I_to_H)","20% R, doses of S+SV",5-12,0.366% [0.221% – 0.525%]
+"IHR, unvaccinated (I_to_H)","20% R, doses of S+SV",13-17,0.261% [0.153% – 0.413%]
+"IHR, unvaccinated (I_to_H)","20% R, doses of S+SV",18-49,0.298% [0.192% – 0.425%]
+"IHR, unvaccinated (I_to_H)","20% R, doses of S+SV",50-64,0.756% [0.472% – 1.134%]
+"IHR, unvaccinated (I_to_H)","20% R, doses of S+SV",65+,8.658% [5.648% – 11.802%]
+"IHR, unvaccinated (I_to_H)","20% R, doses of S+SV",All,n/a
+"IHR, unvaccinated (I_to_H)","20% R, doses of total population",0,1.021% [0.593% – 1.375%]
+"IHR, unvaccinated (I_to_H)","20% R, doses of total population",1-4,1.198% [0.842% – 1.381%]
+"IHR, unvaccinated (I_to_H)","20% R, doses of total population",5-12,0.384% [0.233% – 0.524%]
+"IHR, unvaccinated (I_to_H)","20% R, doses of total population",13-17,0.272% [0.171% – 0.406%]
+"IHR, unvaccinated (I_to_H)","20% R, doses of total population",18-49,0.285% [0.195% – 0.400%]
+"IHR, unvaccinated (I_to_H)","20% R, doses of total population",50-64,0.732% [0.493% – 1.066%]
+"IHR, unvaccinated (I_to_H)","20% R, doses of total population",65+,8.490% [5.960% – 11.482%]
+"IHR, unvaccinated (I_to_H)","20% R, doses of total population",All,n/a
+"IHR, vaccinated (IV_to_H)",No initial immunity,0,0.933% [0.548% – 1.245%]
+"IHR, vaccinated (IV_to_H)",No initial immunity,1-4,1.067% [0.697% – 1.258%]
+"IHR, vaccinated (IV_to_H)",No initial immunity,5-12,0.324% [0.191% – 0.466%]
+"IHR, vaccinated (IV_to_H)",No initial immunity,13-17,0.230% [0.139% – 0.377%]
+"IHR, vaccinated (IV_to_H)",No initial immunity,18-49,0.262% [0.160% – 0.384%]
+"IHR, vaccinated (IV_to_H)",No initial immunity,50-64,0.666% [0.399% – 0.981%]
+"IHR, vaccinated (IV_to_H)",No initial immunity,65+,5.883% [3.771% – 8.187%]
+"IHR, vaccinated (IV_to_H)",No initial immunity,All,n/a
+"IHR, vaccinated (IV_to_H)","20% R, doses of S+SV",0,1.028% [0.616% – 1.257%]
+"IHR, vaccinated (IV_to_H)","20% R, doses of S+SV",1-4,1.073% [0.678% – 1.264%]
+"IHR, vaccinated (IV_to_H)","20% R, doses of S+SV",5-12,0.334% [0.201% – 0.479%]
+"IHR, vaccinated (IV_to_H)","20% R, doses of S+SV",13-17,0.238% [0.140% – 0.377%]
+"IHR, vaccinated (IV_to_H)","20% R, doses of S+SV",18-49,0.272% [0.175% – 0.388%]
+"IHR, vaccinated (IV_to_H)","20% R, doses of S+SV",50-64,0.689% [0.430% – 1.033%]
+"IHR, vaccinated (IV_to_H)","20% R, doses of S+SV",65+,5.974% [3.897% – 8.143%]
+"IHR, vaccinated (IV_to_H)","20% R, doses of S+SV",All,n/a
+"IHR, vaccinated (IV_to_H)","20% R, doses of total population",0,0.931% [0.541% – 1.254%]
+"IHR, vaccinated (IV_to_H)","20% R, doses of total population",1-4,1.093% [0.768% – 1.260%]
+"IHR, vaccinated (IV_to_H)","20% R, doses of total population",5-12,0.350% [0.213% – 0.478%]
+"IHR, vaccinated (IV_to_H)","20% R, doses of total population",13-17,0.248% [0.156% – 0.370%]
+"IHR, vaccinated (IV_to_H)","20% R, doses of total population",18-49,0.260% [0.178% – 0.364%]
+"IHR, vaccinated (IV_to_H)","20% R, doses of total population",50-64,0.667% [0.449% – 0.971%]
+"IHR, vaccinated (IV_to_H)","20% R, doses of total population",65+,5.858% [4.112% – 7.923%]
+"IHR, vaccinated (IV_to_H)","20% R, doses of total population",All,n/a

@@ -6,6 +6,13 @@
             + archive/fitted_params.json, with the vaccination schedule it was
             fitted/simulated under ("... - OLD high vax.csv", same folder)
 
+plus, with `--only <tag>`, the refits of the high-vax model with 20% of each
+age group initially recovered (own config/fit/simulations in
+archive/2026-08-high-vax-rates/, table written to
+attack_rate_and_IHR_by_age_<tag>.{csv,md}):
+  MA_vax_old_vax_initial_R_20pct                daily doses = proportion x (S + SV)
+  MA_vax_old_vax_initial_R_20pct_vax_total_pop  daily doses = proportion x total population
+
 Time series, each as posterior median + 95% band over accepted_params:
 
   m(t)            = exp(interp of cumsum(m_dlog_k) on the 14-day knots)
@@ -23,13 +30,13 @@ The "no vax" scenario keeps every parameter and only zeroes doses, so only
 beta_eff (and the calendar-adjusted beta_eff) differ between scenarios.
 
 Table, per age group:
-  attack rate     = (N_a - S_a(T) - SV_a(T)) / N_a from the param-set stochastic
+  attack rate     = (N_a - R_a(0) - S_a(T) - SV_a(T)) / N_a from the param-set stochastic
                     runs (baseline and no vax), cross-checked against the
                     cumulative S_to_E + SV_to_EV flows plus seeded E
   effective IHR   = IHR_scale|a * I_to_H_prop_a   (unvaccinated)
                     IHR_scale|a * IV_to_H_prop_a  (vaccinated)
 """
-import ast, json
+import argparse, ast, json
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -54,7 +61,19 @@ MODELS = [
      ARCH / "model_config_2026-08-high-vax-rates.json", MA / "archive/fitted_params.json",
      ARCH / "MA_flu_daily_vaccinations_proportions_array - OLD high vax.csv",
      ARCH / "simulation_output_param_set_stochastic_2026-08-high-vax-rates"),
+    ("MA_vax_old_vax_initial_R_20pct", "7-age m(t), Aug-2026 high vaccination rates, 20% initially recovered",
+     ARCH / "model_config_MA_vax_old_vax_initial_R_20pct.json",
+     ARCH / "fitted_params_MA_vax_old_vax_initial_R_20pct.json",
+     ARCH / "MA_flu_daily_vaccinations_proportions_array - OLD high vax.csv",
+     ARCH / "simulation_output_MA_vax_old_vax_initial_R_20pct_param_set_stochastic"),
+    ("MA_vax_old_vax_initial_R_20pct_vax_total_pop",
+     "7-age m(t), Aug-2026 high vaccination rates, 20% initially recovered, doses as a share of total population",
+     ARCH / "model_config_MA_vax_old_vax_initial_R_20pct_vax_total_pop.json",
+     ARCH / "fitted_params_MA_vax_old_vax_initial_R_20pct_vax_total_pop.json",
+     ARCH / "MA_flu_daily_vaccinations_proportions_array - OLD high vax.csv",
+     ARCH / "simulation_output_MA_vax_old_vax_initial_R_20pct_vax_total_pop_param_set_stochastic"),
 ]
+DEFAULT_TAGS = ("current", "high_vax")
 SCENARIOS = [("baseline", "baseline"), ("no vax", "no%20vax")]
 TV_KNOT_SPACING = 14
 
@@ -113,10 +132,19 @@ C_TOT = float(np.ravel(sa["total_contact_matrix"])[0])
 C_SCH = float(np.ravel(sa["school_contact_matrix"])[0])
 C_WRK = float(np.ravel(sa["work_contact_matrix"])[0])
 
+# --only TAG runs a single model and writes its attack-rate table to
+# attack_rate_and_IHR_by_age_<TAG>.{csv,md}, leaving the default
+# (current + high_vax) table untouched.
+_ap = argparse.ArgumentParser()
+_ap.add_argument("--only", choices=[m[0] for m in MODELS])
+_args = _ap.parse_args()
+_tags = (_args.only,) if _args.only else DEFAULT_TAGS
+TABLE_STEM = f"attack_rate_and_IHR_by_age_{_args.only}" if _args.only else "attack_rate_and_IHR_by_age"
+
 OUT.mkdir(exist_ok=True)
 table_rows = []
 
-for tag, label, cfg_path, fit_path, vax_csv, sim_dir in MODELS:
+for tag, label, cfg_path, fit_path, vax_csv, sim_dir in (m for m in MODELS if m[0] in _tags):
     cfg = json.loads(cfg_path.read_text())
     fit = json.loads(fit_path.read_text())
     p = cfg["params"]
@@ -210,6 +238,8 @@ for tag, label, cfg_path, fit_path, vax_csv, sim_dir in MODELS:
         a.xaxis.set_major_formatter(mdates.DateFormatter("%b\n%Y"))
 
     cov_end = (cov @ w)[-1]
+    r0 = np.asarray(cfg["initial_conditions"]["aggregate_pop"].get("seeds", {}).get("R", np.zeros((n_age, 1))),
+                    float).ravel()
     notes = (
         f"{label}.  Lines = posterior median, shaded = 95% interval over the {len(draws)} accepted MCMC draws "
         f"(panel e is deterministic).\n"
@@ -220,7 +250,8 @@ for tag, label, cfg_path, fit_path, vax_csv, sim_dir in MODELS:
         "(d) beta_eff multiplies (c) by Σ_a (N_a/N)·[(1−v_a)·relative_suscept + v_a·vax_susceptibility_a], with v_a the "
         f"cumulative scheduled coverage lagged {lag} days\n"
         f"      (population coverage {100*cov_end:.1f}% by season end in baseline, 0 in no vax). "
-        "Susceptible depletion from infection is NOT included.\n"
+        "Susceptible depletion from infection is NOT included"
+        + (f" (nor the {100*r0.sum()/pop.sum():.0f}% initially recovered).\n" if r0.sum() > 0 else ".\n") +
         f"(e) C(t) = {C_TOT:.2f} − (1−school day)·{C_SCH:.2f} − (1−work day)·{C_WRK:.2f} contacts/day, from "
         "model_config_MA_single_age.json and the MA school/work calendar\n"
         f"      ({C_TOT:.2f} on school+work days, {C_TOT-C_SCH:.2f} on work-only days, {C_TOT-C_SCH-C_WRK:.2f} "
@@ -243,7 +274,9 @@ for tag, label, cfg_path, fit_path, vax_csv, sim_dir in MODELS:
     ar = {}
     for s, scen_dir in SCENARIOS:
         st = load_final_state(sim_dir, scen_dir, ["S", "SV", "S_to_E", "SV_to_EV"], num_days)
-        inf = pop[None, :] - st["S"] - st["SV"]
+        # people seeded directly into R (prior immunity) were never infected
+        # this season, so they are not part of the attack rate
+        inf = pop[None, :] - r0[None, :] - st["S"] - st["SV"]
         # (N-S-SV) - flows must be the seeded E, i.e. seeds_E * seed_scale_E of
         # that rep: the same ratio in every age group, within the posterior range
         ratio = (inf - (st["S_to_E"] + st["SV_to_EV"])) / seeds[None, :]
@@ -271,14 +304,15 @@ for tag, label, cfg_path, fit_path, vax_csv, sim_dir in MODELS:
     })
 
 tbl = pd.DataFrame(table_rows)
-tbl.to_csv(OUT / "attack_rate_and_IHR_by_age.csv", index=False)
+tbl.to_csv(OUT / f"{TABLE_STEM}.csv", index=False)
 
 md = ["# Attack rate and effective calibrated IHR by age group", "",
       "Median [95% interval]. Attack rate = share of the age group infected over the 250-day season "
-      "(N − S(T) − SV(T)) / N, including seeded infections, across the param-set stochastic runs. "
+      "(N − R(0) − S(T) − SV(T)) / N, including seeded infections and excluding anyone seeded as "
+      "recovered, across the param-set stochastic runs. "
       "Effective IHR = IHR_scale|age × I_to_H_prop (unvaccinated) or × IV_to_H_prop (vaccinated), "
       "i.e. the probability that an infection is hospitalized, across the accepted MCMC draws.", ""]
 for model, g in tbl.groupby("model", sort=False):
     md += [f"## {model}", "", to_markdown(g.drop(columns="model")), ""]
-(OUT / "attack_rate_and_IHR_by_age.md").write_text("\n".join(md))
+(OUT / f"{TABLE_STEM}.md").write_text("\n".join(md))
 print(f"wrote outputs to {OUT}")

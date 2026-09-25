@@ -820,11 +820,25 @@ class ScheduledExactTransferRate(RateTemplate):
         transition's pre-simulation history is ignored, as before). See
         ConfigDrivenSubpopModel._compute_scheduled_exact_pre_simulation_adjustments
         in generic_model.py.
+    dose_pool : str, optional
+        What the daily proportion is a proportion *of*:
+        "susceptible" (default) -- origin + destination, everyone not yet
+        infected; "total_population" -- every compartment of the
+        subpopulation, so the scheduled count does not shrink when part of
+        the population starts out immune (e.g. seeded into R). The count is
+        capped at the origin either way.
     """
+
+    DOSE_POOLS = ("susceptible", "total_population")
 
     def validate_config(self, rate_config, param_names, compartment_names, schedule_names):
         if "schedule" not in rate_config:
             raise ValueError("ScheduledExactTransferRate: rate_config must contain 'schedule'")
+        pool = rate_config.get("dose_pool", "susceptible")
+        if pool not in self.DOSE_POOLS:
+            raise ValueError(
+                f"ScheduledExactTransferRate: dose_pool must be one of {self.DOSE_POOLS}, got {pool!r}"
+            )
         sname = rate_config["schedule"]
         if sname not in schedule_names:
             raise ValueError(
