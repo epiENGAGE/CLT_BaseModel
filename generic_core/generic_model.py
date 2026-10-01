@@ -139,6 +139,25 @@ class ScheduledTransferVariable(clt.TransitionVariable):
         self._timestep_in_day = 0
 
 
+class _SchedulesInputOverride:
+    """
+    Read-only view of a schedules_input object with one attribute replaced
+    -- lets `ConfigDrivenSubpopModel.replace_schedule` rebuild a schedule
+    from a new DataFrame without copying or mutating the original input
+    (which may be a frozen dataclass).
+    """
+
+    def __init__(self, base, attribute: str, value):
+        self._base = base
+        self._attribute = attribute
+        self._value = value
+
+    def __getattr__(self, name):
+        if name == self._attribute:
+            return self._value
+        return getattr(self._base, name)
+
+
 # ---------------------------------------------------------------------------
 # ConfigDrivenSubpopModel
 # ---------------------------------------------------------------------------
@@ -583,6 +602,34 @@ class ConfigDrivenSubpopModel(clt.SubpopModel):
                 sc_cfg.schedule_config, self.params, self.schedules_input
             )
         return schedules
+
+    def replace_schedule(self, schedule_name: str, new_df) -> None:
+        """
+        Replace the DataFrame behind a named schedule (e.g. for
+        `ScenarioRunner`), preprocessing it the same way as at construction.
+
+        The base method stores `new_df` as-is and relies on the schedule's
+        `postprocess_data_input` to prepare it, but generic schedules do all
+        their preprocessing (date parsing, JSON decoding, protection-delay
+        shift, date indexing) in their template's `build_schedule`. So the
+        schedule is rebuilt through its template with `new_df` in place of
+        its input DataFrame, and only the resulting `timeseries_df` is
+        copied onto the existing schedule object -- which keeps references
+        to that object valid and matches what `ScenarioRunner` saves and
+        restores.
+        """
+        if schedule_name not in self.schedules:
+            # Let the base method raise its error for an unknown name
+            super().replace_schedule(schedule_name, new_df)
+            return
+
+        sc_cfg = next(c for c in self.model_config.schedules if c.name == schedule_name)
+        template = self._schedule_registry[sc_cfg.schedule_template]
+        schedules_input = _SchedulesInputOverride(
+            self.schedules_input, template.input_attribute(sc_cfg.schedule_config), new_df
+        )
+        rebuilt = template.build_schedule(sc_cfg.schedule_config, self.params, schedules_input)
+        self.schedules[schedule_name].timeseries_df = rebuilt.timeseries_df
 
     def create_dynamic_vals(self) -> sc.objdict:
         """

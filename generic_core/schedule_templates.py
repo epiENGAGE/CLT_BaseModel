@@ -76,6 +76,15 @@ class ScheduleTemplate(ABC):
             Raw input data object providing DataFrames for timeseries schedules.
         """
 
+    def input_attribute(self, schedule_config: dict) -> str:
+        """
+        Name of the attribute on schedules_input holding the raw DataFrame
+        this schedule is built from -- used by
+        `ConfigDrivenSubpopModel.replace_schedule` to rebuild the schedule
+        from a new DataFrame.
+        """
+        return schedule_config["df_attribute"]
+
 
 # ---------------------------------------------------------------------------
 # Date-column helper
@@ -238,6 +247,9 @@ class ContactMatrixTemplate(ScheduleTemplate):
     work_contact_matrix_param : str
         Parameter name for the A×A work contact matrix.
     """
+
+    def input_attribute(self, schedule_config: dict) -> str:
+        return schedule_config["school_work_day_df_attribute"]
 
     _REQUIRED = (
         "school_work_day_df_attribute",
