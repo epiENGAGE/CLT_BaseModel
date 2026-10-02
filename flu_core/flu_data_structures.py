@@ -512,6 +512,12 @@ class FluSubpopParams(clt.SubpopParams):
     school_contact_matrix: Optional[np.ndarray] = None
     work_contact_matrix: Optional[np.ndarray] = None
 
+    # Not used by the numpy engine (which has no softplus/clamp floor) --
+    # present so `FluMetapopModel.update_params_tensors` can copy it onto
+    # `FluFullMetapopParamsTensors` for the torch engine. See `_nonneg` in
+    # `flu_torch_det_components.py`.
+    use_softplus: bool = True
+
 
 @dataclass
 class FluSubpopSchedules:
@@ -888,6 +894,11 @@ class FluFullMetapopParamsTensors(FluTravelParamsTensors):
     IA_relative_inf: Optional[torch.Tensor] = None
 
     relative_suscept: Optional[torch.Tensor] = None
+
+    # Selects how `compute_track_new_compartments` floors new compartment
+    #   values at 0: softplus (smooth, default, matches legacy behavior) or
+    #   a hard clamp (ReLU) -- see `_nonneg` in `flu_torch_det_components`.
+    use_softplus: bool = True
 
 
 class FluPrecomputedTensors:

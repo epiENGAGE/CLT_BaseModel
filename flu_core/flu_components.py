@@ -2502,6 +2502,38 @@ class FluSubpopModel(clt.SubpopModel):
         super().reset_simulation()
 
 
+def simulate_with_seed_at_offset(model: FluSubpopModel,
+                                 num_days: int,
+                                 seed_day: int = None,
+                                 seed_E0: np.ndarray = None) -> None:
+    """
+    Advances `model` to `num_days`, the numpy-engine counterpart of
+    `seed_day`/`seed_E0` in `torch_simulate_hospital_admits` and
+    `torch_simulate_full_history` (`flu_torch_det_components.py`).
+
+    If `seed_day` and `seed_E0` (np.ndarray, same shape as
+    `model.compartments.S.current_val`) are both given, simulation pauses
+    at `seed_day` and `seed_E0` is moved from "S" to "E" before continuing
+    -- so a calibration's t0 offset can act as an epidemic-seeding delay
+    while schedules (vaccines, humidity, contact matrices) stay on the
+    true calendar. Defaults to a no-op (equivalent to
+    `model.simulate_until_day(num_days)`).
+    """
+
+    if seed_day is None or seed_E0 is None:
+        model.simulate_until_day(num_days)
+        return
+
+    model.simulate_until_day(seed_day)
+
+    S, E = model.compartments.S, model.compartments.E
+    S.current_val = S.current_val - seed_E0
+    E.current_val = E.current_val + seed_E0
+    model.state.sync_to_current_vals(model.compartments)
+
+    model.simulate_until_day(num_days)
+
+
 class FluMetapopModel(clt.MetapopModel, ABC):
     """
     MetapopModel-derived class specific to flu model.

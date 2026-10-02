@@ -30,6 +30,17 @@ from .flu_travel_functions import compute_total_mixing_exposure
 base_path = clt.utils.PROJECT_ROOT / "flu_instances" / "texas_input_files"
 
 
+def _nonneg(x: torch.Tensor, use_softplus: bool) -> torch.Tensor:
+    """
+    Floors a compartment tensor at 0: `softplus` (smooth approximation to
+    ReLU, legacy default) if `use_softplus`, else a hard clamp (ReLU).
+    """
+
+    if use_softplus:
+        return torch.nn.functional.softplus(x)
+    return torch.clamp(x, min=0.0)
+
+
 def torch_approx_binom_probability_from_rate(rate, dt):
     """
     Torch-compatible implementation of converting a
@@ -494,6 +505,7 @@ def compute_track_transitions(state: FluFullMetapopStateTensors,
 
 
 def compute_track_new_compartments(state: FluFullMetapopStateTensors,
+                                   params: FluFullMetapopParamsTensors,
                                    flows: dict,
                                    S_to_E: torch.Tensor,
                                    S_net_vaccination: torch.Tensor,
@@ -504,8 +516,9 @@ def compute_track_new_compartments(state: FluFullMetapopStateTensors,
     negative for the base track and positive for the vaccinated track)
     to its compartments.
 
-    Uses `softplus`, a smooth approximation to the ReLU function, to
-    keep compartments nonnegative.
+    Floors compartments at 0 via `_nonneg`, using `params.use_softplus`
+    to select between `softplus` (a smooth approximation to the ReLU
+    function, the default) and a hard clamp (ReLU).
 
     Returns:
         (dict):
@@ -515,19 +528,19 @@ def compute_track_new_compartments(state: FluFullMetapopStateTensors,
 
     c = {name: getattr(state, name + suffix) for name in BASE_COMPARTMENTS}
     f = flows
-    softplus = torch.nn.functional.softplus
+    use_softplus = params.use_softplus
 
     new_vals = {
-        "S": softplus(c["S"] + f["R_to_S"] - S_to_E + S_net_vaccination),
-        "E": softplus(c["E"] + S_to_E - f["E_to_IP"] - f["E_to_IA"]),
-        "IP": softplus(c["IP"] + f["E_to_IP"] - f["IP_to_ISR"] - f["IP_to_ISH"]),
-        "ISR": softplus(c["ISR"] + f["IP_to_ISR"] - f["ISR_to_R"]),
-        "ISH": softplus(c["ISH"] + f["IP_to_ISH"] - f["ISH_to_HR"] - f["ISH_to_HD"]),
-        "IA": softplus(c["IA"] + f["E_to_IA"] - f["IA_to_R"]),
-        "HR": softplus(c["HR"] + f["ISH_to_HR"] - f["HR_to_R"]),
-        "HD": softplus(c["HD"] + f["ISH_to_HD"] - f["HD_to_D"]),
-        "R": softplus(c["R"] + f["ISR_to_R"] + f["IA_to_R"] + f["HR_to_R"] - f["R_to_S"]),
-        "D": softplus(c["D"] + f["HD_to_D"]),
+        "S": _nonneg(c["S"] + f["R_to_S"] - S_to_E + S_net_vaccination, use_softplus),
+        "E": _nonneg(c["E"] + S_to_E - f["E_to_IP"] - f["E_to_IA"], use_softplus),
+        "IP": _nonneg(c["IP"] + f["E_to_IP"] - f["IP_to_ISR"] - f["IP_to_ISH"], use_softplus),
+        "ISR": _nonneg(c["ISR"] + f["IP_to_ISR"] - f["ISR_to_R"], use_softplus),
+        "ISH": _nonneg(c["ISH"] + f["IP_to_ISH"] - f["ISH_to_HR"] - f["ISH_to_HD"], use_softplus),
+        "IA": _nonneg(c["IA"] + f["E_to_IA"] - f["IA_to_R"], use_softplus),
+        "HR": _nonneg(c["HR"] + f["ISH_to_HR"] - f["HR_to_R"], use_softplus),
+        "HD": _nonneg(c["HD"] + f["ISH_to_HD"] - f["HD_to_D"], use_softplus),
+        "R": _nonneg(c["R"] + f["ISR_to_R"] + f["IA_to_R"] + f["HR_to_R"] - f["R_to_S"], use_softplus),
+        "D": _nonneg(c["D"] + f["HD_to_D"], use_softplus),
     }
 
     return {name + suffix: val for name, val in new_vals.items()}
@@ -557,11 +570,12 @@ def advance_timestep(state: FluFullMetapopStateTensors,
         of the multinomial distribution to handle
         multiple outflows from the same compartment
     - We do not round the transition variables
-    - We also use `softplus`, a smooth approximation to the
-        ReLU function, to ensure that compartments are
-        nonnegative (which is not guaranteed using
-        the mean of a binomial/multinomial random variable
-        rather than sampling from those distributions).
+    - We also floor compartments at 0 via `_nonneg` (which is not
+        guaranteed using the mean of a binomial/multinomial random
+        variable rather than sampling from those distributions):
+        `softplus`, a smooth approximation to the ReLU function, by
+        default, or a hard clamp (ReLU) if `params.use_softplus`
+        is `False`.
 
     Both tracks are advanced: the base track and the vaccinated track
     (compartments with a "_V" suffix). People enter the vaccinated
@@ -604,8 +618,8 @@ def advance_timestep(state: FluFullMetapopStateTensors,
                                           death_multiplier=vax_death_multiplier)
 
     new_compartments = {
-        **compute_track_new_compartments(state, base_flows, S_to_E, -S_to_S_V),
-        **compute_track_new_compartments(state, vax_flows, S_V_to_E_V, S_to_S_V, suffix="_V"),
+        **compute_track_new_compartments(state, params, base_flows, S_to_E, -S_to_S_V),
+        **compute_track_new_compartments(state, params, vax_flows, S_V_to_E_V, S_to_S_V, suffix="_V"),
     }
 
     # Immunity variables are switched off -- see `compute_M_change`
@@ -667,13 +681,23 @@ def torch_simulate_full_history(state: FluFullMetapopStateTensors,
                                 precomputed: FluPrecomputedTensors,
                                 schedules: FluFullMetapopScheduleTensors,
                                 num_days: int,
-                                timesteps_per_day: int) -> Tuple[dict, dict]:
+                                timesteps_per_day: int,
+                                seed_day: int = None,
+                                seed_E0: torch.Tensor = None) -> Tuple[dict, dict]:
     """
     Simulates the flu model with a differentiable torch implementation
     that carries out `binom_deterministic_no_round` transition types --
     returns hospital admits for calibration use.
 
     See subroutine `advance_timestep` for additional details.
+
+    Seed-at-offset: if `seed_day` and `seed_E0` (torch.Tensor of size
+    (L, A, R)) are both given, `seed_E0` is moved from the base track's
+    "S" to "E" at the start of `day == seed_day`, so a calibration's t0
+    offset can act as an epidemic-seeding delay while schedules (vaccines,
+    humidity, contact matrices) stay on the true calendar. `seed_E0`
+    preserves gradient tracking, so E0 stays calibratable. Defaults to a
+    no-op.
 
     Returns:
         (Tuple[dict, dict]):
@@ -689,6 +713,8 @@ def torch_simulate_full_history(state: FluFullMetapopStateTensors,
     for day in range(num_days):
         state, daily_mixing_exposure, daily_vax_expected = \
             prepare_daily_torch_state(state, params, precomputed, schedules, day)
+        if seed_E0 is not None and seed_day is not None and day == seed_day:
+            state = replace(state, S=state.S - seed_E0, E=state.E + seed_E0)
 
         daily_tvar = None
         for timestep in range(timesteps_per_day):
@@ -718,10 +744,20 @@ def torch_simulate_hospital_admits(state: FluFullMetapopStateTensors,
                                      precomputed: FluPrecomputedTensors,
                                      schedules: FluFullMetapopScheduleTensors,
                                      num_days: int,
-                                     timesteps_per_day: int) -> torch.Tensor:
+                                     timesteps_per_day: int,
+                                     seed_day: int = None,
+                                     seed_E0: torch.Tensor = None) -> torch.Tensor:
     """
     Analogous to `torch_simulate_full_history` but only saves and
     returns hospital admits for calibration use.
+
+    Seed-at-offset: if `seed_day` and `seed_E0` (torch.Tensor of size
+    (L, A, R)) are both given, `seed_E0` is moved from the base track's
+    "S" to "E" at the start of `day == seed_day`, so a calibration's t0
+    offset can act as an epidemic-seeding delay while schedules (vaccines,
+    humidity, contact matrices) stay on the true calendar. `seed_E0`
+    preserves gradient tracking, so E0 stays calibratable. Defaults to a
+    no-op.
 
     Returns:
         (torch.Tensor of size (num_days, L, A, R)):
@@ -737,6 +773,8 @@ def torch_simulate_hospital_admits(state: FluFullMetapopStateTensors,
     for day in range(num_days):
         state, daily_mixing_exposure, daily_vax_expected = \
             prepare_daily_torch_state(state, params, precomputed, schedules, day)
+        if seed_E0 is not None and seed_day is not None and day == seed_day:
+            state = replace(state, S=state.S - seed_E0, E=state.E + seed_E0)
         daily_admits = None
         for timestep in range(timesteps_per_day):
             state, calibration_targets, _ = \

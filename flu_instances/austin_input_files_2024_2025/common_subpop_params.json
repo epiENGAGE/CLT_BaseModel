@@ -14,6 +14,7 @@
     "vax_induced_hosp_risk_reduce": [[0.63,0.63],[0.63,0.63],[0.51,0.51],[0.51,0.51],[0.57,0.57]],
 	"vax_induced_death_risk_reduce": 0.0,
 	"adjust_VE_for_seasonal_waning": true,
+	"use_softplus": false,
 	"VE_season_dose_window_quantile": 0.05,
 	"vax_protection_delay_days": 14,
 	"vax_immunity_reset_date_mm_dd": "06_30",
