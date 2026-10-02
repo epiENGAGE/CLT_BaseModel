@@ -516,7 +516,7 @@ class FluSubpopParams(clt.SubpopParams):
     # present so `FluMetapopModel.update_params_tensors` can copy it onto
     # `FluFullMetapopParamsTensors` for the torch engine. See `_nonneg` in
     # `flu_torch_det_components.py`.
-    use_softplus: bool = True
+    use_softplus: bool = False
 
 
 @dataclass
@@ -898,7 +898,7 @@ class FluFullMetapopParamsTensors(FluTravelParamsTensors):
     # Selects how `compute_track_new_compartments` floors new compartment
     #   values at 0: softplus (smooth, default, matches legacy behavior) or
     #   a hard clamp (ReLU) -- see `_nonneg` in `flu_torch_det_components`.
-    use_softplus: bool = True
+    use_softplus: bool = False
 
 
 class FluPrecomputedTensors:
