@@ -368,12 +368,18 @@ def _param_tab_controls(flu, inputs, mo, params):
         and isinstance(getattr(params, f.name), (int, float))
     ]
 
-    # Array params (excludes contact matrices and skipped fields)
+    # Array params (excludes contact matrices, skipped fields, and anything
+    # that isn't a numeric array — e.g. string/date fields)
+    def _is_numeric_array(val):
+        arr = _np.asarray(val)
+        return _np.issubdtype(arr.dtype, _np.number)
+
     ARRAY_PARAMS = [
         f.name for f in _dc.fields(flu.FluSubpopParams)
         if f.name not in (_SKIP | _CONTACT_MATRICES)
         and not isinstance(getattr(params, f.name), (int, float))
         and getattr(params, f.name) is not None
+        and _is_numeric_array(getattr(params, f.name))
     ]
 
     # Baseline vector formatted for display
@@ -1108,7 +1114,7 @@ def _plot_vph(
             _vp_data[_sc_name] = [b - c for b, c in zip(_base_vals, _counter_vals)]
 
         _labels = [scenario_labels.get(k, k) for k in _vp_data]
-        _ax.boxplot(list(_vp_data.values()), labels=_labels)
+        _ax.boxplot(list(_vp_data.values()), tick_labels=_labels)
         _ax.axhline(0, linestyle="--", color="gray", alpha=0.6)
         _ax.set_ylabel(_y_label)
         _ax.set_title(f"{_y_label} vs. baseline — {_combo_label}")
@@ -1165,7 +1171,7 @@ def _plot_actual_metrics(
             ]
 
         _labels = [scenario_labels.get(k, k) for k in _data]
-        _ax.boxplot(list(_data.values()), labels=_labels)
+        _ax.boxplot(list(_data.values()), tick_labels=_labels)
         _ax.set_ylabel(_y_label)
         _ax.set_title(f"{_y_label} — all scenarios — {_combo_label}")
 

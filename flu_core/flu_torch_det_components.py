@@ -302,7 +302,7 @@ def _vax_conditional_ratio(ve_outcome: torch.Tensor,
     safe_denom = torch.where(denom > 0, denom, torch.ones_like(denom))
     ratio = torch.where(denom > 0, (1 - ve_outcome) / safe_denom, torch.ones_like(denom))
 
-    return torch.clamp(ratio, max=1.0)
+    return torch.clamp(ratio, min=0.0, max=1.0)
 
 
 def torch_compute_vax_conditional_multipliers(params: FluFullMetapopParamsTensors) -> tuple:

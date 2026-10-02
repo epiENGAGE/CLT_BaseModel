@@ -1198,7 +1198,7 @@ def _vax_conditional_ratio(ve_outcome, ve_prior_step) -> np.ndarray:
     safe_denom = np.where(denom > 0, denom, 1.0)
     ratio = np.where(denom > 0, (1 - ve_outcome) / safe_denom, 1.0)
 
-    return np.minimum(ratio, 1.0)
+    return np.clip(ratio, 0.0, 1.0)
 
 
 def compute_vax_conditional_multipliers(params: FluSubpopParams) -> tuple:
@@ -1244,6 +1244,14 @@ def _warn_vax_conditional_clipping(params: FluSubpopParams) -> None:
     < `vax_induced_hosp_risk_reduce`. Realized overall efficacy against
     that outcome then equals the previous step's efficacy, which is
     higher than requested.
+
+    Also warns if either multiplier is floored at 0 for any age-risk
+    group -- i.e. if `vax_induced_hosp_risk_reduce` or
+    `vax_induced_death_risk_reduce` exceeds 1 (an unconditional efficacy
+    above 100%, which the sequential conditional-efficacy structure
+    cannot represent). Realized overall efficacy against that outcome
+    then equals the previous step's efficacy, which is lower than
+    requested.
     """
 
     target_shape = (params.num_age_groups, params.num_risk_groups)
@@ -1268,6 +1276,19 @@ def _warn_vax_conditional_clipping(params: FluSubpopParams) -> None:
                 f"efficacy for `{outcome_name}` is floored at 0 and the "
                 f"realized overall efficacy equals `{prior_name}` for these "
                 "groups -- higher than requested."
+            )
+
+        over_idxs = np.argwhere((outcome_arr > 1) & (prior_arr < 1))
+
+        if over_idxs.size > 0:
+            groups_str = ", ".join(f"(age {a}, risk {r})" for a, r in over_idxs)
+            warnings.warn(
+                f"`{outcome_name}` exceeds 1 (>100% unconditional efficacy) "
+                f"for age-risk group(s) {groups_str}. Vaccine efficacies are "
+                "applied sequentially along the vaccinated track, so the "
+                f"conditional multiplier for `{outcome_name}` is floored at "
+                f"0 and the realized overall efficacy equals `{prior_name}` "
+                "for these groups -- lower than requested."
             )
 
 
