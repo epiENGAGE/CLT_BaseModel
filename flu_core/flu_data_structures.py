@@ -81,6 +81,14 @@ def resolve_mm_dd_near_date(mm_dd: str,
     return resolved
 
 
+# Compartments of the base (unvaccinated) track, and their copies on the
+#   parallel vaccinated track -- people enter the vaccinated track from
+#   "S" into "S_V" according to the `daily_vaccines` schedule
+BASE_COMPARTMENTS = ("S", "E", "IP", "ISR", "ISH", "IA", "HR", "HD", "R", "D")
+VAX_COMPARTMENTS = tuple(name + "_V" for name in BASE_COMPARTMENTS)
+ALL_COMPARTMENTS = BASE_COMPARTMENTS + VAX_COMPARTMENTS
+
+
 @dataclass
 class FluSubpopState(clt.SubpopState):
     """
@@ -131,14 +139,23 @@ class FluSubpopState(clt.SubpopState):
         D (np.ndarray of nonnegative integers):
             dead compartment for age-risk groups
             (holds current_val of Compartment "D").
+        S_V, E_V, IP_V, ISR_V, ISH_V, IA_V, HR_V, HD_V, R_V, D_V
+            (np.ndarray of nonnegative integers):
+            vaccinated-track copies of the compartments above
+            (holds current_val of Compartment "<X>_V"). People
+            enter the vaccinated track from "S" into "S_V" according
+            to the `daily_vaccines` schedule. Optional in the
+            init-vals JSON -- missing entries default to zeros.
         M (np.ndarray of nonnegative floats):
             infection-induced population-level immunity
             for age-risk groups (holds current_val
-            of EpiMetric "M").
+            of EpiMetric "M"). Switched off in the
+            vaccinated-track model -- always zero.
         MV (np.ndarray of nonnegative floats):
             vaccine-induced population-level immunity
             for age-risk groups (holds current_val
-            of EpiMetric "MV").
+            of EpiMetric "MV"). Switched off in the
+            vaccinated-track model -- always zero.
         absolute_humidity (positive float):
             grams of water vapor per cubic meter g/m^3,
             used as seasonality parameter that influences
@@ -174,6 +191,17 @@ class FluSubpopState(clt.SubpopState):
     HD: Optional[np.ndarray] = None
     R: Optional[np.ndarray] = None
     D: Optional[np.ndarray] = None
+
+    S_V: Optional[np.ndarray] = None
+    E_V: Optional[np.ndarray] = None
+    IP_V: Optional[np.ndarray] = None
+    ISR_V: Optional[np.ndarray] = None
+    ISH_V: Optional[np.ndarray] = None
+    IA_V: Optional[np.ndarray] = None
+    HR_V: Optional[np.ndarray] = None
+    HD_V: Optional[np.ndarray] = None
+    R_V: Optional[np.ndarray] = None
+    D_V: Optional[np.ndarray] = None
 
     M: Optional[np.ndarray] = None
     MV: Optional[np.ndarray] = None
@@ -252,11 +280,21 @@ class FluSubpopParams(clt.SubpopParams):
             season-average reduction in risk of hospitalization
             after getting vaccinated -- see
             `vax_induced_inf_risk_reduce` for the season-average
-            versus peak distinction.
+            versus peak distinction. This is the OVERALL reduction
+            (not conditional on infection): the vaccinated track
+            applies it as the conditional multiplier
+            `(1 - vax_induced_hosp_risk_reduce) /
+            (1 - vax_induced_inf_risk_reduce)` on top of the infection
+            reduction -- see
+            `flu_components.compute_vax_conditional_multipliers`.
         vax_induced_death_risk_reduce (positive float):
             season-average reduction in risk of death after getting
             vaccinated -- see `vax_induced_inf_risk_reduce` for the
-            season-average versus peak distinction.
+            season-average versus peak distinction. This is the
+            OVERALL reduction: the vaccinated track applies it as the
+            conditional multiplier `(1 - vax_induced_death_risk_reduce) /
+            (1 - vax_induced_hosp_risk_reduce)` on top of the infection
+            and hospitalization reductions.
         vax_induced_inf_risk_reduce_initial (np.ndarray of positive floats):
             "peak" (zero-waning) vaccine-induced reduction in risk
             of getting infected -- this is the value actually applied
@@ -317,7 +355,18 @@ class FluSubpopParams(clt.SubpopParams):
             date (in "mm_dd" format) each year when vaccine
             immunity resets, and date from which to start
             calculating contribution of vaccines to
-            vaccine-induced immunity.
+            vaccine-induced immunity. In the vaccinated-track
+            model, everyone in "S_V" moves back to "S" on this
+            date, and the initial "S_V" value includes the
+            vaccinations scheduled between the most recent
+            occurrence of this date and the simulation start.
+        vax_dose_pool (str):
+            population that the `daily_vaccines` proportions
+            apply to when computing how many people move from
+            "S" to "S_V" -- "susceptible" (default) uses S + S_V,
+            "total_population" uses every compartment of that
+            age-risk group (`total_pop_age_risk`). The number
+            moved is always capped at what is left in "S".
         infection_immunity_start_date_mm_dd: (str or None):
             date (in "mm_dd" format) that the input initial value
             of infection-induced immunity (M) corresponds to.
@@ -437,6 +486,7 @@ class FluSubpopParams(clt.SubpopParams):
     VE_season_dose_window_quantile: Optional[float] = None
     vax_protection_delay_days: Optional[int] = 0
     vax_immunity_reset_date_mm_dd: Optional[str] = None
+    vax_dose_pool: Optional[str] = "susceptible"
     infection_immunity_start_date_mm_dd: Optional[str] = None
     infection_immunity_injection_val: Optional[np.ndarray] = None
 
@@ -576,6 +626,16 @@ class FluTravelStateTensors:
     IA: torch.Tensor = None
     HR: torch.Tensor = None
     HD: torch.Tensor = None
+
+    # Vaccinated-track counterparts -- infectious people on the
+    #   vaccinated track spread infection, and hospitalized people
+    #   on it are not mobile, exactly like the base track
+    IP_V: torch.Tensor = None
+    ISR_V: torch.Tensor = None
+    ISH_V: torch.Tensor = None
+    IA_V: torch.Tensor = None
+    HR_V: torch.Tensor = None
+    HD_V: torch.Tensor = None
 
     flu_contact_matrix: torch.Tensor = None
     mobility_modifier: torch.Tensor = None
@@ -745,6 +805,12 @@ class FluFullMetapopStateTensors(FluTravelStateTensors):
     R: Optional[torch.Tensor] = None
     D: Optional[torch.Tensor] = None
 
+    # `IP_V`, `ISR_V`, `ISH_V`, `IA_V`, `HR_V`, `HD_V` already in parent class
+    S_V: Optional[torch.Tensor] = None
+    E_V: Optional[torch.Tensor] = None
+    R_V: Optional[torch.Tensor] = None
+    D_V: Optional[torch.Tensor] = None
+
     M: Optional[torch.Tensor] = None
     MV: Optional[torch.Tensor] = None
 
@@ -801,6 +867,7 @@ class FluFullMetapopParamsTensors(FluTravelParamsTensors):
     VE_season_dose_window_quantile: Optional[torch.Tensor] = None
     vax_protection_delay_days: Optional[torch.Tensor] = 0
     vax_immunity_reset_date_mm_dd: Optional[str] = None
+    vax_dose_pool: Optional[str] = "susceptible"
     infection_immunity_start_date_mm_dd: Optional[str] = None
     infection_immunity_injection_val: Optional[torch.Tensor] = None
 

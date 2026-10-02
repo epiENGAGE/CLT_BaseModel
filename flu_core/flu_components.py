@@ -20,7 +20,7 @@ from .flu_data_structures import FluSubpopState, FluSubpopParams, \
     FluTravelStateTensors, FluTravelParamsTensors, \
     FluFullMetapopStateTensors, FluFullMetapopParamsTensors, \
     FluMixingParams, FluPrecomputedTensors, FluFullMetapopScheduleTensors, \
-    FluSubpopSchedules, resolve_mm_dd_near_date
+    FluSubpopSchedules, ALL_COMPARTMENTS
 
 
 class FluSubpopModelError(clt.SubpopModelError):
@@ -31,6 +31,9 @@ class FluSubpopModelError(clt.SubpopModelError):
 class FluMetapopModelError(clt.MetapopModelError):
     """Custom exceptions for flu metapopulation simulation model errors."""
     pass
+
+
+VAX_DOSE_POOLS = ("susceptible", "total_population")
 
 
 # Note: for dataclasses, Optional is used to help with static type checking
@@ -81,10 +84,33 @@ class SusceptibleToExposed(clt.TransitionVariable):
 
         self.total_mixing_exposure = None
 
+    def susceptibility_multiplier(self,
+                                  params: FluSubpopParams):
+        """
+        Multiplier on the relative susceptibility of the origin
+        compartment -- 1 for "S", overridden for "S_V" in
+        `VaxSusceptibleToExposed`.
+        """
+
+        return 1.0
+
     def get_current_rate(self,
                          state: FluSubpopState,
                          params: FluSubpopParams) -> np.ndarray:
         """
+        Returns:
+            np.ndarray of shape (A, R)
+        """
+
+        return np.asarray(self.get_unadjusted_rate(state, params) *
+                          self.susceptibility_multiplier(params))
+
+    def get_unadjusted_rate(self,
+                            state: FluSubpopState,
+                            params: FluSubpopParams) -> np.ndarray:
+        """
+        Rate for someone in "S" -- see `get_current_rate`.
+
         Returns:
             np.ndarray of shape (A, R)
         """
@@ -129,13 +155,31 @@ class SusceptibleToExposed(clt.TransitionVariable):
             # Super confusing syntax... but this is the pain of having A x R,
             #   but having the contact matrix (contact patterns) be for
             #   ONLY age groups
-            wtd_infectious_prop = np.divide(np.sum(sum([state.ISR, state.ISH]), axis=1, keepdims=True) + wtd_presymp_asymp_by_age, # Remy TODO check the sum works
-                                            compute_pop_by_age(params))
+            # Symptomatic people on both tracks are infectious
+            wtd_infectious_prop = np.divide(
+                np.sum(compute_symp_infectious(state), axis=1, keepdims=True) +\
+                    wtd_presymp_asymp_by_age,
+                compute_pop_by_age(params))
 
             raw_total_exposure = np.matmul(state.flu_contact_matrix, wtd_infectious_prop)
 
             # The total rate is only age-dependent -- it's the same rate across age groups
             return params.relative_suscept * (beta_adjusted * vax_immunity_factor * raw_total_exposure / immune_force)
+
+
+class VaxSusceptibleToExposed(SusceptibleToExposed):
+    """
+    SusceptibleToExposed-derived class for movement from the
+    "S_V" to "E_V" compartment (vaccinated track).
+
+    Identical to `SusceptibleToExposed` except that the relative
+    susceptibility of people in "S_V" is that of people in "S"
+    multiplied by `1 - vax_induced_inf_risk_reduce`.
+    """
+
+    def susceptibility_multiplier(self,
+                                  params: FluSubpopParams):
+        return 1 - np.asarray(params.vax_induced_inf_risk_reduce)
 
 
 class RecoveredToSusceptible(clt.TransitionVariable):
@@ -226,9 +270,19 @@ class PresympToSympRecover(clt.TransitionVariable):
 
         vax_immunity_factor = 1 - state.MV * params.vax_induced_hosp_risk_reduce_initial
 
-        prob_hosp = (params.IP_to_ISH_prop / immunity_force) * vax_immunity_factor
+        prob_hosp = (params.IP_to_ISH_prop / immunity_force) * vax_immunity_factor * \
+            self.hosp_multiplier(params)
 
         return np.asarray((1 - prob_hosp) * params.IP_to_IS_rate)
+
+    def hosp_multiplier(self,
+                        params: FluSubpopParams):
+        """
+        Multiplier on the probability of hospitalization -- 1 for
+        "IP", overridden for "IP_V" in `VaxPresympToSympRecover`.
+        """
+
+        return 1.0
 
 
 class PresympToSympHospital(clt.TransitionVariable):
@@ -256,9 +310,49 @@ class PresympToSympHospital(clt.TransitionVariable):
 
         vax_immunity_factor = 1 - state.MV * params.vax_induced_hosp_risk_reduce_initial
 
-        prob_hosp = (params.IP_to_ISH_prop / immunity_force) * vax_immunity_factor
+        prob_hosp = (params.IP_to_ISH_prop / immunity_force) * vax_immunity_factor * \
+            self.hosp_multiplier(params)
 
         return np.asarray(prob_hosp * params.IP_to_IS_rate)
+
+    def hosp_multiplier(self,
+                        params: FluSubpopParams):
+        """
+        Multiplier on the probability of hospitalization -- 1 for
+        "IP", overridden for "IP_V" in `VaxPresympToSympHospital`.
+        """
+
+        return 1.0
+
+
+class VaxPresympToSympRecover(PresympToSympRecover):
+    """
+    PresympToSympRecover-derived class for movement from the
+    "IP_V" to "ISR_V" compartment (vaccinated track) -- the
+    complement of `VaxPresympToSympHospital`.
+    """
+
+    def hosp_multiplier(self,
+                        params: FluSubpopParams):
+        return compute_vax_conditional_multipliers(params)[0]
+
+
+class VaxPresympToSympHospital(PresympToSympHospital):
+    """
+    PresympToSympHospital-derived class for movement from the
+    "IP_V" to "ISH_V" compartment (vaccinated track).
+
+    The probability of hospitalization is that of people in "IP"
+    multiplied by `(1 - vax_induced_hosp_risk_reduce) /
+    (1 - vax_induced_inf_risk_reduce)` -- the conditional (given
+    infection) multiplier, since vaccinated people already had their
+    infection risk reduced at "S_V" -> "E_V". See
+    `compute_vax_conditional_multipliers`.
+    """
+
+    def hosp_multiplier(self,
+                        params: FluSubpopParams):
+        return compute_vax_conditional_multipliers(params)[0]
 
 
 class SympRecoverToRecovered(clt.TransitionVariable):
@@ -308,9 +402,19 @@ class SympHospitalToHospRecover(clt.TransitionVariable):
 
         vax_immunity_factor = 1 - state.MV * params.vax_induced_death_risk_reduce_initial
 
-        prob_death = (params.ISH_to_HD_prop / immunity_force) * vax_immunity_factor
+        prob_death = (params.ISH_to_HD_prop / immunity_force) * vax_immunity_factor * \
+            self.death_multiplier(params)
 
         return np.asarray((1 - prob_death) * params.ISH_to_H_rate)
+
+    def death_multiplier(self,
+                         params: FluSubpopParams):
+        """
+        Multiplier on the probability of death -- 1 for "ISH",
+        overridden for "ISH_V" in `VaxSympHospitalToHospRecover`.
+        """
+
+        return 1.0
 
 
 class SympHospitalToHospDead(clt.TransitionVariable):
@@ -344,10 +448,49 @@ class SympHospitalToHospDead(clt.TransitionVariable):
 
         vax_immunity_factor = 1 - state.MV * params.vax_induced_death_risk_reduce_initial
 
-        prob_death = (params.ISH_to_HD_prop / immunity_force) * vax_immunity_factor
+        prob_death = (params.ISH_to_HD_prop / immunity_force) * vax_immunity_factor * \
+            self.death_multiplier(params)
 
         return np.asarray(prob_death * params.ISH_to_H_rate)
-        
+
+    def death_multiplier(self,
+                         params: FluSubpopParams):
+        """
+        Multiplier on the probability of death -- 1 for "ISH",
+        overridden for "ISH_V" in `VaxSympHospitalToHospDead`.
+        """
+
+        return 1.0
+
+
+class VaxSympHospitalToHospRecover(SympHospitalToHospRecover):
+    """
+    SympHospitalToHospRecover-derived class for movement from the
+    "ISH_V" to "HR_V" compartment (vaccinated track) -- the
+    complement of `VaxSympHospitalToHospDead`.
+    """
+
+    def death_multiplier(self,
+                         params: FluSubpopParams):
+        return compute_vax_conditional_multipliers(params)[1]
+
+
+class VaxSympHospitalToHospDead(SympHospitalToHospDead):
+    """
+    SympHospitalToHospDead-derived class for movement from the
+    "ISH_V" to "HD_V" compartment (vaccinated track).
+
+    The probability of death is that of people in "ISH"
+    multiplied by `(1 - vax_induced_death_risk_reduce) /
+    (1 - vax_induced_hosp_risk_reduce)` -- the conditional (given
+    hospitalization) multiplier. See
+    `compute_vax_conditional_multipliers`.
+    """
+
+    def death_multiplier(self,
+                         params: FluSubpopParams):
+        return compute_vax_conditional_multipliers(params)[1]
+
         
 
 class AsympToRecovered(clt.TransitionVariable):
@@ -407,25 +550,310 @@ class HospDeadToDead(clt.TransitionVariable):
                        params.HD_to_D_rate)
 
 
+def compute_vax_dose_pool(S: np.ndarray,
+                          S_V: np.ndarray,
+                          total_pop_age_risk: np.ndarray,
+                          vax_dose_pool: str) -> np.ndarray:
+    """
+    Returns the number of people the `daily_vaccines` proportions
+    apply to, for each age-risk group -- see `vax_dose_pool` in
+    `FluSubpopParams`.
+
+    Returns:
+        np.ndarray of shape (A, R)
+    """
+
+    if vax_dose_pool == "total_population":
+        return np.asarray(total_pop_age_risk, dtype=float)
+    elif vax_dose_pool == "susceptible":
+        return np.asarray(S, dtype=float) + np.asarray(S_V, dtype=float)
+    else:
+        raise FluSubpopModelError(
+            f"`vax_dose_pool` must be one of {VAX_DOSE_POOLS} -- got {vax_dose_pool!r}.")
+
+
+def round_with_carry(expected: np.ndarray,
+                     carry: np.ndarray,
+                     is_integer_valued: bool) -> tuple:
+    """
+    Turns an expected (fractional) number of people to move into the
+    number actually moved this timestep, for each age-risk group.
+
+    For integer-valued transition types, `expected` is added to the
+    fractional `carry` owed from earlier timesteps and only the rounded
+    total is moved, so `carry` stays in [-0.5, 0.5). The cumulative
+    number moved is therefore always within 0.5 of the cumulative
+    number expected -- rounding every timestep (or every day)
+    independently would instead drift, and a group expecting e.g. 0.3
+    people per day would never move anyone. Otherwise `expected` is
+    moved as-is and `carry` is unchanged.
+
+    Returns:
+        (np.ndarray, np.ndarray):
+            number to move and updated carry, each of shape (A, R).
+    """
+
+    if not is_integer_valued:
+        return expected, carry
+
+    carry = carry + expected
+    target = np.floor(carry + 0.5)
+
+    return target, carry - target
+
+
+class ScheduledVaccination(clt.TransitionVariable):
+    """
+    TransitionVariable-derived class for movement from the
+    "S" to "S_V" compartment -- the entry point of the
+    vaccinated track.
+
+    The number moved is deterministic and set by the `daily_vaccines`
+    schedule rather than drawn from a distribution, similar to the
+    `scheduled_exact` transitions of `generic_core`. At the start of
+    each day, `FluSubpopModel.prepare_daily_state` calls
+    `set_daily_expected` with the expected number of people vaccinated
+    that day: the day's `daily_vaccines` proportion times the dose pool
+    (see `compute_vax_dose_pool`). This expected number is spread
+    evenly over the day's timesteps, the same way `daily_vaccines` was
+    divided by the number of timesteps when it fed the (now switched
+    off) `VaxInducedImmunity` epi metric, and rounded with
+    `round_with_carry` for integer-valued transition types.
+
+    The amount moved is capped at what is left in "S" after this
+    timestep's "S" to "E" transition, so "S" never goes negative. A
+    capped shortfall is recorded in `cumulative_capped_shortfall`
+    (and warned about once) but is not carried forward -- those
+    people were not in "S" to be vaccinated.
+
+    Attributes:
+        competing_outflow (SusceptibleToExposed):
+            the other outflow from "S" -- must be realized before
+            this transition variable each timestep (see
+            `FluSubpopModel.create_transition_variables`).
+        is_integer_valued (bool):
+            whether to round the amount moved (see above).
+        daily_expected (np.ndarray of shape (A, R)):
+            expected number vaccinated over the current day.
+        carry (np.ndarray of shape (A, R)):
+            fractional amount owed but not yet moved, in [-0.5, 0.5).
+        cumulative_capped_shortfall (np.ndarray of shape (A, R)):
+            people the schedule called for since the start of the
+            simulation who could not be moved because "S" ran out.
+
+    See parent class docstring for other attributes.
+    """
+
+    def __init__(self,
+                 origin: clt.Compartment,
+                 destination: clt.Compartment,
+                 competing_outflow: clt.TransitionVariable,
+                 transition_type: clt.TransitionTypes):
+
+        super().__init__(origin,
+                         destination,
+                         "scheduled_exact",
+                         is_jointly_distributed=False)
+
+        self.competing_outflow = competing_outflow
+        self.is_integer_valued = "no_round" not in transition_type
+
+        self._reset_counters()
+
+    def _reset_counters(self) -> None:
+
+        self._warned_cap = False
+
+        self.daily_expected = None
+        self.carry = None
+        self.cumulative_capped_shortfall = None
+
+    def set_daily_expected(self,
+                           state: FluSubpopState,
+                           params: FluSubpopParams) -> None:
+        """
+        Sets the expected number of people vaccinated over the current
+        day, from the dose pool at the start of the day -- called once
+        a day by `FluSubpopModel.prepare_daily_state`, after the
+        schedules are updated and the vaccinated-track reset is applied.
+        """
+
+        pool = compute_vax_dose_pool(state.S,
+                                     state.S_V,
+                                     params.total_pop_age_risk,
+                                     params.vax_dose_pool)
+
+        self.daily_expected = np.asarray(state.daily_vaccines, dtype=float) * pool
+
+    def get_current_rate(self,
+                         state: FluSubpopState,
+                         params: FluSubpopParams) -> np.ndarray:
+        """
+        Returns the `daily_vaccines` proportion for the current day --
+        the amount moved comes from `daily_expected` instead.
+
+        Returns:
+            np.ndarray of shape (A, R)
+        """
+
+        return np.asarray(state.daily_vaccines, dtype=float)
+
+    def get_scheduled_exact_realization(self,
+                                        RNG: np.random.Generator,
+                                        num_timesteps: int) -> np.ndarray:
+        """
+        See class docstring. The `RNG` parameter is not used.
+
+        Returns:
+            np.ndarray of shape (A, R)
+        """
+
+        if self.daily_expected is None:
+            raise FluSubpopModelError(
+                "`S_to_S_V.daily_expected` has not been set -- "
+                "`FluSubpopModel.prepare_daily_state` must run at the start "
+                "of each simulation day.")
+
+        expected = self.daily_expected / num_timesteps
+
+        if self.carry is None:
+            self.carry = np.zeros_like(expected)
+            self.cumulative_capped_shortfall = np.zeros_like(expected)
+
+        target, self.carry = round_with_carry(expected, self.carry, self.is_integer_valued)
+
+        competing_val = self.competing_outflow.current_val
+        if competing_val is None:
+            competing_val = 0.0
+        available = np.maximum(np.asarray(self.origin.current_val, dtype=float) -
+                               np.asarray(competing_val, dtype=float), 0.0)
+
+        moved = np.minimum(target, available)
+        shortfall = target - moved
+
+        self.cumulative_capped_shortfall = self.cumulative_capped_shortfall + shortfall
+
+        if np.any(shortfall > 0) and not self._warned_cap:
+            self._warned_cap = True
+            warnings.warn(
+                "Scheduled vaccinations exceeded the number of people left in "
+                "\"S\" for some age-risk group(s) and were capped. The shortfall "
+                "is recorded in `S_to_S_V.cumulative_capped_shortfall`. Further "
+                "occurrences are not reported.")
+
+        return moved
+
+    def reset(self) -> None:
+        super().reset()
+        self._reset_counters()
+
+
+def compute_pre_start_vaccination_shift(S_init: np.ndarray,
+                                        S_V_init: np.ndarray,
+                                        total_pop_age_risk: np.ndarray,
+                                        current_real_date: datetime.date,
+                                        params: FluSubpopParams,
+                                        schedules: sc.objdict,
+                                        timesteps_per_day: int,
+                                        is_integer_valued: bool) -> np.ndarray:
+    """
+    Returns the number of people to move from "S" to "S_V" at the
+    start of the simulation to account for vaccinations scheduled
+    before the simulation start date.
+
+    Mirrors how `VaxInducedImmunity` used to adjust its initial value:
+    if `vax_immunity_reset_date_mm_dd` is None, there is no
+    adjustment. Otherwise, the window runs from the most recent
+    occurrence of the reset date before `current_real_date` up to
+    (not including) `current_real_date`. The `daily_vaccines` index is
+    already the protection date (see `DailyVaccines.postprocess_data_input`),
+    so the protection delay is NOT added to the reset date.
+
+    Within the window, the vaccination rule of `ScheduledVaccination`
+    is replayed day by day and timestep by timestep (same dose pool,
+    same `round_with_carry` rounding, capped at what is left in "S"),
+    starting from the input `S_init` and `S_V_init` -- which are
+    therefore treated as the values at the reset date. As in the old
+    `VaxInducedImmunity` adjustment, no other transitions are replayed.
+
+    Returns:
+        np.ndarray of shape (A, R)
+    """
+
+    S_remaining = np.asarray(S_init, dtype=float).copy()
+    moved_total = np.zeros_like(S_remaining)
+
+    if params.vax_immunity_reset_date_mm_dd is None:
+        return moved_total
+
+    month, day = params.vax_immunity_reset_date_mm_dd.split('_')
+    reset_date = datetime.date(current_real_date.year, int(month), int(day))
+    if reset_date >= current_real_date:
+        reset_date = datetime.date(current_real_date.year - 1, int(month), int(day))
+
+    vaccines_df = schedules['daily_vaccines'].timeseries_df
+
+    mask = (vaccines_df.index >= reset_date) & (vaccines_df.index < current_real_date)
+    relevant_vaccines = vaccines_df.loc[mask, "daily_vaccines"].sort_index()
+
+    S_V_current = np.asarray(S_V_init, dtype=float).copy()
+    carry = np.zeros_like(S_remaining)
+
+    for daily_vaccines in relevant_vaccines:
+
+        pool = compute_vax_dose_pool(S_remaining, S_V_current + moved_total,
+                                     total_pop_age_risk, params.vax_dose_pool)
+        expected = np.asarray(daily_vaccines, dtype=float) * pool / timesteps_per_day
+
+        for _ in range(timesteps_per_day):
+            target, carry = round_with_carry(expected, carry, is_integer_valued)
+            moved = np.minimum(target, S_remaining)
+            S_remaining = S_remaining - moved
+            moved_total = moved_total + moved
+
+    return moved_total
+
+
+def _zero_epi_metric_init_val(init_val,
+                              params: FluSubpopParams,
+                              metric_name: str) -> np.ndarray:
+    """
+    Returns zeros shaped like `init_val` (A x R when `init_val` is None),
+    warning if the input initial value was nonzero -- in the
+    vaccinated-track model, the M and MV epi metrics are switched off
+    and always stay at zero, so any input value is ignored.
+    """
+
+    if init_val is None:
+        return np.zeros((params.num_age_groups, params.num_risk_groups))
+
+    init_val = np.asarray(init_val, dtype=float)
+
+    if np.any(init_val != 0):
+        warnings.warn(
+            f"Initial value of {metric_name} is nonzero ({init_val.tolist()}) but "
+            f"{metric_name} is switched off in the vaccinated-track model and "
+            "always stays at 0 -- the input value is ignored.")
+
+    return np.zeros_like(init_val)
+
+
 class InfInducedImmunity(clt.EpiMetric):
     """
     EpiMetric-derived class for infection-induced
     population-level immunity.
 
-    Population-level immunity increases as people move
-    from "R" to "S" -- this is a design choice intended
-    to avoid "double-counting." People in "R" cannot be
-    infected at all. People who move from "R" to "S"
-    are susceptible again, but these recently-recovered people
-    should have partial immunity. To handle this phenomenon,
-    this epi metric increases as people move from "R" to "S."
+    Switched off in the vaccinated-track model: M starts at zero
+    (whatever the input initial value), never changes, and is never
+    injected. The class is kept so that M still exists as a state
+    variable for code that reads it (plotting, torch tensors, JSON
+    loaders), and so that the M terms in the transition rates
+    simply evaluate to 1.
 
     Params:
         R_to_S (RecoveredToSusceptible):
             RecoveredToSusceptible TransitionVariable
-            in the SubpopModel -- it is an attribute
-            because the population-level immunity
-            increases as people move from "R" to "S".
+            in the SubpopModel -- kept for interface compatibility.
 
     See parent class docstring for other attributes.
     """
@@ -449,47 +877,12 @@ class InfInducedImmunity(clt.EpiMetric):
                              params: FluSubpopParams,
                              timesteps_per_day: int):
         """
-        Adjusts initial value of infection-induced immunity based on
-        infection_immunity_start_date_mm_dd, the date that init_val
-        (M(0)) corresponds to.
-
-        If infection_immunity_start_date_mm_dd is None, or falls on
-        current_real_date, init_val is used as-is. If it is before
-        current_real_date, init_val is decayed forward (waning only)
-        to current_real_date. If it is after current_real_date, the
-        adjusted initial value is zero, and init_val is instead added
-        to current_val once infection_immunity_start_date_mm_dd is
-        reached (see check_and_apply_injection).
-
-        The "MM_DD" string carries no year, so the year is resolved by
-        `resolve_mm_dd_near_date` -- see that function for why the
-        nearest-year rule matters for seasons that span a new year.
+        Returns zeros -- see class docstring.
         """
 
         self.original_init_val = copy.deepcopy(init_val)
-        self.adjusted_init_val = copy.deepcopy(init_val)
+        self.adjusted_init_val = _zero_epi_metric_init_val(init_val, params, "M")
         self.pending_injection_date = None
-
-        if params.infection_immunity_start_date_mm_dd is not None:
-
-            immunity_start_date = resolve_mm_dd_near_date(
-                params.infection_immunity_start_date_mm_dd,
-                current_real_date,
-                param_name="infection_immunity_start_date_mm_dd")
-
-            if immunity_start_date < current_real_date:
-                # init_val is a past value -- decay it forward
-                #   (waning only) to current_real_date
-                num_days = (current_real_date - immunity_start_date).days
-                for _ in range(num_days):
-                    for _ in range(timesteps_per_day):
-                        self.adjusted_init_val = self.adjusted_init_val - \
-                            params.inf_induced_immune_wane * self.adjusted_init_val / timesteps_per_day
-            elif immunity_start_date > current_real_date:
-                # init_val is a future value -- start at 0 and add
-                #   init_val once immunity_start_date is reached
-                self.adjusted_init_val = np.zeros_like(self.adjusted_init_val)
-                self.pending_injection_date = immunity_start_date
 
         return self.adjusted_init_val
 
@@ -497,21 +890,10 @@ class InfInducedImmunity(clt.EpiMetric):
                                   current_date: datetime.date,
                                   params: FluSubpopParams):
         """
-        Check if current_date matches the pending
-        infection_immunity_start_date_mm_dd injection date. If so,
-        add the original initial value to current_val (one-time only).
-
-        Args:
-            current_date: The current simulation date
-            params: FluSubpopParams containing
-                infection_immunity_start_date_mm_dd
+        No-op -- see class docstring.
         """
 
-        if self.pending_injection_date is not None and \
-                current_date == self.pending_injection_date:
-            self.current_val = self.current_val + self.original_init_val
-            self.pending_injection_date = None
-            print(f"InfInducedImmunity increased by initial value on {current_date}")
+        pass
 
     def get_change_in_current_val(self,
                                   state: FluSubpopState,
@@ -519,38 +901,36 @@ class InfInducedImmunity(clt.EpiMetric):
                                   num_timesteps: int) -> np.ndarray:
         """
         Returns:
-            np.ndarray of shape (A, R)
+            np.ndarray of shape (A, R) of zeros -- see class docstring.
         """
 
-        # Note: the current values of transition variables already include
-        #   discretization (division by the number of timesteps) -- therefore,
-        #   we do not divide the first part of this equation by the number of
-        #   timesteps -- see `TransitionVariable` class's methods for getting
-        #   various realizations for more information
-
-        return (self.R_to_S.current_val / params.total_pop_age_risk) * \
-               (1 - params.inf_induced_saturation * state.M) - \
-               params.inf_induced_immune_wane * state.M / num_timesteps
+        return np.zeros_like(np.asarray(state.M, dtype=float))
 
 
 class VaxInducedImmunity(clt.EpiMetric):
     """
     EpiMetric-derived class for vaccine-induced
     population-level immunity.
+
+    Switched off in the vaccinated-track model: vaccination is
+    modeled by moving people from "S" to "S_V" instead (see
+    `ScheduledVaccination`). MV starts at zero (whatever the input
+    initial value) and never changes. The class is kept so that MV
+    still exists as a state variable for code that reads it, and so
+    that the MV terms in the transition rates simply evaluate to 1.
     """
 
-    def __init__(self, 
+    def __init__(self,
                  init_val,
                  current_real_date: datetime.date,
                  params: FluSubpopParams,
                  schedules: clt.Schedule,
                  timesteps_per_day: int):
-        
+
         adjusted_init_val = self.adjust_initial_value(
             init_val, current_real_date, params, schedules, timesteps_per_day)
         super().__init__(adjusted_init_val)
-        
-        
+
     def adjust_initial_value(self,
                              init_val: np.ndarray,
                              current_real_date: datetime.date,
@@ -558,103 +938,36 @@ class VaxInducedImmunity(clt.EpiMetric):
                              schedules: clt.Schedule,
                              timesteps_per_day: int):
         """
-        Adjusts initial value of vaccine-induced immunity based on
-        vaccination schedule if the parameter vax_immunity_reset_date_mm_dd
-        is not None.
-        Vaccines administered before the reset date are not counted, but
-        vaccines administered after the reset date (and before the simulation
-        start date, accounting for protection delay) are counted with waning.
-
-        Note on the protection delay: the `daily_vaccines` schedule is
-        indexed by PROTECTION date, not vaccination date --
-        `DailyVaccines.postprocess_data_input` has already shifted every
-        date forward by `vax_protection_delay_days`. So the window here
-        is bounded by the raw reset date; adding the delay to it again
-        would drop the doses that become protective during the delay
-        window just after the reset date.
+        Returns zeros -- see class docstring. Vaccinations before the
+        simulation start date are accounted for by the initial "S_V"
+        value instead (see `compute_pre_start_vaccination_shift`).
         """
-        
-        self.original_init_val = copy.deepcopy(init_val)
-        self.adjusted_init_val = copy.deepcopy(init_val)
-        
-        if params.vax_immunity_reset_date_mm_dd is not None:
-            # Print warning to mention that initial value is being adjusted
-            msg = 'Vaccine immunity reset date is set as ' +\
-                f'{params.vax_immunity_reset_date_mm_dd.replace("_", "/")}. \n' +\
-                'Initial vaccine-induced immunity value is being adjusted ' +\
-                'by resetting immunity to 0 at that date, and by taking into ' +\
-                'account vaccines administered after this date, and before simulation start date.'
-            warnings.warn(msg)
-            
-            # Parse reset date (format: "MM_DD")
-            month, day = params.vax_immunity_reset_date_mm_dd.split('_')
-            current_year = current_real_date.year
-            
-            # Find most recent occurrence of reset date before start_date
-            reset_date = datetime.date(current_year, int(month), int(day))
-            if reset_date >= current_real_date:
-                # If reset date is after start, use previous year
-                reset_date = datetime.date(current_year - 1, int(month), int(day))
-            
-            # Filter vaccines between reset_date and start date -- the
-            # index is already the protection date (see docstring), so
-            # the protection delay must NOT be added to `reset_date` here
-            vaccines_df = schedules['daily_vaccines'].timeseries_df.copy()
 
-            mask = (vaccines_df.index >= reset_date) &\
-                (vaccines_df.index < current_real_date)
-            relevant_vaccines = vaccines_df[mask]
-            
-            # Initialize MV adjustment
-            MV_adjustment = np.zeros_like(vaccines_df['daily_vaccines'].iloc[0])
-            
-            # Process each day's vaccines, applying waning
-            for _, row in relevant_vaccines.iterrows():
-                for i in range(timesteps_per_day):
-                    MV_adjustment += row["daily_vaccines"] / timesteps_per_day - \
-                        params.vax_induced_immune_wane * MV_adjustment / timesteps_per_day
-            
-            self.adjusted_init_val = self.adjusted_init_val + MV_adjustment
-            
+        self.original_init_val = copy.deepcopy(init_val)
+        self.adjusted_init_val = _zero_epi_metric_init_val(init_val, params, "MV")
+
         return self.adjusted_init_val
-            
+
     def get_change_in_current_val(self,
                                   state: FluSubpopState,
                                   params: FluSubpopParams,
                                   num_timesteps: int) -> np.ndarray:
         """
         Returns:
-            np.ndarray of shape (A, R)
+            np.ndarray of shape (A, R) of zeros -- see class docstring.
         """
 
-        # Note: `state.daily_vaccines` (based on the value of the `DailyVaccines`
-        #   `Schedule` is NOT divided by the number of timesteps -- so we need to
-        #   do this division in the equation here.
-        
-        return state.daily_vaccines / (num_timesteps) - \
-               params.vax_induced_immune_wane * state.MV / num_timesteps
+        return np.zeros_like(np.asarray(state.MV, dtype=float))
 
-    def check_and_apply_reset(self, 
-                              current_date: datetime.date, 
+    def check_and_apply_reset(self,
+                              current_date: datetime.date,
                               params: FluSubpopParams):
         """
-        Check if current date matches vax_immunity_reset_date_mm_dd.
-        If so, reset MV to zero.
-
-        Args:
-            current_date: The current simulation date
-            params: FluSubpopParams containing vax_immunity_reset_date_mm_dd
+        No-op -- the vaccine immunity reset now moves people from
+        "S_V" back to "S" (see `FluSubpopModel.check_and_apply_vax_track_reset`).
         """
-        
-        if params.vax_immunity_reset_date_mm_dd is not None:
-            # Parse reset date (format: "MM_DD")
-            month, day = params.vax_immunity_reset_date_mm_dd.split('_')
 
-            # Check if current date matches the reset date (month and day)
-            if current_date.month == int(month) and current_date.day == int(day):
-                # Reset vaccine-induced immunity to zero
-                self.current_val = np.zeros_like(self.current_val)
-                print(f"VaxInducedImmunity reset to 0 on {current_date}")
+        pass
 
 
 def compute_vax_induced_risk_reduce_initial(params: FluSubpopParams,
@@ -871,6 +1184,93 @@ def _cap_vax_induced_risk_reduce_initial(ve_initial_arr: np.ndarray,
     return np.minimum(ve_initial_arr, 1.0)
 
 
+def _vax_conditional_ratio(ve_outcome, ve_prior_step) -> np.ndarray:
+    """
+    Returns `(1 - ve_outcome) / (1 - ve_prior_step)`, capped at 1.0, and
+    set to 1.0 where `ve_prior_step` is 1 (nobody reaches that step, so the
+    value is never applied). See `compute_vax_conditional_multipliers`.
+    """
+
+    ve_outcome = np.asarray(ve_outcome, dtype=float)
+    ve_prior_step = np.asarray(ve_prior_step, dtype=float)
+
+    denom = 1 - ve_prior_step
+    safe_denom = np.where(denom > 0, denom, 1.0)
+    ratio = np.where(denom > 0, (1 - ve_outcome) / safe_denom, 1.0)
+
+    return np.minimum(ratio, 1.0)
+
+
+def compute_vax_conditional_multipliers(params: FluSubpopParams) -> tuple:
+    """
+    Converts the overall (unconditional) vaccine efficacies
+    `vax_induced_hosp_risk_reduce` and `vax_induced_death_risk_reduce` into
+    the conditional multipliers applied along the vaccinated track.
+
+    The vaccinated track applies its reductions sequentially --
+    `1 - vax_induced_inf_risk_reduce` at "S_V" -> "E_V", then the hosp
+    multiplier at "IP_V" -> "ISH_V", then the death multiplier at
+    "ISH_V" -> "HD_V" -- so the multipliers must be conditional on the
+    previous step for the products to equal the overall efficacies:
+
+        hosp_mult  = (1 - VE_hosp)  / (1 - VE_inf)
+        death_mult = (1 - VE_death) / (1 - VE_hosp)
+
+    so that (1 - VE_inf) * hosp_mult = 1 - VE_hosp and
+    (1 - VE_inf) * hosp_mult * death_mult = 1 - VE_death.
+
+    Each multiplier is capped at 1.0 (conditional efficacy floored at 0)
+    -- a ratio above 1 means the overall efficacy for that outcome is
+    lower than for the previous step, which the sequential structure
+    cannot represent. See `_warn_vax_conditional_clipping`.
+
+    Returns:
+        (hosp_mult, death_mult), each an np.ndarray broadcastable to (A, R).
+    """
+
+    hosp_mult = _vax_conditional_ratio(params.vax_induced_hosp_risk_reduce,
+                                       params.vax_induced_inf_risk_reduce)
+    death_mult = _vax_conditional_ratio(params.vax_induced_death_risk_reduce,
+                                        params.vax_induced_hosp_risk_reduce)
+
+    return hosp_mult, death_mult
+
+
+def _warn_vax_conditional_clipping(params: FluSubpopParams) -> None:
+    """
+    Warns if `compute_vax_conditional_multipliers` caps either multiplier
+    at 1.0 for any age-risk group -- i.e. if `vax_induced_hosp_risk_reduce`
+    < `vax_induced_inf_risk_reduce` or `vax_induced_death_risk_reduce`
+    < `vax_induced_hosp_risk_reduce`. Realized overall efficacy against
+    that outcome then equals the previous step's efficacy, which is
+    higher than requested.
+    """
+
+    target_shape = (params.num_age_groups, params.num_risk_groups)
+
+    def as_arr(name):
+        return np.broadcast_to(np.asarray(getattr(params, name), dtype=float), target_shape)
+
+    pairs = (("vax_induced_hosp_risk_reduce", "vax_induced_inf_risk_reduce"),
+             ("vax_induced_death_risk_reduce", "vax_induced_hosp_risk_reduce"))
+
+    for outcome_name, prior_name in pairs:
+        outcome_arr = as_arr(outcome_name)
+        prior_arr = as_arr(prior_name)
+        under_idxs = np.argwhere((outcome_arr < prior_arr) & (prior_arr < 1))
+
+        if under_idxs.size > 0:
+            groups_str = ", ".join(f"(age {a}, risk {r})" for a, r in under_idxs)
+            warnings.warn(
+                f"`{outcome_name}` is lower than `{prior_name}` for age-risk "
+                f"group(s) {groups_str}. Vaccine efficacies are applied "
+                "sequentially along the vaccinated track, so the conditional "
+                f"efficacy for `{outcome_name}` is floored at 0 and the "
+                f"realized overall efficacy equals `{prior_name}` for these "
+                "groups -- higher than requested."
+            )
+
+
 def _season_window_doses(params: FluSubpopParams,
                          schedules: sc.objdict,
                          start_real_date: datetime.date,
@@ -988,7 +1388,7 @@ class BetaReduce(clt.DynamicVal):
         self.permanent_lockdown = False
 
     def update_current_val(self, state, params):
-        if np.sum(sum([state.ISR, state.ISH])) / np.sum(params.total_pop_age_risk) > 0.05:
+        if np.sum(compute_symp_infectious(state)) / np.sum(params.total_pop_age_risk) > 0.05:
             self.current_val = .5
             self.permanent_lockdown = True
         else:
@@ -1229,13 +1629,28 @@ def compute_wtd_presymp_asymp_by_age(subpop_state: FluSubpopState,
         np.ndarray of shape (A, R)
     """
 
-    # sum over risk groups
+    # Sum both tracks, then sum over risk groups
     wtd_IP = \
-        subpop_params.IP_relative_inf * np.sum(subpop_state.IP, axis=1, keepdims=True)
+        subpop_params.IP_relative_inf * np.sum(subpop_state.IP + subpop_state.IP_V,
+                                               axis=1, keepdims=True)
     wtd_IA = \
-        subpop_params.IA_relative_inf * np.sum(subpop_state.IA, axis=1, keepdims=True)
+        subpop_params.IA_relative_inf * np.sum(subpop_state.IA + subpop_state.IA_V,
+                                               axis=1, keepdims=True)
 
     return wtd_IP + wtd_IA
+
+
+def compute_symp_infectious(subpop_state: FluSubpopState) -> np.ndarray:
+    """
+    Returns symptomatic infectious people (ISR and ISH) summed
+        across the base and vaccinated tracks.
+
+    Returns:
+        np.ndarray of shape (A, R)
+    """
+
+    return subpop_state.ISR + subpop_state.ISH + \
+        subpop_state.ISR_V + subpop_state.ISH_V
 
 
 def compute_beta_adjusted(subpop_state: FluSubpopState,
@@ -1301,6 +1716,24 @@ def create_timeseries_df_from_day_of_week_schedule(
     return df
 
 
+def parse_schedule_dates(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Converts the "date" column of a schedule DataFrame in place from
+    "YYYY-MM-DD" strings (or `datetime.date` objects, left as dates)
+    to `datetime.date` objects, and returns the DataFrame. DataFrames
+    with a "day_of_week" column instead of dates are returned as-is.
+    """
+
+    try:
+        if 'day_of_week' not in df.columns:
+            df["date"] = pd.to_datetime(df["date"], format='%Y-%m-%d').dt.date
+    except ValueError as e:
+        raise ValueError("Error: dates should be strings in YYYY-MM-DD format or "
+                         "`date.datetime` objects.") from e
+
+    return df
+
+
 class FluSubpopModel(clt.SubpopModel):
     """
     Class for creating ImmunoSEIRS flu model with predetermined fixed
@@ -1308,11 +1741,13 @@ class FluSubpopModel(clt.SubpopModel):
     populated by user-specified `JSON` files.
 
     Key method create_transmission_model returns a `SubpopModel`
-    instance with S-E-I-H-R-D compartments and M
-    and MV epi metrics.
-    
+    instance with S-E-I-H-R-D compartments, a parallel vaccinated
+    track of S_V-E_V-I_V-H_V-R_V-D_V compartments, and M and MV epi
+    metrics (both switched off -- they always stay at zero, and
+    `R_to_S_rate` is forced to zero).
+
     The update structure is as follows:
-        - S <- S + R_to_S - S_to_E
+        - S <- S + R_to_S - S_to_E - S_to_S_V
         - E <- E + S_to_E - E_to_IP - E_to_IA
         - IA <- IA + E_to_IA - IA_to_R 
         - IP <- IP + E_to_IP - IP_to_ISR - IP_to_ISH
@@ -1322,6 +1757,27 @@ class FluSubpopModel(clt.SubpopModel):
         - HD <- HD + ISH_to_HD - HD_to_D
         - R <- R + ISR_to_R + HR_to_R - R_to_S
         - D <- D + HD_to_D
+
+    The vaccinated track X_V has the same structure (with transition
+    variables named X_V_to_Y_V), except that:
+        - S_V <- S_V + S_to_S_V + R_V_to_S_V - S_V_to_E_V
+        - S_V_to_E_V is a VaxSusceptibleToExposed instance -- relative
+          susceptibility is multiplied by 1 - vax_induced_inf_risk_reduce
+        - IP_V_to_ISR_V / IP_V_to_ISH_V are VaxPresympToSympRecover /
+          VaxPresympToSympHospital instances -- the probability of
+          hospitalization is multiplied by
+          (1 - vax_induced_hosp_risk_reduce) / (1 - vax_induced_inf_risk_reduce)
+        - ISH_V_to_HR_V / ISH_V_to_HD_V are VaxSympHospitalToHospRecover /
+          VaxSympHospitalToHospDead instances -- the probability of
+          death is multiplied by
+          (1 - vax_induced_death_risk_reduce) / (1 - vax_induced_hosp_risk_reduce)
+      These are conditional multipliers, so the overall reductions in
+      hospitalization and death risk for a vaccinated person equal
+      vax_induced_hosp_risk_reduce and vax_induced_death_risk_reduce --
+      see `compute_vax_conditional_multipliers`.
+    S_to_S_V is a ScheduledVaccination instance driven by the
+    `daily_vaccines` schedule. On `vax_immunity_reset_date_mm_dd`,
+    everyone in S_V moves back to S.
 
     The following are TransitionVariable instances:
         - R_to_S is a RecoveredToSusceptible instance
@@ -1334,10 +1790,11 @@ class FluSubpopModel(clt.SubpopModel):
         - HR_to_R is a HospRecoverToRecovered instance 
         - HD_to_D is a HospDeadToDead instance
 
-    There are three TransitionVariableGroups:
+    There are six TransitionVariableGroups:
         - E_out (handles E_to_IP and E_to_IA)
         - IP_out (handles IP_to_ISR and IP_to_ISH)
         - ISH_out (handles ISH_to_HR and ISH_to_HD)
+        - E_V_out, IP_V_out, ISH_V_out (vaccinated-track counterparts)
 
     The following are EpiMetric instances:
         - M is a InfInducedImmunity instance
@@ -1386,6 +1843,15 @@ class FluSubpopModel(clt.SubpopModel):
 
         self.params = clt.updated_dataclass(self.params, {"start_real_date": self.start_real_date})
 
+        # Infection-induced immunity is switched off in the
+        #   vaccinated-track model -- recovered people stay in R
+        if np.any(np.asarray(self.params.R_to_S_rate) != 0):
+            warnings.warn(
+                f"`R_to_S_rate` is {self.params.R_to_S_rate} but is forced to 0 "
+                "in the vaccinated-track model (infection-induced immunity is "
+                "switched off).")
+        self.params = clt.updated_dataclass(self.params, {"R_to_S_rate": 0.0})
+
         self.update_vax_induced_risk_reduce_initial()
         self.update_infection_immunity_injection_val()
 
@@ -1399,7 +1865,12 @@ class FluSubpopModel(clt.SubpopModel):
         #   model's starting tensors straight off `self.state` and would
         #   otherwise start the torch run from different initial
         #   immunity than the numpy run.
+        # Same for the compartments: "S" and "S_V" start from values
+        #   shifted by pre-start vaccinations (see `create_compartments`),
+        #   and the vaccinated-track fields are None when the init-vals
+        #   JSON omits them.
         self.state.sync_to_current_vals(self.epi_metrics)
+        self.state.sync_to_current_vals(self.compartments)
 
     def update_vax_induced_risk_reduce_initial(self) -> None:
         """
@@ -1418,6 +1889,8 @@ class FluSubpopModel(clt.SubpopModel):
         `reset_simulation`, which calls this for the same reason
         `VaxInducedImmunity`'s initial value is recomputed there.
         """
+
+        _warn_vax_conditional_clipping(self.params)
 
         inf_initial, hosp_initial, death_initial = compute_vax_induced_risk_reduce_initial(
             self.params, self.schedules, self.start_real_date)
@@ -1578,8 +2051,9 @@ class FluSubpopModel(clt.SubpopModel):
         """
         
         p = self.params
+        # `R_to_S_rate` is not checked -- it is forced to 0 (see `__init__`)
         rates_list = [
-            p.R_to_S_rate, p.E_to_I_rate, p.IP_to_IS_rate, p.ISH_to_H_rate,
+            p.E_to_I_rate, p.IP_to_IS_rate, p.ISH_to_H_rate,
             p.ISR_to_R_rate, p.IA_to_R_rate, p.HR_to_R_rate, p.HD_to_D_rate,
             p.E_to_IA_prop]
         
@@ -1609,16 +2083,29 @@ class FluSubpopModel(clt.SubpopModel):
         Ensure all initial compartment and saturation values are non-negative.
         """
         
-        compartments_list = ["S", "E", "IP", "ISR", "ISH", "IA", "HR", "HD", "R", "D"]
-        immunity_values_list = ["M", "MV"]
+        # Read compartments off the `Compartment` objects rather than
+        #   `self.state` -- vaccinated-track fields on `self.state` are
+        #   None until synced when the init-vals JSON omits them
+        values = {name: self.compartments[name].current_val for name in ALL_COMPARTMENTS}
+        values.update({name: self.epi_metrics[name].current_val for name in ("M", "MV")})
 
-        for state_name in compartments_list + immunity_values_list:
-            if not(np.all(getattr(self.state, state_name) >= 0)):
+        for state_name, value in values.items():
+            if not(np.all(np.asarray(value) >= 0)):
                 raise FluSubpopModelError(
                     'Initial compartment and immunity values must be non-negative. ' +\
-                    f'{state_name} is negative: {getattr(self.state, state_name)} for subpopulation ' +\
+                    f'{state_name} is negative: {value} for subpopulation ' +\
                     f'{self.name}.'
                 )
+
+    def check_vax_dose_pool_input(self) -> None:
+        """
+        Ensure `vax_dose_pool` is one of the supported options.
+        """
+
+        if self.params.vax_dose_pool not in VAX_DOSE_POOLS:
+            raise FluSubpopModelError(
+                f"`vax_dose_pool` must be one of {VAX_DOSE_POOLS} -- got "
+                f"{self.params.vax_dose_pool!r}.")
     
     def run_input_checks(self) -> None:
         """
@@ -1631,59 +2118,113 @@ class FluSubpopModel(clt.SubpopModel):
               and work contact matrices
             - all rate values must be strictly positive
             - initial compartmental values must be non-negative
+            - `vax_dose_pool` must be a supported option
         """
-        
+
         self.check_humidity_input()
         self.check_vaccination_input()
         self.check_calendar_variables_input()
         self.check_contact_matrix_input()
         self.check_rate_input()
         self.check_initial_compartment_input()
+        self.check_vax_dose_pool_input()
 
     def prepare_daily_state(self) -> None:
         """
-        Override parent method to add vaccine immunity reset check and
-        infection-induced immunity injection check.
-        At beginning of each day, update schedules, dynamic values,
-        and check for vaccine immunity reset and infection immunity
-        injection.
+        Override parent method to add the vaccinated-track updates.
+        At beginning of each day, update schedules and dynamic values,
+        move everyone in "S_V" back to "S" if today is the vaccine
+        immunity reset date, and set the day's expected number of
+        vaccinations on `S_to_S_V`.
         """
         # Call parent implementation first to update schedules and dynamic vals
         super().prepare_daily_state()
 
-        # Check and potentially reset vaccine-induced immunity
-        if hasattr(self.epi_metrics, 'MV'):
-            self.epi_metrics.MV.check_and_apply_reset(
-                self.current_real_date,
-                self.params
-            )
+        self.check_and_apply_vax_track_reset()
 
-        # Check and potentially inject infection-induced immunity
-        if hasattr(self.epi_metrics, 'M'):
-            self.epi_metrics.M.check_and_apply_injection(
-                self.current_real_date,
-                self.params
-            )
+        # The day's vaccinations come from the pool after the reset, which
+        #   moves people between S and S_V -- matches `prepare_daily_torch_state`
+        self.transition_variables.S_to_S_V.set_daily_expected(self.state, self.params)
 
-        # The reset/injection checks above set `current_val` directly on
-        #   the epi metric objects -- sync `self.state` immediately so
-        #   that today's ODE update (which reads `state.MV`/`state.M`,
-        #   not the epi metric's own `current_val`) sees the up-to-date
-        #   value on its very first timestep, instead of a stale
-        #   pre-reset/pre-injection value.
-        self.state.sync_to_current_vals(self.epi_metrics)
+    def check_and_apply_vax_track_reset(self) -> None:
+        """
+        If the current date matches `vax_immunity_reset_date_mm_dd`
+        (month and day, so this repeats every year), move everyone in
+        "S_V" back to "S". People elsewhere on the vaccinated track
+        stay there.
+        """
+
+        if self.params.vax_immunity_reset_date_mm_dd is None:
+            return
+
+        month, day = self.params.vax_immunity_reset_date_mm_dd.split('_')
+
+        if self.current_real_date.month != int(month) or \
+                self.current_real_date.day != int(day):
+            return
+
+        S = self.compartments.S
+        S_V = self.compartments.S_V
+
+        S.current_val = np.asarray(S.current_val, dtype=float) + \
+            np.asarray(S_V.current_val, dtype=float)
+        S_V.current_val = np.zeros_like(np.asarray(S_V.current_val, dtype=float))
+
+        print(f"Vaccinated track reset: S_V moved back to S on {self.current_real_date}")
+
+        # Sync `self.state` immediately so that today's first timestep
+        #   (which reads `state.S`/`state.S_V`) sees the reset values
+        self.state.sync_to_current_vals(self.compartments)
 
     def create_compartments(self) -> sc.objdict[str, clt.Compartment]:
 
-        # Create `Compartment` instances S-E-IA-IP-IS-H-R-D (7 compartments total)
+        # Create `Compartment` instances S-E-IA-IP-IS-H-R-D and their
+        #   vaccinated-track copies (20 compartments total)
         # Save instances in `sc.objdict` and return objdict
+
+        A = self.params.num_age_groups
+        R = self.params.num_risk_groups
+
+        init_vals = {}
+        for name in ALL_COMPARTMENTS:
+            val = getattr(self.state, name)
+            init_vals[name] = np.zeros((A, R)) if val is None else val
+
+        # Keep the input values so the pre-start shift can be recomputed
+        #   from scratch on `reset_simulation` (see there)
+        self._original_S_init = copy.deepcopy(init_vals["S"])
+        self._original_S_V_init = copy.deepcopy(init_vals["S_V"])
+
+        shift = self.compute_pre_start_vaccination_shift(
+            sum(np.asarray(v, dtype=float) for v in init_vals.values()))
+        init_vals["S"] = np.asarray(self._original_S_init, dtype=float) - shift
+        init_vals["S_V"] = np.asarray(self._original_S_V_init, dtype=float) + shift
 
         compartments = sc.objdict()
 
-        for name in ("S", "E", "IP", "ISR", "ISH", "IA", "HR", "HD", "R", "D"):
-            compartments[name] = clt.Compartment(getattr(self.state, name))
+        for name in ALL_COMPARTMENTS:
+            compartments[name] = clt.Compartment(init_vals[name])
 
         return compartments
+
+    def compute_pre_start_vaccination_shift(self,
+                                            total_pop_age_risk: np.ndarray) -> np.ndarray:
+        """
+        Returns the number of people to move from the input "S" to
+        the input "S_V" to account for vaccinations scheduled before
+        the simulation start date -- see
+        `compute_pre_start_vaccination_shift`.
+        """
+
+        return compute_pre_start_vaccination_shift(
+            self._original_S_init,
+            self._original_S_V_init,
+            total_pop_age_risk,
+            self.start_real_date,
+            self.params,
+            self.schedules,
+            self.simulation_settings.timesteps_per_day,
+            "no_round" not in self.simulation_settings.transition_type)
 
     def create_dynamic_vals(self) -> sc.objdict[str, clt.DynamicVal]:
         """
@@ -1713,17 +2254,27 @@ class FluSubpopModel(clt.SubpopModel):
 
         for field, df in asdict(self.schedules_spec).items():
 
-            try:
-                if 'day_of_week' not in df.columns:
-                    df["date"] = pd.to_datetime(df["date"], format='%Y-%m-%d').dt.date
-            except ValueError as e:
-                raise ValueError("Error: dates should be strings in YYYY-MM-DD format or "
-                                 "`date.datetime` objects.") from e
-
-            schedules[field].timeseries_df = df
+            schedules[field].timeseries_df = parse_schedule_dates(df)
             schedules[field].postprocess_data_input()
 
         return schedules
+
+    def replace_schedule(self,
+                         schedule_name: str,
+                         new_df: pd.DataFrame) -> None:
+        """
+        Extends the base `replace_schedule` to parse "date" strings
+        into `datetime.date` objects first, as `create_schedules` does
+        -- the `Schedule` lookups index by `datetime.date`, and
+        `DailyVaccines` shifts the dates by its protection delay.
+        """
+
+        # Leave an unknown `schedule_name` to the base method, which
+        #   raises a clear error for it
+        if schedule_name in self.schedules:
+            new_df = parse_schedule_dates(new_df.copy())
+
+        super().replace_schedule(schedule_name, new_df)
 
     def create_transition_variables(self) -> sc.objdict[str, clt.TransitionVariable]:
         """
@@ -1763,11 +2314,45 @@ class FluSubpopModel(clt.SubpopModel):
         transition_variables.HR_to_R = HospRecoverToRecovered(HR, R, transition_type)
         transition_variables.HD_to_D = HospDeadToDead(HD, D, transition_type)
 
+        # Entry into the vaccinated track -- must come AFTER S_to_E:
+        #   both are marginally distributed, so `sample_transitions`
+        #   realizes them in this order, and S_to_S_V caps itself at
+        #   what S_to_E leaves in S
+        transition_variables.S_to_S_V = ScheduledVaccination(S, self.compartments.S_V,
+                                                             transition_variables.S_to_E,
+                                                             transition_type)
+
+        # Vaccinated track -- same structure, except for S_V_to_E_V
+        #   and the IP_V and ISH_V splits
+        S_V = self.compartments.S_V
+        E_V = self.compartments.E_V
+        IP_V = self.compartments.IP_V
+        ISR_V = self.compartments.ISR_V
+        ISH_V = self.compartments.ISH_V
+        IA_V = self.compartments.IA_V
+        HR_V = self.compartments.HR_V
+        HD_V = self.compartments.HD_V
+        R_V = self.compartments.R_V
+        D_V = self.compartments.D_V
+
+        transition_variables.R_V_to_S_V = RecoveredToSusceptible(R_V, S_V, transition_type)
+        transition_variables.S_V_to_E_V = VaxSusceptibleToExposed(S_V, E_V, transition_type)
+        transition_variables.IP_V_to_ISR_V = VaxPresympToSympRecover(IP_V, ISR_V, transition_type, True)
+        transition_variables.IP_V_to_ISH_V = VaxPresympToSympHospital(IP_V, ISH_V, transition_type, True)
+        transition_variables.IA_V_to_R_V = AsympToRecovered(IA_V, R_V, transition_type)
+        transition_variables.E_V_to_IP_V = ExposedToPresymp(E_V, IP_V, transition_type, True)
+        transition_variables.E_V_to_IA_V = ExposedToAsymp(E_V, IA_V, transition_type, True)
+        transition_variables.ISR_V_to_R_V = SympRecoverToRecovered(ISR_V, R_V, transition_type)
+        transition_variables.ISH_V_to_HR_V = VaxSympHospitalToHospRecover(ISH_V, HR_V, transition_type, True)
+        transition_variables.ISH_V_to_HD_V = VaxSympHospitalToHospDead(ISH_V, HD_V, transition_type, True)
+        transition_variables.HR_V_to_R_V = HospRecoverToRecovered(HR_V, R_V, transition_type)
+        transition_variables.HD_V_to_D_V = HospDeadToDead(HD_V, D_V, transition_type)
+
         return transition_variables
 
     def create_transition_variable_groups(self) -> sc.objdict[str, clt.TransitionVariableGroup]:
         """
-        Create all transition variable groups described in docstring (3 transition
+        Create all transition variable groups described in docstring (6 transition
         variable groups total), save in `sc.objdict`, return objdict
         """
 
@@ -1794,6 +2379,21 @@ class FluSubpopModel(clt.SubpopModel):
                                                                          transition_type,
                                                                          (self.transition_variables.ISH_to_HR,
                                                                           self.transition_variables.ISH_to_HD))
+
+        transition_variable_groups.E_V_out = clt.TransitionVariableGroup(self.compartments.E_V,
+                                                                         transition_type,
+                                                                         (self.transition_variables.E_V_to_IP_V,
+                                                                          self.transition_variables.E_V_to_IA_V))
+
+        transition_variable_groups.IP_V_out = clt.TransitionVariableGroup(self.compartments.IP_V,
+                                                                          transition_type,
+                                                                          (self.transition_variables.IP_V_to_ISR_V,
+                                                                           self.transition_variables.IP_V_to_ISH_V))
+
+        transition_variable_groups.ISH_V_out = clt.TransitionVariableGroup(self.compartments.ISH_V,
+                                                                           transition_type,
+                                                                           (self.transition_variables.ISH_V_to_HR_V,
+                                                                            self.transition_variables.ISH_V_to_HD_V))
 
         return transition_variable_groups
 
@@ -1850,47 +2450,30 @@ class FluSubpopModel(clt.SubpopModel):
 
     def reset_simulation(self) -> None:
         """
-        Extends the base `reset_simulation` to recompute `MV.init_val`,
-        `M.init_val`, and `vax_induced_*_risk_reduce_initial` from the
-        currently loaded vaccine schedule (and current base params)
-        before resetting.
+        Extends the base `reset_simulation` to recompute the initial
+        "S" and "S_V" values and `vax_induced_*_risk_reduce_initial`
+        from the currently loaded vaccine schedule (and current base
+        params) before resetting.
 
-        This ensures that if the `daily_vaccines` schedule has been replaced
-        (e.g. via `replace_schedule`), or the underlying
-        `vax_induced_*_risk_reduce`/`vax_induced_immune_wane`/
-        `inf_induced_immune_wane`/`infection_immunity_start_date_mm_dd`
-        params have been overridden (e.g. by `ScenarioRunner`), the model
-        resets to values consistent with the current schedule/params,
-        rather than the values computed at construction time from the
-        original schedule/params.
+        This ensures that if the `daily_vaccines` schedule has been
+        replaced (e.g. via `replace_schedule`), or
+        `vax_immunity_reset_date_mm_dd`/`vax_dose_pool` have been
+        overridden (e.g. by `ScenarioRunner`), the model resets to
+        values consistent with the current schedule/params, rather
+        than the values computed at construction time.
 
-        The `MV.init_val` and `M.init_val` recomputations use
-        `VaxInducedImmunity.adjust_initial_value()` and
-        `InfInducedImmunity.adjust_initial_value()` respectively, with
-        `original_init_val` as the base — the unmodified value
-        from the state JSON — so adjustments do not compound across calls.
+        The pre-start shift is recomputed from `_original_S_init` and
+        `_original_S_V_init` -- the unmodified values from the state
+        JSON -- so shifts do not compound across calls. M and MV are
+        switched off, so their initial values are always zero.
         """
 
-        MV = self.epi_metrics["MV"]
-        new_MV_init_val = MV.adjust_initial_value(
-            MV.original_init_val,
-            self.start_real_date,
-            self.params,
-            self.schedules,
-            self.simulation_settings.timesteps_per_day,
-        )
+        shift = self.compute_pre_start_vaccination_shift(self.params.total_pop_age_risk)
+
         # Use the init_val setter so current_val is also updated immediately,
         # before super()'s reset loop overwrites it again (harmlessly).
-        MV.init_val = new_MV_init_val
-
-        M = self.epi_metrics["M"]
-        new_M_init_val = M.adjust_initial_value(
-            M.original_init_val,
-            self.start_real_date,
-            self.params,
-            self.simulation_settings.timesteps_per_day,
-        )
-        M.init_val = new_M_init_val
+        self.compartments.S.init_val = np.asarray(self._original_S_init, dtype=float) - shift
+        self.compartments.S_V.init_val = np.asarray(self._original_S_V_init, dtype=float) + shift
 
         self.update_vax_induced_risk_reduce_initial()
         self.update_infection_immunity_injection_val()
@@ -2270,9 +2853,12 @@ class FluMetapopModel(clt.MetapopModel, ABC):
 
         # Updates `total_mixing_exposure` attribute on each `SusceptibleToExposed`
         # instance -- this value captures across-population travel/mixing.
+        # The vaccinated track's S_V_to_E_V uses the same exposure --
+        #   its reduced susceptibility is applied in its own rate
         for i in range(len(subpop_models)):
-            subpop_models.values()[i].transition_variables.S_to_E.total_mixing_exposure = \
-                total_mixing_exposure[i, :, :]
+            subpop_tvars = subpop_models.values()[i].transition_variables
+            subpop_tvars.S_to_E.total_mixing_exposure = total_mixing_exposure[i, :, :]
+            subpop_tvars.S_V_to_E_V.total_mixing_exposure = total_mixing_exposure[i, :, :]
 
     def setup_full_metapop_schedule_tensors(self):
         """

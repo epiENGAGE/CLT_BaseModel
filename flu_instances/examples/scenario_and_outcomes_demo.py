@@ -79,7 +79,7 @@ SIMULATION_DAYS = 200
 NUM_REPS        = 5      # keep small so the demo runs quickly
 SEEDS           = list(range(NUM_REPS))
 
-TVAR_SAVE = ("ISH_to_HR", "ISH_to_HD", "S_to_E", "HD_to_D")
+TVAR_SAVE = tuple(flu.HOSPITAL_ADMISSION_TVARS + flu.NEW_INFECTION_TVARS + flu.DEATH_TVARS)
 
 
 # ---------------------------------------------------------------------------
@@ -250,7 +250,7 @@ print(f"  writing figures to {out_dir}")
 fig, ax = plt.subplots(figsize=(10, 5))
 outcomes.plot_compartment_history(
     baseline_model,
-    compartment_names=["S", "E", "IP", "ISR", "ISH", "IA", "HR", "HD", "R", "D"],
+    compartment_names=flu.ALL_COMPARTMENTS,
     ax=ax,
     title="Baseline compartment history (all subpops)",
 )
@@ -480,7 +480,7 @@ db_path = os.path.join(out_dir, "scenario_results.db")
 
 runner = clt.ScenarioRunner(
     baseline_model=runner_model,
-    state_variables_to_record=["S", "HR", "HD", "D"],
+    state_variables_to_record=["S", "S_V", "HR", "HR_V", "HD", "HD_V", "D", "D_V"],
     database_filename=db_path,
 )
 
@@ -520,12 +520,15 @@ df_specific = runner.get_results_df(
 print(f"  +20% / HR / east / age_group=0: {len(df_specific):,} rows")
 print(f"  Columns: {list(df_specific.columns)}")
 
-# Compute mean deaths at final timepoint per scenario
+# Compute mean deaths at final timepoint per scenario -- deaths on both
+#   tracks (D + D_V) are summed within each subpop / age / risk / rep cell
 final_day = df_all["timepoint"].max()
 mean_deaths = (
     df_all[df_all["timepoint"] == final_day]
-    .query("state_var_name == 'D'")
-    .groupby("scenario_name")["value"]
+    .query("state_var_name in ['D', 'D_V']")
+    .groupby(["scenario_name", "subpop_name", "age_group", "risk_group", "rep"])["value"]
+    .sum()
+    .groupby("scenario_name")
     .mean()
 )
 print("\n  Mean cumulative deaths at final timepoint by scenario:")

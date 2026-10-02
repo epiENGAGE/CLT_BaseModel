@@ -480,7 +480,7 @@ def _run_simulation(
     else:
         scenario_start_dates = {str(v): _default_start for v in param_values}
 
-    tvar_to_save = ["ISH_to_HR", "ISH_to_HD", "S_to_E", "HD_to_D"]
+    tvar_to_save = flu.HOSPITAL_ADMISSION_TVARS + flu.NEW_INFECTION_TVARS + flu.DEATH_TVARS
     updated_settings = clt.updated_dataclass(settings_base, {
         "transition_type": transition_type,
         "transition_variables_to_save": tvar_to_save,
@@ -552,8 +552,8 @@ def _cumulative_vax_display(inputs, mo, np, vax_multiplier):
 
 
 @app.cell
-def _compartment_and_metric_controls(mo):
-    _all_compartments = ["S", "E", "IP", "ISR", "ISH", "IA", "HR", "HD", "R", "D"]
+def _compartment_and_metric_controls(flu, mo):
+    _all_compartments = list(flu.ALL_COMPARTMENTS)
     compartment_checkboxes = mo.ui.array(
         [mo.ui.checkbox(value=True, label=c) for c in _all_compartments],
         label="Compartments to show",
@@ -569,6 +569,7 @@ def _compartment_and_metric_controls(mo):
 def _plot_compartments(
     age_group_selector,
     compartment_checkboxes,
+    flu,
     mo,
     np,
     pd,
@@ -579,7 +580,7 @@ def _plot_compartments(
     settings_base,
     subpop_selector,
 ):
-    _ALL_COMPARTMENTS = ["S", "E", "IP", "ISR", "ISH", "IA", "HR", "HD", "R", "D"]
+    _ALL_COMPARTMENTS = list(flu.ALL_COMPARTMENTS)
     _LINE_STYLES = ["-", "--", ":", "-."]
     _colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
 
@@ -979,11 +980,11 @@ def _plot_cumulative_tvars(
             _label = f"{param_name}={_scenario_label}"
             _start = scenario_start_dates.get(_scenario_label, str(settings_base.start_real_date))
 
-            # Daily deaths from HD_to_D tvar (same pattern as daily_new_infections)
+            # Daily deaths from HD_to_D tvars on both tracks (same pattern as daily_new_infections)
             def _daily_deaths(m, subpop_name=_subpop, age_group=_age_group):
-                from flu_core.flu_outcomes import _tvar_daily, _apply_ar_filter
+                from flu_core.flu_outcomes import _tvar_daily, _apply_ar_filter, DEATH_TVARS
                 return _apply_ar_filter(
-                    _tvar_daily(m, ["HD_to_D"], subpop_name), age_group, None
+                    _tvar_daily(m, DEATH_TVARS, subpop_name), age_group, None
                 )
 
             if num_reps > 1:

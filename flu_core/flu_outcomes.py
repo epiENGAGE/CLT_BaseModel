@@ -17,7 +17,9 @@ Plotting functions produce matplotlib figures and accept a single
 Important
 ---------
 Hospital admissions and new infections use **transition variable histories**
-(``ISH_to_HR``, ``ISH_to_HD``, ``S_to_E``, ``HD_to_D``), not compartment
+(``ISH_to_HR``, ``ISH_to_HD``, ``S_to_E``, ``HD_to_D``, and their
+vaccinated-track counterparts -- see ``HOSPITAL_ADMISSION_TVARS``,
+``NEW_INFECTION_TVARS``, and ``DEATH_TVARS``), not compartment
 differencing.  These must appear in
 ``SimulationSettings.transition_variables_to_save`` before the simulation runs.
 """
@@ -29,6 +31,15 @@ from typing import Optional, Callable
 
 from clt_toolkit.base_components import MetapopModel
 from clt_toolkit.utils import daily_sum_over_timesteps
+
+from .flu_data_structures import ALL_COMPARTMENTS
+
+
+# Transition variables summed for each outcome -- each outcome counts
+#   both the base track and the vaccinated track
+HOSPITAL_ADMISSION_TVARS = ["ISH_to_HR", "ISH_to_HD", "ISH_V_to_HR_V", "ISH_V_to_HD_V"]
+NEW_INFECTION_TVARS = ["S_to_E", "S_V_to_E_V"]
+DEATH_TVARS = ["HD_to_D", "HD_V_to_D_V"]
 
 
 # ---------------------------------------------------------------------------
@@ -58,7 +69,7 @@ def _tvar_daily(
     metapop_model : MetapopModel
     tvar_names : list[str]
         Names of transition variables to sum together (e.g.
-        ``["ISH_to_HR", "ISH_to_HD"]``).
+        ``HOSPITAL_ADMISSION_TVARS``).
     subpop_name : str or None
         Restrict to one named subpopulation; ``None`` sums all.
 
@@ -117,8 +128,9 @@ def daily_hospital_admissions(
     """
     Daily new hospital admissions.
 
-    Computed as the sum of ISH→HR and ISH→HD transition flows,
-    summed across subpopulations and timesteps-per-day.
+    Computed as the sum of ISH→HR and ISH→HD transition flows on both
+    the base and vaccinated tracks, summed across subpopulations and
+    timesteps-per-day.
 
     Parameters
     ----------
@@ -134,7 +146,7 @@ def daily_hospital_admissions(
     -------
     np.ndarray, shape (days,)
     """
-    arr = _tvar_daily(metapop_model, ["ISH_to_HR", "ISH_to_HD"], subpop_name)
+    arr = _tvar_daily(metapop_model, HOSPITAL_ADMISSION_TVARS, subpop_name)
     return _apply_ar_filter(arr, age_group, risk_group)
 
 
@@ -145,13 +157,14 @@ def daily_new_infections(
     risk_group: Optional[int] = None,
 ) -> np.ndarray:
     """
-    Daily new infections = S→E transition flows, aggregated to daily totals.
+    Daily new infections = S→E plus S_V→E_V transition flows, aggregated
+    to daily totals.
 
     Returns
     -------
     np.ndarray, shape (days,)
     """
-    arr = _tvar_daily(metapop_model, ["S_to_E"], subpop_name)
+    arr = _tvar_daily(metapop_model, NEW_INFECTION_TVARS, subpop_name)
     return _apply_ar_filter(arr, age_group, risk_group)
 
 
@@ -176,13 +189,14 @@ def daily_deaths(
     risk_group: Optional[int] = None,
 ) -> np.ndarray:
     """
-    Daily deaths = HD→D transition flows, aggregated to daily totals.
+    Daily deaths = HD→D plus HD_V→D_V transition flows, aggregated to
+    daily totals.
 
     Returns
     -------
     np.ndarray, shape (days,)
     """
-    arr = _tvar_daily(metapop_model, ["HD_to_D"], subpop_name)
+    arr = _tvar_daily(metapop_model, DEATH_TVARS, subpop_name)
     return _apply_ar_filter(arr, age_group, risk_group)
 
 
@@ -193,9 +207,9 @@ def cumulative_deaths(
     risk_group: Optional[int] = None,
 ) -> float:
     """
-    Season-total deaths = sum of HD→D transition flows (scalar).
+    Season-total deaths = sum of HD→D and HD_V→D_V transition flows (scalar).
     """
-    arr = _tvar_daily(metapop_model, ["HD_to_D"], subpop_name)
+    arr = _tvar_daily(metapop_model, DEATH_TVARS, subpop_name)
     return float(_apply_ar_filter(arr, age_group, risk_group).sum())
 
 
@@ -221,9 +235,10 @@ def attack_rate(
     else:
         subpops = list(metapop_model.subpop_models.values())
 
-    # Initial susceptible = S compartment at first recorded timestep
+    # Initial susceptible = S plus S_V compartments at first recorded timestep
     init_S_arrays = [
-        np.asarray(subpop.compartments["S"].history_vals_list[0])
+        np.asarray(subpop.compartments["S"].history_vals_list[0]) +
+        np.asarray(subpop.compartments["S_V"].history_vals_list[0])
         for subpop in subpops
     ]
     init_S = np.sum(np.stack(init_S_arrays, axis=0), axis=0)  # (A, R)
@@ -301,7 +316,7 @@ def summarize_outcomes(
 
 def plot_compartment_history(
     metapop_model: MetapopModel,
-    compartment_names=("S", "E", "IP", "ISR", "ISH", "IA", "HR", "HD", "R", "D"),
+    compartment_names=ALL_COMPARTMENTS,
     ax: matplotlib.axes.Axes = None,
     savefig_filename: str = None,
     subpop_name: Optional[str] = None,
@@ -621,7 +636,10 @@ def plot_scenario_comparison(
             values.append(metric_fn(model_or_list, **metric_kwargs))
 
     if multi_rep:
-        ax.boxplot(values, labels=names)
+        ax.boxplot(values)
+        # Set tick labels separately -- `boxplot`'s `labels` argument was
+        #   renamed `tick_labels` and later removed in matplotlib
+        ax.set_xticks(range(1, len(names) + 1), names)
     else:
         ax.bar(names, values, alpha=0.8)
 

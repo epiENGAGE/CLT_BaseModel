@@ -44,16 +44,17 @@ def test_num_timesteps(make_flu_subpop_model):
 
 def test_subpop_correct_object_count(make_flu_subpop_model):
     """
-    For each SubpopModel, there should be 8 epi compartments,
-        10 transition variables, 2 transition variable groups,
-        and 3 epi metrics
+    For each SubpopModel, there should be 20 epi compartments
+        (10 on each of the base and vaccinated tracks),
+        25 transition variables (12 per track plus S_to_S_V),
+        6 transition variable groups, and 2 epi metrics
     """
 
     model = make_flu_subpop_model("model")
 
-    assert len(model.compartments) == 10
-    assert len(model.transition_variables) == 12
-    assert len(model.transition_variable_groups) == 3
+    assert len(model.compartments) == 20
+    assert len(model.transition_variables) == 25
+    assert len(model.transition_variable_groups) == 6
 
     assert len(model.epi_metrics) == 2
 
@@ -126,7 +127,8 @@ def test_subpop_constructor_reproducible_results(make_flu_subpop_model, transiti
 @pytest.mark.parametrize("transition_type", binom_random_transition_types_list)
 def test_subpop_no_transmission_when_beta_zero(make_flu_subpop_model, transition_type):
     """
-    If the transmission rate beta_baseline = 0, then S should not decrease over time
+    If the transmission rate beta_baseline = 0, then S + S_V should not decrease
+    over time -- S alone does decrease, as people are vaccinated into S_V
     """
 
     subpop_model = make_flu_subpop_model("subpop_model", transition_type)
@@ -134,7 +136,8 @@ def test_subpop_no_transmission_when_beta_zero(make_flu_subpop_model, transition
     subpop_model.modify_subpop_params({"beta_baseline": 0})
     subpop_model.simulate_until_day(300)
 
-    S_history = subpop_model.compartments["S"].history_vals_list
+    S_history = np.asarray(subpop_model.compartments["S"].history_vals_list) + \
+        np.asarray(subpop_model.compartments["S_V"].history_vals_list)
 
     assert np.sum((np.diff(np.sum(S_history, axis=(1, 2))) >= 0)) == len(S_history) - 1
 
@@ -264,34 +267,31 @@ def test_subpop_reset_matches_fresh_model_with_same_params(make_flu_subpop_model
     ("caseA", "caseA_daily_vaccines_constant.csv"),
     ("caseB_subpop1", "caseB_daily_vaccines_constant.csv"),
 ])
-def test_subpop_reset_recomputes_MV_init_val(make_flu_subpop_model, inputs_id, vaccines_csv_name):
+def test_subpop_reset_recomputes_S_V_init_val(make_flu_subpop_model, inputs_id, vaccines_csv_name):
     """
-    `reset_simulation` should recompute `MV.init_val` from the model's
-    *current* schedule/params, not silently keep the value computed at
-    construction time -- see `FluSubpopModel.reset_simulation`'s docstring,
-    which specifically calls out `replace_schedule` and param overrides as
-    the two ways this value can go stale.
+    `reset_simulation` should recompute the initial "S" and "S_V" values
+    (shifted by vaccinations scheduled before the simulation start) from
+    the model's *current* schedule/params, not silently keep the values
+    computed at construction time -- see `FluSubpopModel.reset_simulation`.
 
-    With the default test fixtures, `MV.init_val`'s reset-date adjustment
-    (in `VaxInducedImmunity.adjust_initial_value`) is a no-op: the
+    With the default test fixtures the shift is a no-op: the
     `daily_vaccines` schedule has no history before the simulation start
-    date, so the window of vaccines counted toward the adjustment is
-    always empty. To meaningfully exercise the recomputation, this test
-    prepends pre-simulation vaccination history to the schedule (via
+    date. To exercise the recomputation, this test prepends
+    pre-simulation vaccination history to the schedule (via
     `replace_schedule`) and moves `vax_immunity_reset_date_mm_dd` earlier
-    (via `modify_subpop_params`) so that window is non-empty, then checks
-    that after `reset_simulation`, `MV.init_val`:
-        1. actually changed from its construction-time value (so this test
-           would fail to exercise anything if it hadn't), and
+    (via `modify_subpop_params`), then checks that after
+    `reset_simulation`, the initial "S_V":
+        1. actually changed from its construction-time value, and
         2. matches a value computed independently (calling
-           `adjust_initial_value` directly), so the recomputed value is not
-           just different but *correct*.
+           `compute_pre_start_vaccination_shift` directly), with "S"
+           reduced by the same amount.
     """
 
     subpop_model = make_flu_subpop_model("subpop_model", case_id_str=inputs_id)
 
-    MV = subpop_model.epi_metrics["MV"]
-    original_MV_init_val = copy.deepcopy(MV.init_val)
+    S = subpop_model.compartments["S"]
+    S_V = subpop_model.compartments["S_V"]
+    original_S_V_init_val = copy.deepcopy(S_V.init_val)
 
     # Prepend 100 days of nonzero vaccination history before the schedule's
     #   original start date, so the reset-date window has doses to count
@@ -304,322 +304,31 @@ def test_subpop_reset_recomputes_MV_init_val(make_flu_subpop_model, inputs_id, v
     combined_df = pd.concat([extra_df, raw_df], ignore_index=True)
 
     subpop_model.replace_schedule("daily_vaccines", combined_df)
-
-    params_updates = {
-        "vax_induced_immune_wane": 0.02,
-        "vax_immunity_reset_date_mm_dd": "06_01",
-    }
-    subpop_model.modify_subpop_params(params_updates)
+    subpop_model.modify_subpop_params({"vax_immunity_reset_date_mm_dd": "06_01"})
     subpop_model.reset_simulation()
 
-    expected_MV_init_val = MV.adjust_initial_value(
-        MV.original_init_val,
+    expected_shift = flu.compute_pre_start_vaccination_shift(
+        subpop_model._original_S_init,
+        subpop_model._original_S_V_init,
+        subpop_model.params.total_pop_age_risk,
         subpop_model.start_real_date,
         subpop_model.params,
         subpop_model.schedules,
-        subpop_model.simulation_settings.timesteps_per_day)
+        subpop_model.simulation_settings.timesteps_per_day,
+        True)
 
-    # Sanity check: the schedule/param change must actually move
-    #   MV.init_val, otherwise this test would pass even if reset never
+    # Sanity check: the schedule/param change must actually move S_V's
+    #   initial value, otherwise this test would pass even if reset never
     #   recomputed it
-    assert not np.array_equal(np.asarray(original_MV_init_val),
-                              np.asarray(MV.init_val))
-
-    # The value reset_simulation left in place should match the value
-    #   independently recomputed from the current schedule/params
-    assert np.allclose(np.asarray(MV.init_val), np.asarray(expected_MV_init_val))
-    assert np.allclose(np.asarray(MV.current_val), np.asarray(expected_MV_init_val))
-
-
-def _make_flu_subpop_model_with_M(mm_dd, M_val=None, case_id_str="caseA"):
-    """
-    Helper: build a `FluSubpopModel` with a nonzero `M` initial value
-    and a given `infection_immunity_start_date_mm_dd`, so
-    `InfInducedImmunity.adjust_initial_value` can be exercised
-    meaningfully (the default test fixtures' `M` init val is all zeros).
-    """
-
-    init_vals, params, mixing_params, simulation_settings, schedules_info = \
-        subpop_inputs(case_id_str)
-
-    if M_val is None:
-        M_val = np.full_like(np.asarray(init_vals.M, dtype=float), 0.1)
-    init_vals.M = M_val
-
-    params = clt.updated_dataclass(
-        params, {"infection_immunity_start_date_mm_dd": mm_dd})
-
-    starting_random_seed = 123456789123456789
-    bit_generator = np.random.MT19937(starting_random_seed)
-
-    model = flu.FluSubpopModel(init_vals,
-                               params,
-                               simulation_settings,
-                               np.random.Generator(bit_generator),
-                               schedules_info,
-                               "subpop_model")
-
-    return model
-
-
-def test_M_adjust_initial_value_same_date():
-    """
-    If infection_immunity_start_date_mm_dd equals start_real_date,
-    M.init_val should be used as-is (no adjustment).
-    """
-
-    model = _make_flu_subpop_model_with_M("08_08")
-
-    assert model.start_real_date == datetime.date(2022, 8, 8)
-
-    M = model.epi_metrics["M"]
-    assert np.allclose(np.asarray(M.init_val), np.asarray(M.original_init_val))
-    assert M.pending_injection_date is None
-
-
-def test_M_adjust_initial_value_past_date_decays_with_waning():
-    """
-    If infection_immunity_start_date_mm_dd is before start_real_date,
-    M.init_val should be decayed forward from the input M(0) using only
-    the waning term (matching the waning piece of
-    InfInducedImmunity.get_change_in_current_val).
-    """
-
-    model = _make_flu_subpop_model_with_M("08_01")
-
-    assert model.start_real_date == datetime.date(2022, 8, 8)
-
-    M = model.epi_metrics["M"]
-
-    timesteps_per_day = model.simulation_settings.timesteps_per_day
-    wane = model.params.inf_induced_immune_wane
-
-    expected = np.asarray(M.original_init_val, dtype=float).copy()
-    num_days = (datetime.date(2022, 8, 8) - datetime.date(2022, 8, 1)).days
-    for _ in range(num_days):
-        for _ in range(timesteps_per_day):
-            expected = expected - wane * expected / timesteps_per_day
-
-    assert np.allclose(np.asarray(M.init_val), expected)
-    assert M.pending_injection_date is None
-    # Sanity check: waning should have actually reduced the value
-    assert np.all(expected < np.asarray(M.original_init_val, dtype=float))
-
-
-def test_M_adjust_initial_value_future_date_defers_injection():
-    """
-    If infection_immunity_start_date_mm_dd is after start_real_date,
-    M.init_val should be zero at simulation start, and the original
-    M(0) should only be added to current_val once that date is reached
-    (via check_and_apply_injection), exactly once.
-    """
-
-    model = _make_flu_subpop_model_with_M("08_10")
-
-    assert model.start_real_date == datetime.date(2022, 8, 8)
-
-    M = model.epi_metrics["M"]
-
-    assert np.allclose(np.asarray(M.init_val), np.zeros_like(np.asarray(M.init_val)))
-    assert M.pending_injection_date == datetime.date(2022, 8, 10)
-
-    # A day before the injection date: no change
-    M.check_and_apply_injection(datetime.date(2022, 8, 9), model.params)
-    assert np.allclose(np.asarray(M.current_val), np.zeros_like(np.asarray(M.current_val)))
-    assert M.pending_injection_date == datetime.date(2022, 8, 10)
-
-    # On the injection date: current_val jumps by the original init val
-    M.check_and_apply_injection(datetime.date(2022, 8, 10), model.params)
-    assert np.allclose(np.asarray(M.current_val), np.asarray(M.original_init_val))
-    assert M.pending_injection_date is None
-
-    # Calling again on/after the same date should not double-inject
-    M.check_and_apply_injection(datetime.date(2022, 8, 10), model.params)
-    assert np.allclose(np.asarray(M.current_val), np.asarray(M.original_init_val))
-
-
-def test_subpop_reset_recomputes_M_init_val():
-    """
-    Analogous to test_subpop_reset_recomputes_MV_init_val: reset_simulation
-    should recompute M.init_val (and pending_injection_date) from the
-    model's *current* params, not silently keep the value/state computed
-    at construction time.
-    """
-
-    model = _make_flu_subpop_model_with_M("08_10")
-
-    M = model.epi_metrics["M"]
-    original_M_init_val = copy.deepcopy(M.init_val)
-    assert M.pending_injection_date == datetime.date(2022, 8, 10)
-
-    # Change infection_immunity_start_date_mm_dd to a date before
-    #   start_real_date, so the adjustment now decays M(0) instead of
-    #   deferring an injection
-    model.modify_subpop_params({"infection_immunity_start_date_mm_dd": "08_01"})
-    model.reset_simulation()
-
-    expected_M_init_val = M.adjust_initial_value(
-        M.original_init_val,
-        model.start_real_date,
-        model.params,
-        model.simulation_settings.timesteps_per_day)
-
-    # Sanity check: the param change must actually move M.init_val
-    assert not np.array_equal(np.asarray(original_M_init_val),
-                              np.asarray(M.init_val))
-
-    assert np.allclose(np.asarray(M.init_val), np.asarray(expected_M_init_val))
-    assert np.allclose(np.asarray(M.current_val), np.asarray(expected_M_init_val))
-    assert M.pending_injection_date is None
-
-
-def _analytic_pure_wane_decay(M0, wane, timesteps_per_day, num_days):
-    """
-    Closed-form value of M after `num_days` of pure exponential waning
-    (no growth term), applied with the same per-timestep discretization
-    as InfInducedImmunity.get_change_in_current_val's waning piece:
-        M <- M - wane * M / timesteps_per_day, each timestep.
-    """
-
-    factor = (1 - wane / timesteps_per_day) ** (num_days * timesteps_per_day)
-    return np.asarray(M0, dtype=float) * factor
-
-
-def _make_isolated_M_model(mm_dd, wane, M0_val=0.2, timesteps_per_day=7,
-                           case_id_str="caseA"):
-    """
-    Helper: build a `FluSubpopModel` with no epidemic activity at all
-    (E, IP, ISR, ISH, IA, HR, HD, R, D all zeroed out, S left as-is) so
-    R_to_S stays exactly zero throughout the simulation. This isolates
-    InfInducedImmunity's waning term -- with R_to_S == 0, the ODE
-    reduces exactly to dM/dt = -wane * M -- so M's simulated trajectory
-    can be checked against a closed-form decay curve.
-    """
-
-    init_vals, params, mixing_params, simulation_settings, schedules_info = \
-        subpop_inputs(case_id_str)
-
-    for compartment_name in ("E", "IP", "ISR", "ISH", "IA", "HR", "HD", "R", "D"):
-        zeros = np.zeros_like(np.asarray(getattr(init_vals, compartment_name)))
-        setattr(init_vals, compartment_name, zeros)
-
-    init_vals.M = np.full_like(np.asarray(init_vals.M, dtype=float), M0_val)
-
-    params = clt.updated_dataclass(
-        params, {"infection_immunity_start_date_mm_dd": mm_dd,
-                 "inf_induced_immune_wane": wane})
-
-    simulation_settings = clt.updated_dataclass(
-        simulation_settings, {"timesteps_per_day": timesteps_per_day})
-
-    starting_random_seed = 123456789123456789
-    bit_generator = np.random.MT19937(starting_random_seed)
-
-    model = flu.FluSubpopModel(init_vals,
-                               params,
-                               simulation_settings,
-                               np.random.Generator(bit_generator),
-                               schedules_info,
-                               "subpop_model")
-
-    return model
-
-
-def test_M_simulated_curve_same_date_matches_analytic_decay():
-    """
-    infection_immunity_start_date_mm_dd == start_real_date: M(0) is used
-    as-is, and (with no epidemic activity) M should follow the pure
-    waning decay curve exactly as the simulation progresses.
-    """
-
-    wane = 0.05
-    M0 = 0.2
-    timesteps_per_day = 7
-
-    model = _make_isolated_M_model("08_08", wane, M0_val=M0,
-                                   timesteps_per_day=timesteps_per_day)
-    assert model.start_real_date == datetime.date(2022, 8, 8)
-
-    num_days = 5
-    model.simulate_until_day(num_days)
-
-    expected = _analytic_pure_wane_decay(M0, wane, timesteps_per_day, num_days)
-
-    assert np.allclose(np.asarray(model.epi_metrics["M"].current_val), expected)
-    # Sanity check: waning should have actually reduced M below M(0)
-    assert np.all(expected < M0)
-
-
-def test_M_simulated_curve_past_date_shows_immunity_declining():
-    """
-    infection_immunity_start_date_mm_dd < start_real_date, with
-    inf_induced_immune_wane > 0: M(0) is decayed forward to
-    start_real_date, and then continues decaying identically as the
-    simulation progresses -- i.e. the pre-simulation adjustment and the
-    in-simulation ODE waning compose into one continuous decay curve,
-    and immunity is strictly lower than in the same-date case (since it
-    has been waning for longer).
-    """
-
-    wane = 0.05
-    M0 = 0.2
-    timesteps_per_day = 7
-
-    model = _make_isolated_M_model("08_01", wane, M0_val=M0,
-                                   timesteps_per_day=timesteps_per_day)
-    assert model.start_real_date == datetime.date(2022, 8, 8)
-
-    days_before_start = (datetime.date(2022, 8, 8) - datetime.date(2022, 8, 1)).days
-
-    num_simulated_days = 5
-    model.simulate_until_day(num_simulated_days)
-
-    total_decay_days = days_before_start + num_simulated_days
-    expected = _analytic_pure_wane_decay(M0, wane, timesteps_per_day, total_decay_days)
-
-    actual = np.asarray(model.epi_metrics["M"].current_val)
-    assert np.allclose(actual, expected)
-
-    # Immunity should be strictly lower than the same-date case simulated
-    #   for the same number of days, since it started decaying earlier
-    same_date_expected = _analytic_pure_wane_decay(
-        M0, wane, timesteps_per_day, num_simulated_days)
-    assert np.all(actual < same_date_expected)
-
-
-def test_M_simulated_curve_future_date_injects_then_wanes():
-    """
-    infection_immunity_start_date_mm_dd > start_real_date, with
-    inf_induced_immune_wane > 0: M stays at 0 until the injection date is
-    reached, then jumps to M(0) and wanes from there identically to the
-    same-date case (just shifted in time).
-    """
-
-    wane = 0.05
-    M0 = 0.2
-    timesteps_per_day = 7
-
-    model = _make_isolated_M_model("08_10", wane, M0_val=M0,
-                                   timesteps_per_day=timesteps_per_day)
-    assert model.start_real_date == datetime.date(2022, 8, 8)
-
-    days_until_injection = (datetime.date(2022, 8, 10) - datetime.date(2022, 8, 8)).days
-
-    # Before the injection date: M stays at 0
-    model.simulate_until_day(days_until_injection)
-    assert np.allclose(np.asarray(model.epi_metrics["M"].current_val),
-                       np.zeros_like(np.asarray(model.epi_metrics["M"].current_val)))
-
-    # Continue past the injection date, then check the post-injection
-    #   waning curve
-    num_days_after_injection = 3
-    model.simulate_until_day(days_until_injection + num_days_after_injection)
-
-    expected = _analytic_pure_wane_decay(
-        M0, wane, timesteps_per_day, num_days_after_injection)
-
-    assert np.allclose(np.asarray(model.epi_metrics["M"].current_val), expected)
-    assert np.all(expected < M0)
+    assert np.sum(expected_shift) > 0
+    assert not np.array_equal(np.asarray(original_S_V_init_val),
+                              np.asarray(S_V.init_val))
+
+    assert np.allclose(np.asarray(S_V.init_val),
+                       np.asarray(subpop_model._original_S_V_init) + expected_shift)
+    assert np.allclose(np.asarray(S_V.current_val), np.asarray(S_V.init_val))
+    assert np.allclose(np.asarray(S.init_val),
+                       np.asarray(subpop_model._original_S_init) - expected_shift)
 
 
 @pytest.mark.parametrize("transition_type", binom_random_transition_types_list + ["poisson"])

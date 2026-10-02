@@ -46,28 +46,28 @@ def _scale_vaccines_df(vaccines_df: pd.DataFrame, scale: float) -> pd.DataFrame:
 # Task 5a — replace_schedule
 # ---------------------------------------------------------------------------
 
-class TestMVInitValConsistency:
+class TestVaxTrackInitValConsistency:
     """
-    VaxInducedImmunity.adjust_initial_value() must be re-run on
-    reset_simulation() so that MV.init_val is consistent with whatever
+    The pre-start vaccination shift of the initial "S"/"S_V" values must be
+    re-run on reset_simulation() so that it is consistent with whatever
     daily_vaccines schedule is currently loaded.
 
     The caseB test CSV starts exactly on the simulation start date, so the
-    pre-simulation vaccine filter in adjust_initial_value() finds no rows and
-    the numerical init_val does not change.  We therefore test the invariant
-    behaviourally: after replace_schedule + reset_simulation, the model's MV
-    trajectory over multiple days must match a freshly built model that used
-    the same schedule from the start.
+    pre-simulation vaccine window finds no rows and the numerical init_val
+    does not change.  We therefore test the invariant behaviourally: after
+    replace_schedule + reset_simulation, the model's S_V trajectory over
+    multiple days must match a freshly built model that used the same
+    schedule from the start.
     """
 
-    def _run_mv_history(self, model, n_days: int) -> np.ndarray:
-        """Run deterministically for n_days; return MV history as an array."""
+    def _run_S_V_history(self, model, n_days: int) -> np.ndarray:
+        """Run deterministically for n_days; return S_V history as an array."""
         model.simulate_until_day(n_days)
-        return np.array(model.epi_metrics["MV"].history_vals_list)
+        return np.array(model.compartments["S_V"].history_vals_list)
 
     def test_reset_after_replace_matches_fresh_model(self, make_flu_subpop_model):
         """
-        After replace_schedule + reset_simulation, the MV trajectory must be
+        After replace_schedule + reset_simulation, the S_V trajectory must be
         identical to a freshly constructed model that used the new schedule.
         """
         raw_df = pd.read_csv(
@@ -84,7 +84,7 @@ class TestMVInitValConsistency:
         model_ref.replace_schedule("daily_vaccines", scaled_df)
         # reset so it starts from a consistent initial state
         model_ref.reset_simulation()
-        history_ref = self._run_mv_history(model_ref, 10)
+        history_ref = self._run_S_V_history(model_ref, 10)
 
         # Model that had original schedule, then replaced + reset
         model_swapped = make_flu_subpop_model(
@@ -94,14 +94,14 @@ class TestMVInitValConsistency:
         )
         model_swapped.replace_schedule("daily_vaccines", scaled_df)
         model_swapped.reset_simulation()
-        history_swapped = self._run_mv_history(model_swapped, 10)
+        history_swapped = self._run_S_V_history(model_swapped, 10)
 
         np.testing.assert_allclose(history_swapped, history_ref)
 
-    def test_mv_trajectory_differs_between_different_schedules(
+    def test_S_V_trajectory_differs_between_different_schedules(
             self, make_flu_subpop_model):
         """
-        Two models with different vaccine schedules must produce different MV
+        Two models with different vaccine schedules must produce different S_V
         trajectories — confirming that replace_schedule actually changes
         in-simulation dynamics.
         """
@@ -118,32 +118,36 @@ class TestMVInitValConsistency:
             case_id_str="caseB_subpop1"
         )
         model_10x.replace_schedule("daily_vaccines", _scale_vaccines_df(raw_df, 10.0))
-        model_10x.reset_simulation()
 
-        mv_1x  = self._run_mv_history(model_1x,  30)
-        mv_10x = self._run_mv_history(model_10x, 30)
+        # With the fixture's beta, the epidemic empties S before the
+        #   14-day protection delay is over, leaving nobody to vaccinate
+        #   into S_V -- slow it down so both schedules have people to act on
+        for model in (model_1x, model_10x):
+            model.modify_subpop_params({"beta_baseline": 0.01})
+            model.reset_simulation()
 
-        assert not np.allclose(mv_1x, mv_10x), (
-            "MV trajectories are identical despite 10x vaccine coverage difference."
+        S_V_1x = self._run_S_V_history(model_1x,  30)
+        S_V_10x = self._run_S_V_history(model_10x, 30)
+
+        assert not np.allclose(S_V_1x, S_V_10x), (
+            "S_V trajectories are identical despite 10x vaccine coverage difference."
         )
 
     def test_reset_without_replace_is_idempotent(self, make_flu_subpop_model):
         """
         reset_simulation() without any schedule change must produce the same
-        MV.init_val as the original construction (no drift across resets).
+        S/S_V init_vals as the original construction (no drift across resets).
         """
         model = make_flu_subpop_model("idempotent", case_id_str="caseB_subpop1")
-        original_mv_init = copy.deepcopy(model.epi_metrics["MV"].init_val)
+        original_inits = {name: copy.deepcopy(model.compartments[name].init_val)
+                          for name in ("S", "S_V")}
 
-        model.reset_simulation()
-        np.testing.assert_array_equal(
-            model.epi_metrics["MV"].init_val, original_mv_init
-        )
-
-        model.reset_simulation()
-        np.testing.assert_array_equal(
-            model.epi_metrics["MV"].init_val, original_mv_init
-        )
+        for _ in range(2):
+            model.reset_simulation()
+            for name, original_init in original_inits.items():
+                np.testing.assert_array_equal(
+                    model.compartments[name].init_val, original_init
+                )
 
 class TestReplaceScheduleSubpop:
     """replace_schedule on a single FluSubpopModel."""

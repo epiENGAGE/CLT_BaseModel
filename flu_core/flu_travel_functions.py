@@ -29,13 +29,16 @@ def compute_wtd_infectious_LA(state: FluTravelStateTensors,
             weighted by relative infectiousness
     """
 
+    # Infectious people on the vaccinated track are exactly as
+    #   infectious as those on the base track, so sum both tracks
+    #   before summing over risk groups
     # Einstein notation here means sum over risk groups
-    ISR = torch.einsum("lar->la", state.ISR)
-    ISH = torch.einsum("lar->la", state.ISH)
+    ISR = torch.einsum("lar->la", state.ISR + state.ISR_V)
+    ISH = torch.einsum("lar->la", state.ISH + state.ISH_V)
     wtd_IP = \
-        params.IP_relative_inf * torch.einsum("lar->la", state.IP)
+        params.IP_relative_inf * torch.einsum("lar->la", state.IP + state.IP_V)
     wtd_IA = \
-        params.IA_relative_inf * torch.einsum("lar->la", state.IA)
+        params.IA_relative_inf * torch.einsum("lar->la", state.IA + state.IA_V)
 
     return ISR + ISH + wtd_IP + wtd_IA
 
@@ -62,7 +65,8 @@ def compute_active_pop_LAR(state: FluTravelStateTensors,
     #   function signature consistency with other
     #   similar computation functions
 
-    return precomputed.total_pop_LAR_tensor - state.HR - state.HD
+    return precomputed.total_pop_LAR_tensor - state.HR - state.HD - \
+        state.HR_V - state.HD_V
 
 
 def compute_effective_pop_LA(state: FluTravelStateTensors,

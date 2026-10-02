@@ -7,6 +7,7 @@ import pandas as pd
 
 import clt_toolkit as clt
 from .flu_components import FluMetapopModel
+from .flu_outcomes import HOSPITAL_ADMISSION_TVARS
 
 import json
 
@@ -103,11 +104,11 @@ def accept_reject_admits(metapop_model: FluMetapopModel,
         # But do not save daily (compartment) history for efficiency
         for subpop_name, updates_dict in param_samples.items():
             metapop_model.modify_subpop_params(subpop_name, updates_dict)
-            metapop_model.modify_simulation_settings({"transition_variables_to_save": ["ISH_to_HR", "ISH_to_HD"],
+            metapop_model.modify_simulation_settings({"transition_variables_to_save": HOSPITAL_ADMISSION_TVARS,
                                                       "save_daily_history": False})
 
         metapop_model.simulate_until_day(num_days_early_stop)
-        total_simulated_admits = clt.aggregate_daily_tvar_history(metapop_model, ["ISH_to_HR", "ISH_to_HD"])
+        total_simulated_admits = clt.aggregate_daily_tvar_history(metapop_model, HOSPITAL_ADMISSION_TVARS)
         current_rsquared = compute_rsquared(reference_timeseries=total_daily_target_admits[:num_days_early_stop],
                                             simulated_timeseries=total_simulated_admits)
         if current_rsquared < target_rsquared:
@@ -115,7 +116,7 @@ def accept_reject_admits(metapop_model: FluMetapopModel,
 
         else:
             metapop_model.simulate_until_day(num_days)
-            total_simulated_admits = clt.aggregate_daily_tvar_history(metapop_model, ["ISH_to_HR", "ISH_to_HD"])
+            total_simulated_admits = clt.aggregate_daily_tvar_history(metapop_model, HOSPITAL_ADMISSION_TVARS)
             current_rsquared = compute_rsquared(reference_timeseries=total_daily_target_admits,
                                                 simulated_timeseries=total_simulated_admits)
             if current_rsquared < target_rsquared:

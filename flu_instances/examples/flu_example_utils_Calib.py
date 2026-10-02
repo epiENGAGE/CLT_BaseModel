@@ -14,6 +14,7 @@ import warnings
 
 import numpy as np
 import clt_toolkit as clt
+from flu_core import ALL_COMPARTMENTS
 
 
 EXAMPLES_ROOT = Path(__file__).resolve().parent
@@ -512,8 +513,12 @@ def load_calibrated_austin_inputs(
         high_risk_frac = high_risk_fractions[name]
         state_s_arr = np.asarray(state.S, dtype=float)
         if state_s_arr.ndim == 2 and state_s_arr.shape[1] == 1:
-            for comp_name in ["S", "E", "IP", "ISR", "ISH", "IA", "HR", "HD", "R", "D", "M", "MV"]:
+            for comp_name in ALL_COMPARTMENTS + ("M", "MV"):
                 comp_val = getattr(state, comp_name)
+                # Vaccinated-track fields are None when the init-vals
+                #   JSON omits them -- the model fills them with zeros
+                if comp_val is None:
+                    continue
                 setattr(
                     state,
                     comp_name,

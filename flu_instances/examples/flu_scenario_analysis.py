@@ -483,7 +483,7 @@ def _param_tab_controls(flu, inputs, mo, params):
 
 
 @app.cell
-def _build_settings(clt, settings_base, sim_mode, start_date_input):
+def _build_settings(clt, flu, settings_base, sim_mode, start_date_input):
     _transition_type = (
         "binom_deterministic_no_round"
         if sim_mode.value == "Deterministic"
@@ -493,7 +493,7 @@ def _build_settings(clt, settings_base, sim_mode, start_date_input):
         settings_base,
         {
             "transition_type": _transition_type,
-            "transition_variables_to_save": ["ISH_to_HR", "ISH_to_HD", "S_to_E", "HD_to_D"],
+            "transition_variables_to_save": flu.HOSPITAL_ADMISSION_TVARS + flu.NEW_INFECTION_TVARS + flu.DEATH_TVARS,
             "start_real_date": start_date_input.value,
         },
     )
@@ -643,8 +643,8 @@ def _run_scenarios(
     # Arrays are stored as binary blobs (numpy .npy format) to keep the
     # row count small (one row per scenario/subpop/var/rep combination).
     # ------------------------------------------------------------------
-    _STATE_VARS = ["S", "E", "IP", "ISR", "ISH", "IA", "HR", "HD", "R", "D"]
-    _TVAR_NAMES = ["ISH_to_HR", "ISH_to_HD", "S_to_E", "HD_to_D"]
+    _STATE_VARS = list(flu.ALL_COMPARTMENTS)
+    _TVAR_NAMES = flu.HOSPITAL_ADMISSION_TVARS + flu.NEW_INFECTION_TVARS + flu.DEATH_TVARS
 
     def _arr_to_blob(arr):
         buf = io.BytesIO()
@@ -940,8 +940,8 @@ def _plot_daily_admissions(
 # ---------------------------------------------------------------------------
 
 @app.cell
-def _comp_line_controls(mo):
-    _ALL_COMPARTMENTS = ["S", "E", "IP", "ISR", "ISH", "IA", "HR", "HD", "R", "D"]
+def _comp_line_controls(flu, mo):
+    _ALL_COMPARTMENTS = list(flu.ALL_COMPARTMENTS)
     comp_checkboxes = mo.ui.array(
         [mo.ui.checkbox(value=(c in {"ISR", "IA"}), label=c)
          for c in _ALL_COMPARTMENTS]
@@ -960,6 +960,7 @@ def _plot_comp_histories(
     adm_age_dd,
     adm_subpop_dd,
     comp_checkboxes,
+    flu,
     np,
     pd,
     plt,
@@ -967,7 +968,7 @@ def _plot_comp_histories(
     scenario_models,
     settings,
 ):
-    _ALL_COMPARTMENTS = ["S", "E", "IP", "ISR", "ISH", "IA", "HR", "HD", "R", "D"]
+    _ALL_COMPARTMENTS = list(flu.ALL_COMPARTMENTS)
     _LINE_STYLES = ["-", "--", ":", "-."]
 
     _selected    = [c for c, v in zip(_ALL_COMPARTMENTS, comp_checkboxes.value) if v] or _ALL_COMPARTMENTS
