@@ -1228,6 +1228,7 @@ def _geo_fetch(
     if not _eff_age_groups:
         set_fetched_matrices({
             "matrices": {}, "populations": {}, "scope": "shared",
+            "num_age_groups": int(num_age_groups),
             "errors": {"error": "Define named age bands before fetching contact matrices."},
         })
     else:
@@ -1255,21 +1256,33 @@ def _geo_fetch(
             "matrices": _results,
             "populations": _pops,
             "scope": "per_subpop" if _per_subpop else "shared",
+            "num_age_groups": len(_eff_age_groups),
             "errors": _errors,
         })
     return
 
 
 @app.cell
-def _geo_result(get_fetched_matrices):
+def _geo_result(get_fetched_matrices, num_age_groups):
     _state = get_fetched_matrices() or {}
+    # A fetch is sized to the age-group count that was active when it ran. Loading
+    # a config (or editing the bands) with a different A leaves the cached arrays
+    # the wrong shape, so discard them instead of letting them reach the model.
+    _fetched_A = _state.get("num_age_groups")
+    fetched_stale = (
+        _fetched_A is not None
+        and int(_fetched_A) != int(num_age_groups)
+        and bool(_state.get("matrices") or _state.get("populations"))
+    )
+    if fetched_stale:
+        _state = {}
     fetched_contact_matrices = _state.get("matrices", {})
     fetched_populations = _state.get("populations", {})
     fetched_matrices_scope = _state.get("scope", "shared")
     fetched_matrices_errors = _state.get("errors", {})
     return (
         fetched_contact_matrices, fetched_populations,
-        fetched_matrices_scope, fetched_matrices_errors,
+        fetched_matrices_scope, fetched_matrices_errors, fetched_stale,
     )
 
 
@@ -1281,6 +1294,7 @@ def _geo_show(
     geo_subpop_names, geo_subpop_kind, geo_subpop_state, geo_subpop_country,
     geo_fetch_button,
     fetched_contact_matrices, fetched_matrices_scope, fetched_matrices_errors,
+    fetched_stale,
     step_header, section_card, CLT_ACCENT,
 ):
     mo.stop(main_tab.value != "Population & Geography", None)
@@ -1341,7 +1355,15 @@ def _geo_show(
         {"Fetch contact matrices for a geography": mo.vstack(_ctrl)},
     ))
 
-    if fetched_matrices_errors.get("error"):
+    if fetched_stale:
+        _parts.append(mo.callout(
+            mo.md(f"Previously fetched contact matrices and population were built "
+                  f"for a different number of age groups than the current "
+                  f"**A = {num_age_groups}**, so they were discarded. Press "
+                  f"**Fetch** again to get matrices for this configuration."),
+            kind="warn",
+        ))
+    elif fetched_matrices_errors.get("error"):
         _parts.append(mo.callout(mo.md(f"**Fetch failed:** {fetched_matrices_errors['error']}"),
                                  kind="danger"))
     elif fetched_contact_matrices:
@@ -1361,7 +1383,7 @@ def _geo_show(
 @app.cell
 def _population_data(
     population_source_radio, risk_fraction_inputs, population_csv_input,
-    fetched_populations, fetched_matrices_scope,
+    fetched_populations, fetched_matrices_scope, fetched_stale,
     is_metapop, geo_subpop_names,
     num_age_groups, num_risk_groups, age_groups, age_group_mode,
     loaded_config, load_population_csv, np,
@@ -1394,7 +1416,14 @@ def _population_data(
             population_by_subpop = _pop
     else:  # Fetch from geography
         if not fetched_populations:
-            if age_group_mode != "Named age bands" and num_age_groups != 1:
+            if fetched_stale:
+                population_errors["info"] = (
+                    f"The fetched population was built for a different number of "
+                    f"age groups than the current **A = {_A}**, so it was discarded "
+                    "— re-fetch it for this configuration. Using the population "
+                    "saved in the config (or a uniform split) in the meantime."
+                )
+            elif age_group_mode != "Named age bands" and num_age_groups != 1:
                 population_errors["info"] = (
                     "Switch to **Named age bands** above to fetch a population "
                     "for a geography — a geography can't be chosen in count-only "
@@ -13377,6 +13406,10 @@ def _shared_import_state(mo):
     # widget's .value, since re-opening the browser dialog replaces .value
     # wholesale -- without this, picking files from a second folder would
     # silently drop whatever was picked from the first.
+    # Kept on default allow_self_loops=False: _shared_import_apply below both
+    # reads this state and writes the not-yet-applied leftovers back to it,
+    # so self-loops would make every Apply click re-trigger itself forever.
+    # The row widgets get their re-render via _shared_import_entries instead.
     get_shared_import_files, set_shared_import_files = mo.state([])
     return (
         get_shared_imports, set_shared_imports,
@@ -13386,7 +13419,7 @@ def _shared_import_state(mo):
 
 @app.cell
 def _shared_import_upload_ui(
-    mo, detect_config_type, get_shared_import_files, set_shared_import_files,
+    mo, detect_config_type, set_shared_import_files,
 ):
     # Runs only on a genuine file-selection event from the browser (mo.ui.file
     # calls on_change from its own _update(), never from an unrelated cell
@@ -13432,7 +13465,20 @@ def _shared_import_upload_ui(
 
 
 @app.cell
-def _shared_import_rows_ui(mo, get_shared_import_files, set_shared_import_files):
+def _shared_import_entries(get_shared_import_files):
+    # Deliberately a cell of its own, upstream of the row widgets below.
+    # marimo never re-runs the cell that called a state setter, even when it
+    # reads the getter -- so a rows cell that read get_shared_import_files()
+    # itself would go stale the moment one of its own remove buttons or type
+    # dropdowns wrote to that state (clicking remove looked like a no-op).
+    # Reading it here instead means a write re-runs *this* cell, and the rows
+    # rebuild as an ordinary downstream dependency.
+    shared_import_entries = get_shared_import_files()
+    return (shared_import_entries,)
+
+
+@app.cell
+def _shared_import_rows_ui(mo, shared_import_entries, set_shared_import_files):
     # One dropdown + remove button per staged file. The dropdown is pre-set
     # to a filename-based guess (see detect_config_type) but always
     # user-confirmable before Apply -- the guess is just a time-saver, never
@@ -13469,7 +13515,7 @@ def _shared_import_rows_ui(mo, get_shared_import_files, set_shared_import_files)
             set_shared_import_files(_update)
         return _on_click
 
-    _files = get_shared_import_files()
+    _files = shared_import_entries
     shared_import_type_sels = mo.ui.array([
         mo.ui.dropdown(
             options=_type_opts,

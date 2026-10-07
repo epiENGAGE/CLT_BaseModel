@@ -309,6 +309,14 @@ def build_compartment_init(seed_arrays, population_AR, compartments):
     _comp_init = {}
     for _c in compartments[1:] if len(compartments) > 1 else []:
         _arr = np.asarray(seed_arrays.get(_c, np.zeros_like(_pop)), dtype=float)
+        if _arr.shape != _pop.shape:
+            raise ValueError(
+                f"Initial-condition seeds for compartment '{_c}' have shape "
+                f"{_arr.shape}, but the population array has shape {_pop.shape}. "
+                f"This usually means the seeds were saved under a different "
+                f"number of age/risk groups — regenerate or re-load them for the "
+                f"current configuration."
+            )
         _comp_init[_c] = _arr
         _seed_total = _seed_total + _arr
     _remainder = _pop - _seed_total

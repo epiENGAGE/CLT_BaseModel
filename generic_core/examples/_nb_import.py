@@ -20,6 +20,10 @@ def _shared_import_state(mo):
     # widget's .value, since re-opening the browser dialog replaces .value
     # wholesale -- without this, picking files from a second folder would
     # silently drop whatever was picked from the first.
+    # Kept on default allow_self_loops=False: _shared_import_apply below both
+    # reads this state and writes the not-yet-applied leftovers back to it,
+    # so self-loops would make every Apply click re-trigger itself forever.
+    # The row widgets get their re-render via _shared_import_entries instead.
     get_shared_import_files, set_shared_import_files = mo.state([])
     return (
         get_shared_imports, set_shared_imports,
@@ -29,7 +33,7 @@ def _shared_import_state(mo):
 
 @app.cell
 def _shared_import_upload_ui(
-    mo, detect_config_type, get_shared_import_files, set_shared_import_files,
+    mo, detect_config_type, set_shared_import_files,
 ):
     # Runs only on a genuine file-selection event from the browser (mo.ui.file
     # calls on_change from its own _update(), never from an unrelated cell
@@ -75,7 +79,20 @@ def _shared_import_upload_ui(
 
 
 @app.cell
-def _shared_import_rows_ui(mo, get_shared_import_files, set_shared_import_files):
+def _shared_import_entries(get_shared_import_files):
+    # Deliberately a cell of its own, upstream of the row widgets below.
+    # marimo never re-runs the cell that called a state setter, even when it
+    # reads the getter -- so a rows cell that read get_shared_import_files()
+    # itself would go stale the moment one of its own remove buttons or type
+    # dropdowns wrote to that state (clicking remove looked like a no-op).
+    # Reading it here instead means a write re-runs *this* cell, and the rows
+    # rebuild as an ordinary downstream dependency.
+    shared_import_entries = get_shared_import_files()
+    return (shared_import_entries,)
+
+
+@app.cell
+def _shared_import_rows_ui(mo, shared_import_entries, set_shared_import_files):
     # One dropdown + remove button per staged file. The dropdown is pre-set
     # to a filename-based guess (see detect_config_type) but always
     # user-confirmable before Apply -- the guess is just a time-saver, never
@@ -112,7 +129,7 @@ def _shared_import_rows_ui(mo, get_shared_import_files, set_shared_import_files)
             set_shared_import_files(_update)
         return _on_click
 
-    _files = get_shared_import_files()
+    _files = shared_import_entries
     shared_import_type_sels = mo.ui.array([
         mo.ui.dropdown(
             options=_type_opts,
