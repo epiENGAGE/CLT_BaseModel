@@ -51,6 +51,8 @@ SELECTED_SCENARIOS <- c(
 SCENARIO_COLORS <- c(
   "baseline"                = "#1f77b4",  # blue
   "no vax"                  = "#2ca02c",  # green
+  "50% coverage (all ages)" = "#ff7f0e",  # orange
+  "55% coverage (all ages)" = "#9467bd",  # purple
   "70% coverage (all ages)" = "#d62728",  # red
   "High VE"                 = "#9467bd",  # purple
   "Low VE"                  = "#ff7f0e",  # orange
@@ -61,6 +63,8 @@ SCENARIO_COLORS <- c(
 SCENARIO_LABELS <- c(
   "baseline"                = "Baseline",
   "no vax"                  = "No Vaccination",
+  "50% coverage (all ages)" = "50% Coverage",
+  "55% coverage (all ages)" = "55% Coverage",
   "70% coverage (all ages)" = "70% Coverage",
   "High VE"                 = "High VE",
   "Low VE"                  = "Low VE",

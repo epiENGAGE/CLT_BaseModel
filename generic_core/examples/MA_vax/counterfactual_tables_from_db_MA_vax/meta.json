@@ -1,8 +1,8 @@
 {
   "source": "run_simulations_MA_vax.py -> results source (results_full table)",
-  "db": "/Users/rfp437/Work/CityLevelTransmission/CLT_BaseModel/generic_core/examples/MA_vax/simulation_output_MA_vax_param_set_stochastic/results_parquet",
+  "db": "/Users/rfp437/Work/CityLevelTransmission/CLT_BaseModel/generic_core/examples/MA_vax/simulation_output_MA_vax_param_set_stochastic/results_20261005_154607_parquet",
   "model_config_file": "/Users/rfp437/Work/CityLevelTransmission/CLT_BaseModel/generic_core/examples/MA_vax/model_config_MA_vax.json",
   "fitted_params_file": "/Users/rfp437/Work/CityLevelTransmission/CLT_BaseModel/generic_core/examples/MA_vax/fitted_params_MA_vax.json",
   "n_reps": 627,
-  "generated_at": "2026-09-23T02:46:26.708153+00:00"
+  "generated_at": "2026-10-05T22:21:40.206393+00:00"
 }

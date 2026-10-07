@@ -5,6 +5,11 @@
 ##
 ## Run with: Rscript generic_core/examples/MA_vax/presentation_2026_09_22/graphs/plot_per_100k_doses_stacked_bar.R
 ## or source() it interactively / from an RStudio session.
+##
+## Optional CLI args (all positional, defaulting to the 70%-coverage table
+## for backward compatibility): <input_csv> <output_png> <plot_title>
+## e.g. for the 50%/55% coverage-target panels:
+##   Rscript plot_per_100k_doses_stacked_bar.R S_A_3_50pct_per_100k_doses.csv S_A_3_50pct_per_100k_doses_stacked_bar.png "50% coverage target"
 
 library(ggplot2)
 library(dplyr)
@@ -31,8 +36,19 @@ SCRIPT_DIR <- get_script_dir()
 ## CONFIG
 ## ---------------------------------------------------------------------
 
-DATA_FILE <- file.path(SCRIPT_DIR, "S_A_3_per_100k_doses.csv")
-OUTPUT_FILE <- file.path(SCRIPT_DIR, "S_A_3_per_100k_doses_stacked_bar.png")
+ARGS <- commandArgs(trailingOnly = TRUE)
+DATA_FILE <- if (length(ARGS) >= 1) ARGS[1] else file.path(SCRIPT_DIR, "S_A_3_per_100k_doses.csv")
+OUTPUT_FILE <- if (length(ARGS) >= 2) ARGS[2] else file.path(SCRIPT_DIR, "S_A_3_per_100k_doses_stacked_bar.png")
+PLOT_TITLE <- if (length(ARGS) >= 3) ARGS[3] else NULL
+## A bare filename (no "/") is resolved relative to this script's own
+## folder, so it keeps working when invoked from a different cwd; a path
+## containing "/" (relative or absolute) is used as-is.
+if (!grepl("/", DATA_FILE, fixed = TRUE)) {
+  DATA_FILE <- file.path(SCRIPT_DIR, DATA_FILE)
+}
+if (!grepl("/", OUTPUT_FILE, fixed = TRUE)) {
+  OUTPUT_FILE <- file.path(SCRIPT_DIR, OUTPUT_FILE)
+}
 
 # Vaccinated age groups (originally the CSV columns) shown as bars, in
 # top-to-bottom order. Every group has dose data in this table set, so all
@@ -92,7 +108,8 @@ p <- ggplot(dat, aes(x = value, y = vax_group, fill = hosp_group)) +
   labs(
     x = "Hospitalizations averted per 100,000 additional doses",
     y = "Age group vaccinated",
-    fill = "Age group hospitalized"
+    fill = "Age group hospitalized",
+    title = PLOT_TITLE
   ) +
   theme_minimal(base_size = 16) +
   theme(
@@ -100,6 +117,7 @@ p <- ggplot(dat, aes(x = value, y = vax_group, fill = hosp_group)) +
     axis.text.y = element_text(size = 18),
     axis.title.x = element_text(size = 20),
     axis.title.y = element_text(size = 20),
+    plot.title = element_text(size = 20, hjust = 0.5),
     legend.text = element_text(size = 16),
     legend.title = element_text(size = 18),
     legend.position = "bottom",

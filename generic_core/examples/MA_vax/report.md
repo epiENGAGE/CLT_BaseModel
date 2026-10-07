@@ -584,6 +584,10 @@ around late December/early January) well across all age groups.
   (§2.5), so unlike in earlier versions of this analysis none of them is
   left at its baseline schedule, and the appendix's per-additional-dose
   denominators are non-zero for all seven.
+- **The 50%/55% analogs of Tables S.A.3/S.A.6 (appendix) leave 65+
+  untouched** — 65+'s baseline coverage (60.6%, §2.5) is already above both
+  lower targets, so (unlike at 70%) its column is exactly zero in both, not
+  just small.
 - **"Per 100,000 doses" counts doses the schedule reports, not doses the model
   delivers** — 3.2% of scheduled doses go to people already infected (see the
   dose-accounting appendix). Those are wasted, not unspent, so they belong in
@@ -726,6 +730,248 @@ high VE (3,184 vs. 2,772 averted): under `High VE` the scenario's own
 baseline schedule already suppresses so much of the epidemic that there is
 less burden left for the extra doses to avert.
 
+### Table S.A.3 (50% coverage) — Additional hospitalizations averted at 50% coverage
+
+Same construction as Table S.A.3 above, with every age group's schedule
+scaled to 50% cumulative coverage instead of 70%. Per §2.5, 65+ (60.6%) is
+the only age group already above a 50% target, so unlike the 70% table its
+column is now **exactly zero** — vaccinating 65+ further is the one
+scenario here that is structurally identical to baseline, not merely small.
+All six other groups are still raised (none of them reach 50% at baseline).
+
+**Hospitalizations averted (count)**
+
+| Age group (counted) | 0 vaccinated | 1-4 vaccinated | 5-12 vaccinated | 13-17 vaccinated | 18-49 vaccinated | 50-64 vaccinated | 65+ vaccinated | All vaccinated |
+|---|---|---|---|---|---|---|---|---|
+| 0 | 4 [2 – 5] | 0 [0 – 0] | 3 [2 – 3] | 2 [1 – 3] | 5 [3 – 7] | 1 [1 – 1] | 0 [0 – 0] | 12 [8 – 17] |
+| 1-4 | 1 [0 – 1] | 2 [1 – 2] | 12 [8 – 15] | 8 [6 – 10] | 21 [14 – 26] | 4 [3 – 5] | 0 [0 – 0] | 43 [29 – 55] |
+| 5-12 | 1 [0 – 1] | 0 [0 – 0] | 22 [15 – 28] | 8 [6 – 11] | 19 [14 – 25] | 4 [3 – 5] | 0 [0 – 0] | 49 [34 – 63] |
+| 13-17 | 0 [0 – 0] | 0 [0 – 0] | 7 [4 – 9] | 12 [8 – 16] | 12 [8 – 16] | 2 [2 – 3] | 0 [0 – 0] | 30 [20 – 39] |
+| 18-49 | 3 [2 – 3] | 2 [1 – 2] | 52 [40 – 64] | 40 [31 – 50] | 133 [106 – 162] | 21 [16 – 26] | 0 [0 – 0] | 227 [180 – 277] |
+| 50-64 | 3 [2 – 3] | 1 [1 – 2] | 51 [40 – 62] | 41 [32 – 49] | 104 [82 – 125] | 43 [34 – 51] | 0 [0 – 0] | 218 [173 – 263] |
+| 65+ | 14 [13 – 16] | 8 [7 – 9] | 286 [254 – 324] | 222 [197 – 253] | 557 [499 – 627] | 122 [109 – 138] | 0 [0 – 0] | 1,104 [992 – 1,242] |
+| **All** | **25 [22 – 27]** | **13 [12 – 15]** | **434 [388 – 475]** | **335 [299 – 368]** | **856 [775 – 932]** | **198 [178 – 215]** | **0 [0 – 0]** | **1,689 [1,539 – 1,840]** |
+
+**% reduction in hospitalizations**
+
+| Age group (counted) | 0 vaccinated | 1-4 vaccinated | 5-12 vaccinated | 13-17 vaccinated | 18-49 vaccinated | 50-64 vaccinated | 65+ vaccinated | All vaccinated |
+|---|---|---|---|---|---|---|---|---|
+| 0 | 10.8% [10.6% – 10.9%] | 0.2% [0.2% – 0.2%] | 7.4% [6.7% – 7.8%] | 5.4% [4.8% – 5.7%] | 14.2% [13.1% – 14.9%] | 2.7% [2.4% – 2.8%] | 0.0% [0.0% – 0.0%] | 35.0% [33.4% – 36.1%] |
+| 1-4 | 0.4% [0.4% – 0.4%] | 1.0% [1.0% – 1.0%] | 7.9% [7.2% – 8.4%] | 5.3% [4.7% – 5.6%] | 13.6% [12.5% – 14.3%] | 2.6% [2.3% – 2.8%] | 0.0% [0.0% – 0.0%] | 27.9% [26.1% – 29.1%] |
+| 5-12 | 0.3% [0.3% – 0.4%] | 0.2% [0.2% – 0.2%] | 14.1% [13.2% – 14.6%] | 5.5% [4.9% – 5.8%] | 12.6% [11.3% – 13.4%] | 2.5% [2.2% – 2.6%] | 0.0% [0.0% – 0.0%] | 31.3% [29.3% – 32.7%] |
+| 13-17 | 0.3% [0.3% – 0.3%] | 0.2% [0.2% – 0.2%] | 7.1% [6.3% – 7.6%] | 12.7% [12.0% – 13.2%] | 12.7% [11.4% – 13.5%] | 2.6% [2.3% – 2.8%] | 0.0% [0.0% – 0.0%] | 31.6% [29.6% – 33.0%] |
+| 18-49 | 0.4% [0.3% – 0.4%] | 0.2% [0.2% – 0.2%] | 7.0% [6.3% – 7.4%] | 5.4% [4.8% – 5.8%] | 17.9% [16.8% – 18.7%] | 2.8% [2.6% – 3.0%] | 0.0% [0.0% – 0.0%] | 30.5% [28.7% – 31.8%] |
+| 50-64 | 0.3% [0.3% – 0.4%] | 0.2% [0.2% – 0.2%] | 6.8% [6.1% – 7.2%] | 5.4% [4.9% – 5.8%] | 13.8% [12.7% – 14.6%] | 5.7% [5.4% – 5.9%] | 0.0% [0.0% – 0.0%] | 29.0% [27.2% – 30.3%] |
+| 65+ | 0.3% [0.3% – 0.4%] | 0.2% [0.2% – 0.2%] | 7.0% [6.4% – 7.4%] | 5.4% [4.9% – 5.8%] | 13.6% [12.6% – 14.3%] | 3.0% [2.8% – 3.2%] | 0.0% [0.0% – 0.0%] | 27.0% [25.3% – 28.2%] |
+| **All** | **0.4% [0.4% – 0.4%]** | **0.2% [0.2% – 0.2%]** | **7.2% [6.5% – 7.6%]** | **5.5% [5.0% – 5.9%]** | **14.1% [13.1% – 14.9%]** | **3.3% [3.0% – 3.5%]** | **0.0% [0.0% – 0.0%]** | **27.9% [26.1% – 29.2%]** |
+
+**Hospitalizations averted per 100,000 population**
+
+| Age group (counted) | 0 vaccinated | 1-4 vaccinated | 5-12 vaccinated | 13-17 vaccinated | 18-49 vaccinated | 50-64 vaccinated | 65+ vaccinated | All vaccinated |
+|---|---|---|---|---|---|---|---|---|
+| 0 | 5.5 [3.5 – 7.4] | 0.1 [0.1 – 0.2] | 3.7 [2.3 – 4.9] | 2.7 [1.7 – 3.6] | 7.2 [4.4 – 9.6] | 1.4 [0.8 – 1.8] | 0.0 [0.0 – 0.0] | 17.7 [11.1 – 23.9] |
+| 1-4 | 0.2 [0.1 – 0.3] | 0.5 [0.4 – 0.7] | 4.3 [3.0 – 5.5] | 2.9 [2.0 – 3.7] | 7.4 [5.0 – 9.4] | 1.4 [1.0 – 1.8] | 0.0 [0.0 – 0.0] | 15.2 [10.3 – 19.5] |
+| 5-12 | 0.1 [0.1 – 0.1] | 0.1 [0.0 – 0.1] | 3.6 [2.5 – 4.7] | 1.4 [1.0 – 1.8] | 3.2 [2.2 – 4.2] | 0.6 [0.4 – 0.8] | 0.0 [0.0 – 0.0] | 8.0 [5.7 – 10.4] |
+| 13-17 | 0.1 [0.0 – 0.1] | 0.0 [0.0 – 0.1] | 1.6 [1.1 – 2.1] | 2.9 [1.9 – 3.8] | 2.9 [1.9 – 3.8] | 0.6 [0.4 – 0.8] | 0.0 [0.0 – 0.0] | 7.3 [4.8 – 9.5] |
+| 18-49 | 0.1 [0.1 – 0.1] | 0.1 [0.0 – 0.1] | 1.7 [1.3 – 2.2] | 1.3 [1.0 – 1.7] | 4.5 [3.5 – 5.5] | 0.7 [0.5 – 0.9] | 0.0 [0.0 – 0.0] | 7.6 [6.0 – 9.3] |
+| 50-64 | 0.2 [0.1 – 0.2] | 0.1 [0.1 – 0.1] | 3.6 [2.8 – 4.3] | 2.9 [2.2 – 3.5] | 7.3 [5.7 – 8.8] | 3.0 [2.4 – 3.6] | 0.0 [0.0 – 0.0] | 15.3 [12.1 – 18.5] |
+| 65+ | 1.2 [1.0 – 1.3] | 0.7 [0.6 – 0.8] | 23.4 [20.8 – 26.5] | 18.2 [16.1 – 20.7] | 45.6 [40.9 – 51.3] | 10.0 [9.0 – 11.3] | 0.0 [0.0 – 0.0] | 90.4 [81.2 – 101.7] |
+| **All** | **0.4 [0.3 – 0.4]** | **0.2 [0.2 – 0.2]** | **6.2 [5.6 – 6.8]** | **4.8 [4.3 – 5.3]** | **12.2 [11.1 – 13.3]** | **2.8 [2.5 – 3.1]** | **0.0 [0.0 – 0.0]** | **24.2 [22.0 – 26.3]** |
+
+**Hospitalizations averted per 100,000 additional doses**
+
+Denominators reduce to `max(0, 50% − baseline coverage) × population`:
+18,112 doses for age 0, 4,765 for 1-4, 83,411 for 5-12, 55,621 for 13-17,
+652,232 for 18-49, 168,176 for 50-64 and **zero** for 65+ (already above
+50%). The `All ages` column's denominator is the total 982,317 additional
+doses.
+
+| Age group (counted) | 0 vaccinated | 1-4 vaccinated | 5-12 vaccinated | 13-17 vaccinated | 18-49 vaccinated | 50-64 vaccinated | 65+ vaccinated | All vaccinated |
+|---|---|---|---|---|---|---|---|---|
+| 0 | 21.3 [13.5 – 28.8] | 1.7 [1.1 – 2.3] | 3.1 [1.9 – 4.2] | 3.4 [2.1 – 4.5] | 0.8 [0.5 – 1.0] | 0.6 [0.3 – 0.8] | — | 1.3 [0.8 – 1.7] |
+| 1-4 | 3.4 [2.3 – 4.3] | 32.0 [21.7 – 41.6] | 14.5 [9.9 – 18.5] | 14.5 [9.9 – 18.6] | 3.2 [2.2 – 4.1] | 2.3 [1.6 – 3.0] | — | 4.3 [3.0 – 5.6] |
+| 5-12 | 2.9 [2.0 – 3.8] | 7.0 [4.9 – 9.2] | 26.2 [18.5 – 34.1] | 15.3 [10.4 – 19.8] | 3.0 [2.1 – 3.9] | 2.3 [1.6 – 3.0] | — | 5.0 [3.5 – 6.4] |
+| 13-17 | 1.6 [1.1 – 2.2] | 3.7 [2.4 – 4.9] | 8.0 [5.2 – 10.6] | 21.7 [14.4 – 28.4] | 1.8 [1.2 – 2.4] | 1.4 [0.9 – 1.9] | — | 3.1 [2.0 – 4.0] |
+| 18-49 | 14.9 [11.5 – 18.4] | 32.0 [24.6 – 39.5] | 62.1 [47.7 – 76.8] | 72.1 [55.5 – 89.2] | 20.4 [16.2 – 24.9] | 12.4 [9.6 – 15.4] | — | 23.1 [18.3 – 28.2] |
+| 50-64 | 14.0 [10.9 – 16.9] | 30.8 [24.0 – 37.1] | 61.7 [48.1 – 74.3] | 73.6 [57.4 – 88.6] | 16.0 [12.5 – 19.1] | 25.3 [20.1 – 30.6] | — | 22.2 [17.6 – 26.8] |
+| 65+ | 78.8 [70.4 – 88.8] | 172.9 [154.1 – 195.9] | 342.6 [304.0 – 388.6] | 399.9 [354.5 – 454.3] | 85.5 [76.5 – 96.2] | 72.7 [65.1 – 81.9] | — | 112.4 [101.0 – 126.4] |
+| **All** | **137.3 [123.0 – 148.6]** | **281.4 [252.0 – 305.3]** | **520.0 [465.6 – 568.9]** | **603.1 [536.9 – 660.8]** | **131.2 [118.9 – 142.9]** | **117.7 [105.9 – 127.8]** | **—** | **171.9 [156.7 – 187.3]** |
+
+Same ranking as the 70% table: 13-17 is still the best per-dose buy (603.1
+averted per 100,000 doses), followed by 5-12 (520.0) — against 171.9 for the
+all-ages push. The all-ages push now averts 1,689 [1,539 – 1,840]
+hospitalizations overall — a 27.9% reduction — against 3,184 at 70%
+coverage (§3, Table S.A.3 above).
+
+### Table S.A.3 (55% coverage) — Additional hospitalizations averted at 55% coverage
+
+Same construction, scaled to 55% cumulative coverage. 65+ is again the only
+group already above target (60.6% > 55%), so its column is again exactly
+zero.
+
+**Hospitalizations averted (count)**
+
+| Age group (counted) | 0 vaccinated | 1-4 vaccinated | 5-12 vaccinated | 13-17 vaccinated | 18-49 vaccinated | 50-64 vaccinated | 65+ vaccinated | All vaccinated |
+|---|---|---|---|---|---|---|---|---|
+| 0 | 5 [3 – 6] | 0 [0 – 0] | 3 [2 – 5] | 3 [2 – 3] | 6 [4 – 8] | 1 [1 – 2] | 0 [0 – 0] | 15 [10 – 20] |
+| 1-4 | 1 [0 – 1] | 6 [4 – 8] | 16 [11 – 21] | 11 [7 – 14] | 25 [17 – 32] | 6 [4 – 7] | 0 [0 – 0] | 56 [38 – 72] |
+| 5-12 | 1 [0 – 1] | 1 [1 – 2] | 29 [21 – 38] | 11 [8 – 15] | 24 [17 – 31] | 5 [4 – 7] | 0 [0 – 0] | 61 [43 – 80] |
+| 13-17 | 0 [0 – 0] | 1 [0 – 1] | 9 [6 – 12] | 16 [11 – 21] | 14 [9 – 19] | 3 [2 – 5] | 0 [0 – 0] | 38 [25 – 49] |
+| 18-49 | 3 [2 – 4] | 6 [5 – 7] | 69 [53 – 86] | 54 [42 – 67] | 160 [127 – 195] | 30 [23 – 37] | 0 [0 – 0] | 282 [224 – 343] |
+| 50-64 | 3 [2 – 4] | 6 [4 – 7] | 69 [54 – 83] | 55 [43 – 66] | 126 [99 – 151] | 60 [48 – 72] | 0 [0 – 0] | 276 [218 – 333] |
+| 65+ | 17 [15 – 19] | 32 [29 – 37] | 383 [341 – 434] | 300 [267 – 341] | 674 [602 – 757] | 173 [155 – 195] | 0 [0 – 0] | 1,393 [1,251 – 1,563] |
+| **All** | **30 [27 – 32]** | **53 [47 – 57]** | **581 [521 – 636]** | **453 [404 – 496]** | **1,033 [938 – 1,125]** | **280 [252 – 304]** | **0 [0 – 0]** | **2,127 [1,942 – 2,312]** |
+
+**% reduction in hospitalizations**
+
+| Age group (counted) | 0 vaccinated | 1-4 vaccinated | 5-12 vaccinated | 13-17 vaccinated | 18-49 vaccinated | 50-64 vaccinated | 65+ vaccinated | All vaccinated |
+|---|---|---|---|---|---|---|---|---|
+| 0 | 12.9% [12.7% – 13.0%] | 0.9% [0.8% – 1.0%] | 9.9% [9.0% – 10.4%] | 7.2% [6.5% – 7.7%] | 17.1% [15.9% – 18.0%] | 3.8% [3.4% – 4.0%] | 0.0% [0.0% – 0.0%] | 42.7% [40.9% – 43.9%] |
+| 1-4 | 0.5% [0.4% – 0.5%] | 3.9% [3.8% – 4.0%] | 10.6% [9.7% – 11.2%] | 7.1% [6.4% – 7.6%] | 16.4% [15.1% – 17.3%] | 3.7% [3.3% – 3.9%] | 0.0% [0.0% – 0.0%] | 36.4% [34.4% – 37.8%] |
+| 5-12 | 0.4% [0.4% – 0.4%] | 0.9% [0.8% – 0.9%] | 18.7% [17.6% – 19.4%] | 7.4% [6.6% – 7.9%] | 15.2% [13.8% – 16.2%] | 3.5% [3.1% – 3.7%] | 0.0% [0.0% – 0.0%] | 39.4% [37.2% – 41.0%] |
+| 13-17 | 0.4% [0.3% – 0.4%] | 0.7% [0.6% – 0.8%] | 9.5% [8.5% – 10.1%] | 17.0% [16.1% – 17.7%] | 15.3% [13.9% – 16.3%] | 3.6% [3.3% – 3.9%] | 0.0% [0.0% – 0.0%] | 39.7% [37.5% – 41.3%] |
+| 18-49 | 0.4% [0.4% – 0.5%] | 0.8% [0.7% – 0.9%] | 9.4% [8.4% – 10.0%] | 7.3% [6.6% – 7.8%] | 21.6% [20.2% – 22.5%] | 4.0% [3.6% – 4.2%] | 0.0% [0.0% – 0.0%] | 38.0% [35.9% – 39.4%] |
+| 50-64 | 0.4% [0.4% – 0.4%] | 0.8% [0.7% – 0.8%] | 9.2% [8.3% – 9.7%] | 7.3% [6.6% – 7.8%] | 16.7% [15.4% – 17.6%] | 8.0% [7.6% – 8.2%] | 0.0% [0.0% – 0.0%] | 36.6% [34.6% – 38.0%] |
+| 65+ | 0.4% [0.4% – 0.4%] | 0.8% [0.7% – 0.8%] | 9.4% [8.5% – 9.9%] | 7.4% [6.7% – 7.8%] | 16.5% [15.3% – 17.3%] | 4.2% [3.9% – 4.5%] | 0.0% [0.0% – 0.0%] | 34.0% [32.1% – 35.4%] |
+| **All** | **0.5% [0.4% – 0.5%]** | **0.9% [0.8% – 0.9%]** | **9.6% [8.8% – 10.2%]** | **7.5% [6.8% – 7.9%]** | **17.1% [15.8% – 17.9%]** | **4.6% [4.3% – 4.9%]** | **0.0% [0.0% – 0.0%]** | **35.2% [33.1% – 36.6%]** |
+
+**Hospitalizations averted per 100,000 population**
+
+| Age group (counted) | 0 vaccinated | 1-4 vaccinated | 5-12 vaccinated | 13-17 vaccinated | 18-49 vaccinated | 50-64 vaccinated | 65+ vaccinated | All vaccinated |
+|---|---|---|---|---|---|---|---|---|
+| 0 | 6.6 [4.1 – 8.9] | 0.5 [0.3 – 0.6] | 5.0 [3.1 – 6.6] | 3.7 [2.3 – 4.9] | 8.7 [5.4 – 11.6] | 1.9 [1.2 – 2.5] | 0.0 [0.0 – 0.0] | 21.6 [13.6 – 29.1] |
+| 1-4 | 0.3 [0.2 – 0.3] | 2.1 [1.4 – 2.8] | 5.8 [4.0 – 7.4] | 3.9 [2.7 – 5.0] | 9.0 [6.1 – 11.4] | 2.0 [1.4 – 2.5] | 0.0 [0.0 – 0.0] | 19.9 [13.5 – 25.6] |
+| 5-12 | 0.1 [0.1 – 0.1] | 0.2 [0.2 – 0.3] | 4.8 [3.4 – 6.2] | 1.9 [1.3 – 2.4] | 3.9 [2.7 – 5.1] | 0.9 [0.6 – 1.2] | 0.0 [0.0 – 0.0] | 10.1 [7.1 – 13.2] |
+| 13-17 | 0.1 [0.1 – 0.1] | 0.2 [0.1 – 0.2] | 2.2 [1.4 – 2.9] | 3.9 [2.6 – 5.1] | 3.5 [2.3 – 4.6] | 0.8 [0.5 – 1.1] | 0.0 [0.0 – 0.0] | 9.2 [6.1 – 12.0] |
+| 18-49 | 0.1 [0.1 – 0.1] | 0.2 [0.2 – 0.2] | 2.3 [1.8 – 2.9] | 1.8 [1.4 – 2.2] | 5.4 [4.3 – 6.6] | 1.0 [0.8 – 1.2] | 0.0 [0.0 – 0.0] | 9.5 [7.5 – 11.5] |
+| 50-64 | 0.2 [0.2 – 0.3] | 0.4 [0.3 – 0.5] | 4.8 [3.8 – 5.8] | 3.9 [3.0 – 4.7] | 8.8 [6.9 – 10.6] | 4.2 [3.3 – 5.1] | 0.0 [0.0 – 0.0] | 19.4 [15.3 – 23.4] |
+| 65+ | 1.4 [1.2 – 1.6] | 2.6 [2.4 – 3.0] | 31.4 [27.9 – 35.6] | 24.6 [21.8 – 27.9] | 55.1 [49.3 – 62.0] | 14.2 [12.7 – 15.9] | 0.0 [0.0 – 0.0] | 114.0 [102.5 – 128.0] |
+| **All** | **0.4 [0.4 – 0.5]** | **0.8 [0.7 – 0.8]** | **8.3 [7.5 – 9.1]** | **6.5 [5.8 – 7.1]** | **14.8 [13.4 – 16.1]** | **4.0 [3.6 – 4.3]** | **0.0 [0.0 – 0.0]** | **30.4 [27.8 – 33.1]** |
+
+**Hospitalizations averted per 100,000 additional doses**
+
+Denominators: 21,616 doses for age 0, 18,778 for 1-4, 113,726 for 5-12,
+76,210 for 13-17, 801,142 for 18-49, 239,398 for 50-64 and zero for 65+. The
+`All ages` column's denominator is the total 1,270,870 additional doses.
+
+| Age group (counted) | 0 vaccinated | 1-4 vaccinated | 5-12 vaccinated | 13-17 vaccinated | 18-49 vaccinated | 50-64 vaccinated | 65+ vaccinated | All vaccinated |
+|---|---|---|---|---|---|---|---|---|
+| 0 | 21.3 [13.4 – 28.7] | 1.7 [1.1 – 2.3] | 3.1 [1.9 – 4.1] | 3.4 [2.1 – 4.5] | 0.8 [0.5 – 1.0] | 0.6 [0.3 – 0.7] | — | 1.2 [0.7 – 1.6] |
+| 1-4 | 3.4 [2.3 – 4.3] | 31.8 [21.5 – 41.4] | 14.3 [9.8 – 18.2] | 14.3 [9.8 – 18.3] | 3.1 [2.1 – 4.0] | 2.3 [1.6 – 3.0] | — | 4.4 [3.0 – 5.6] |
+| 5-12 | 2.9 [2.0 – 3.8] | 7.0 [4.9 – 9.2] | 25.6 [18.0 – 33.3] | 15.0 [10.3 – 19.5] | 3.0 [2.1 – 3.8] | 2.3 [1.6 – 3.0] | — | 4.8 [3.4 – 6.3] |
+| 13-17 | 1.6 [1.1 – 2.2] | 3.7 [2.4 – 4.9] | 7.9 [5.1 – 10.4] | 21.2 [14.1 – 27.8] | 1.8 [1.2 – 2.4] | 1.4 [0.9 – 1.9] | — | 3.0 [2.0 – 3.9] |
+| 18-49 | 14.9 [11.5 – 18.4] | 31.9 [24.6 – 39.5] | 61.1 [46.9 – 75.5] | 71.1 [54.7 – 87.9] | 20.0 [15.9 – 24.4] | 12.4 [9.6 – 15.3] | — | 22.2 [17.6 – 27.0] |
+| 50-64 | 14.0 [10.9 – 16.9] | 30.7 [24.0 – 37.0] | 60.7 [47.3 – 72.9] | 72.5 [56.6 – 87.3] | 15.7 [12.3 – 18.8] | 25.0 [19.9 – 30.3] | — | 21.7 [17.2 – 26.2] |
+| 65+ | 78.7 [70.3 – 88.6] | 172.3 [153.8 – 195.1] | 336.7 [299.6 – 381.8] | 394.2 [349.8 – 447.3] | 84.1 [75.2 – 94.5] | 72.2 [64.6 – 81.3] | — | 109.6 [98.5 – 123.0] |
+| **All** | **137.1 [123.0 – 148.4]** | **280.7 [251.5 – 303.8]** | **511.0 [458.3 – 558.9]** | **594.1 [530.5 – 650.8]** | **129.0 [117.1 – 140.4]** | **116.8 [105.2 – 126.8]** | **—** | **167.4 [152.8 – 181.9]** |
+
+Same ranking again: 13-17 (594.1) then 5-12 (511.0) remain the best per-dose
+buys, against 167.4 for the all-ages push. The 50%/55%/70% coverage series
+is monotonic as expected — 27.9% → 35.2% → 52.6% overall reduction. Of the
+1,057 additional hospitalizations averted going from the 55% to the 70%
+push, 720 (68%) are counted in **65+** alone — the one age group the 70%
+target newly raises above its own baseline schedule (60.6%) that the 50%/55%
+targets leave untouched (§2.5), so it is the single largest source of
+*additional* benefit from pushing past 55% even though its own direct dose
+count barely changes.
+
+### Table S.A.6 (50%/55% coverage) — Additional hospitalizations averted, across VE scenarios
+
+50%/55% analogs of Table S.A.6: each VE preset's own baseline compared
+against that preset's own 50%- or 55%-coverage (all ages) target (same VE ×
+coverage combinations as the 70% table, just at the two lower targets).
+
+**50% coverage**
+
+*Hospitalizations averted (count)*
+
+| Age group | Low VE | Baseline VE (fitted) | High VE |
+|---|---|---|---|
+| 0 | 10 [6 – 13] | 12 [8 – 17] | 12 [8 – 16] |
+| 1-4 | 32 [22 – 41] | 43 [29 – 55] | 37 [25 – 48] |
+| 5-12 | 39 [26 – 51] | 49 [34 – 63] | 45 [32 – 59] |
+| 13-17 | 24 [15 – 32] | 30 [20 – 39] | 27 [18 – 35] |
+| 18-49 | 156 [117 – 197] | 227 [180 – 277] | 224 [176 – 267] |
+| 50-64 | 155 [117 – 189] | 218 [173 – 263] | 210 [166 – 254] |
+| 65+ | 801 [687 – 926] | 1,104 [992 – 1,242] | 1,054 [945 – 1,179] |
+| **All** | **1,224 [1,039 – 1,353]** | **1,689 [1,539 – 1,840]** | **1,614 [1,482 – 1,743]** |
+
+*% reduction in hospitalizations*
+
+| Age group | Low VE | Baseline VE (fitted) | High VE |
+|---|---|---|---|
+| 0 | 20.1% [18.5% – 21.1%] | 35.0% [33.4% – 36.1%] | 47.6% [46.3% – 48.9%] |
+| 1-4 | 14.7% [13.0% – 15.8%] | 27.9% [26.1% – 29.1%] | 36.7% [35.1% – 38.1%] |
+| 5-12 | 17.9% [15.9% – 19.1%] | 31.3% [29.3% – 32.7%] | 41.5% [39.9% – 43.1%] |
+| 13-17 | 18.0% [15.9% – 19.2%] | 31.6% [29.6% – 33.0%] | 42.1% [40.4% – 43.7%] |
+| 18-49 | 15.1% [13.3% – 16.2%] | 30.5% [28.7% – 31.8%] | 41.0% [39.5% – 42.4%] |
+| 50-64 | 14.5% [12.7% – 15.5%] | 29.0% [27.2% – 30.3%] | 39.0% [37.5% – 40.3%] |
+| 65+ | 13.9% [12.2% – 14.8%] | 27.0% [25.3% – 28.2%] | 36.0% [34.6% – 37.3%] |
+| **All** | **14.3% [12.7% – 15.3%]** | **27.9% [26.1% – 29.2%]** | **37.3% [35.9% – 38.6%]** |
+
+*Hospitalizations averted per 100,000 population*
+
+| Age group | Low VE | Baseline VE (fitted) | High VE |
+|---|---|---|---|
+| 0 | 14.1 [8.6 – 18.7] | 17.7 [11.1 – 23.9] | 17.2 [11.0 – 23.3] |
+| 1-4 | 11.6 [7.9 – 14.7] | 15.2 [10.3 – 19.5] | 13.2 [8.8 – 17.3] |
+| 5-12 | 6.4 [4.3 – 8.4] | 8.0 [5.7 – 10.4] | 7.4 [5.3 – 9.7] |
+| 13-17 | 5.7 [3.7 – 7.7] | 7.3 [4.8 – 9.5] | 6.7 [4.4 – 8.6] |
+| 18-49 | 5.2 [3.9 – 6.6] | 7.6 [6.0 – 9.3] | 7.5 [5.9 – 9.0] |
+| 50-64 | 10.9 [8.2 – 13.3] | 15.3 [12.1 – 18.5] | 14.7 [11.7 – 17.9] |
+| 65+ | 65.6 [56.2 – 75.8] | 90.4 [81.2 – 101.7] | 86.3 [77.4 – 96.5] |
+| **All** | **17.5 [14.9 – 19.3]** | **24.2 [22.0 – 26.3]** | **23.1 [21.2 – 24.9]** |
+
+**55% coverage**
+
+*Hospitalizations averted (count)*
+
+| Age group | Low VE | Baseline VE (fitted) | High VE |
+|---|---|---|---|
+| 0 | 13 [8 – 17] | 15 [10 – 20] | 14 [9 – 19] |
+| 1-4 | 45 [31 – 57] | 56 [38 – 72] | 47 [32 – 62] |
+| 5-12 | 51 [35 – 67] | 61 [43 – 80] | 55 [39 – 72] |
+| 13-17 | 31 [20 – 42] | 38 [25 – 49] | 34 [22 – 43] |
+| 18-49 | 204 [154 – 257] | 282 [224 – 343] | 270 [212 – 322] |
+| 50-64 | 206 [156 – 250] | 276 [218 – 333] | 257 [204 – 312] |
+| 65+ | 1,060 [915 – 1,225] | 1,393 [1,251 – 1,563] | 1,293 [1,158 – 1,445] |
+| **All** | **1,620 [1,385 – 1,788]** | **2,127 [1,942 – 2,312]** | **1,971 [1,809 – 2,134]** |
+
+*% reduction in hospitalizations*
+
+| Age group | Low VE | Baseline VE (fitted) | High VE |
+|---|---|---|---|
+| 0 | 25.5% [23.5% – 26.7%] | 42.7% [40.9% – 43.9%] | 56.1% [54.7% – 57.5%] |
+| 1-4 | 20.6% [18.4% – 21.9%] | 36.4% [34.4% – 37.8%] | 46.8% [45.2% – 48.5%] |
+| 5-12 | 23.6% [21.2% – 25.1%] | 39.4% [37.2% – 41.0%] | 50.7% [48.9% – 52.4%] |
+| 13-17 | 23.7% [21.2% – 25.2%] | 39.7% [37.5% – 41.3%] | 51.3% [49.6% – 53.1%] |
+| 18-49 | 19.9% [17.6% – 21.2%] | 38.0% [35.9% – 39.4%] | 49.5% [47.8% – 51.0%] |
+| 50-64 | 19.2% [17.0% – 20.5%] | 36.6% [34.6% – 38.0%] | 47.8% [46.2% – 49.3%] |
+| 65+ | 18.4% [16.3% – 19.6%] | 34.0% [32.1% – 35.4%] | 44.1% [42.6% – 45.6%] |
+| **All** | **19.0% [16.9% – 20.2%]** | **35.2% [33.1% – 36.6%]** | **45.6% [44.1% – 47.1%]** |
+
+*Hospitalizations averted per 100,000 population*
+
+| Age group | Low VE | Baseline VE (fitted) | High VE |
+|---|---|---|---|
+| 0 | 17.9 [10.9 – 23.7] | 21.6 [13.6 – 29.1] | 20.3 [13.0 – 27.5] |
+| 1-4 | 16.1 [11.0 – 20.5] | 19.9 [13.5 – 25.6] | 16.8 [11.3 – 22.2] |
+| 5-12 | 8.5 [5.7 – 11.0] | 10.1 [7.1 – 13.2] | 9.1 [6.4 – 11.8] |
+| 13-17 | 7.6 [4.9 – 10.1] | 9.2 [6.1 – 12.0] | 8.1 [5.4 – 10.5] |
+| 18-49 | 6.9 [5.2 – 8.6] | 9.5 [7.5 – 11.5] | 9.1 [7.1 – 10.8] |
+| 50-64 | 14.5 [11.0 – 17.6] | 19.4 [15.3 – 23.4] | 18.0 [14.3 – 21.9] |
+| 65+ | 86.8 [74.9 – 100.3] | 114.0 [102.5 – 128.0] | 105.9 [94.8 – 118.3] |
+| **All** | **23.2 [19.8 – 25.6]** | **30.4 [27.8 – 33.1]** | **28.2 [25.9 – 30.5]** |
+
+Same pattern as the 70% table at both lower targets: the **absolute** gain
+peaks at the *fitted* VE rather than at `High VE` (1,689 vs. 1,614 at 50%;
+2,127 vs. 1,971 at 55%) — `High VE`'s own baseline already suppresses enough
+of the epidemic that less burden is left for the extra doses to avert, the
+same mechanism as at 70%. **% reduction** and **per-100,000-population**
+rates, by contrast, remain monotonic in VE at every target (Low < Baseline <
+High) because those are normalized to each scenario's own denominator
+rather than reflecting the absolute size of the epidemic being cut into.
+
 ---
 
 ## Appendix: dose accounting — scheduled vs. delivered doses
@@ -772,3 +1018,25 @@ they are: delivered doses are an *output* of the simulation, so they vary with
 the parameter draw even when the schedule is identical, and they leak between
 age groups, since a milder epidemic in one group leaves more susceptibles for
 the cap to reach in another. Scheduled doses have neither property.
+
+### Vaccination coverage over time, by age group
+
+The proportion of each age group's population the **schedule** vaccinates
+per day, and the cumulative version of the same series — both taken
+directly from the vaccination-schedule input (`daily_vaccines_df`), with no
+adjustment for the §1.4 delivery cap above. The cumulative series' final
+value reproduces the §2.5 coverage table exactly, by construction (it *is*
+that table, read out day by day rather than just at the end of the season).
+
+![Daily scheduled vaccination proportion, by age group](report_assets/vax_coverage_daily_proportion.png)
+
+![Cumulative scheduled vaccination coverage, by age group](report_assets/vax_coverage_cumulative_proportion.png)
+
+The schedule is front-loaded, with a pronounced spike in early November (all
+age groups peak together, 65+ reaching nearly 1.3% of its population in a
+single day) and a long tail of small, infrequent top-ups from December
+onward. 65+ and 1-4 pull ahead of the other five age groups almost
+immediately and stay ahead throughout the season, consistent with their
+higher final coverage (60.6% and 48.3% respectively, §2.5); 18-49 lags
+visibly in the first six weeks before converging toward the pack's middle by
+January.

@@ -102,6 +102,14 @@ SCENARIO_DB_NAME = {
     **{f"Vaccinate {label} only": f"Vaccinate {label} only" for label in AGE_GROUPS},
     "70% coverage (all ages)": "70% coverage (all ages)",
     **{f"70% coverage ({label} only)": f"70% coverage ({label} only)" for label in AGE_GROUPS},
+    # 50%/55% analogs of the 70%-coverage scenarios above, added by hand
+    # alongside run_simulations_MA_vax_param_set_stochastic.py's SCENARIOS/
+    # DOSE_MULTIPLIER entries of the same names -- consumed by
+    # table_S_A_3_for_target below (a copy of table_S_A_3 parameterized by
+    # target fraction, since table_S_A_3 itself hardcodes 0.70).
+    **{f"{pct}% coverage (all ages)": f"{pct}% coverage (all ages)" for pct in (50, 55)},
+    **{f"{pct}% coverage ({label} only)": f"{pct}% coverage ({label} only)"
+       for pct in (50, 55) for label in AGE_GROUPS},
 }
 
 # VE-scenario name -> (own-baseline, own-70%-coverage) results.db scenario
@@ -114,6 +122,16 @@ VE_SCENARIO_DB_NAMES = {
     "high_ve": ("High VE", "High VE + 70% coverage (all ages)"),
 }
 VE_TOTALS_DB_NAME = {"low_ve": "Low VE", "baseline_ve": "baseline", "high_ve": "High VE"}
+
+# 50%/55% analogs of VE_SCENARIO_DB_NAMES, for table_S_A_6_for_target.
+VE_SCENARIO_DB_NAMES_BY_PCT = {
+    pct: {
+        "low_ve": ("Low VE", f"Low VE + {pct}% coverage (all ages)"),
+        "baseline_ve": ("baseline", f"{pct}% coverage (all ages)"),
+        "high_ve": ("High VE", f"High VE + {pct}% coverage (all ages)"),
+    }
+    for pct in (50, 55)
+}
 
 
 def load_population(model_config_file=MODEL_CONFIG_FILE) -> np.ndarray:
@@ -328,6 +346,31 @@ def table_S_A_3(db: ResultsDB, population: np.ndarray,
     }
 
 
+def table_S_A_3_for_target(db: ResultsDB, population: np.ndarray, target_pct: int,
+                            model_config_file=MODEL_CONFIG_FILE) -> dict[str, pd.DataFrame]:
+    """Copy of table_S_A_3, parameterized by target coverage percentage
+    (e.g. 50 or 55) instead of hardcoding 70. Reads the
+    "{target_pct}% coverage (...)" scenarios -- see SCENARIO_DB_NAME."""
+    target = target_pct / 100.0
+    baseline = scenario_totals(db, SCENARIO_DB_NAME["baseline"], population)
+    cols = {}
+    for i, label in enumerate(AGE_GROUPS):
+        scen = scenario_totals(db, SCENARIO_DB_NAME[f"{target_pct}% coverage ({label} only)"], population)
+        col_doses = cf.additional_scheduled_doses_for_target(
+            population, target, i, model_config_file=model_config_file)
+        cols[label] = averted_summary(baseline, scen, doses_override=col_doses)
+    all_scen = scenario_totals(db, SCENARIO_DB_NAME[f"{target_pct}% coverage (all ages)"], population)
+    extra = float(cf.additional_scheduled_doses_for_target(
+        population, target, model_config_file=model_config_file).sum())
+    cols["All"] = averted_summary(baseline, all_scen, doses_override=extra)
+    return {
+        "absolute": pd.DataFrame({l: df["averted"] for l, df in cols.items()}),
+        "pct_reduction": pd.DataFrame({l: df["pct_averted"] for l, df in cols.items()}),
+        "per_100k": pd.DataFrame({l: df["per100k_averted"] for l, df in cols.items()}),
+        "per_100k_doses": pd.DataFrame({l: df["per100k_doses_averted"] for l, df in cols.items()}),
+    }
+
+
 def table_dose_accounting(db: ResultsDB, population: np.ndarray,
                            model_config_file=MODEL_CONFIG_FILE) -> pd.DataFrame:
     """Scheduled vs. delivered doses under the baseline schedule, by age group.
@@ -382,6 +425,22 @@ def table_S_A_6(db: ResultsDB, population: np.ndarray) -> dict[str, pd.DataFrame
         baseline = scenario_totals(db, base_name, population)
         target70 = scenario_totals(db, target_name, population)
         cols[name] = averted_summary(baseline, target70)
+    return {
+        "absolute": pd.DataFrame({l: df["averted"] for l, df in cols.items()}),
+        "pct_reduction": pd.DataFrame({n: df["pct_averted"] for n, df in cols.items()}),
+        "per_100k": pd.DataFrame({n: df["per100k_averted"] for n, df in cols.items()}),
+    }
+
+
+def table_S_A_6_for_target(db: ResultsDB, population: np.ndarray, target_pct: int) -> dict[str, pd.DataFrame]:
+    """Copy of table_S_A_6, parameterized by target coverage percentage
+    (e.g. 50 or 55) instead of hardcoding 70. Reads
+    VE_SCENARIO_DB_NAMES_BY_PCT[target_pct]."""
+    cols = {}
+    for name, (base_name, target_name) in VE_SCENARIO_DB_NAMES_BY_PCT[target_pct].items():
+        baseline = scenario_totals(db, base_name, population)
+        target = scenario_totals(db, target_name, population)
+        cols[name] = averted_summary(baseline, target)
     return {
         "absolute": pd.DataFrame({l: df["averted"] for l, df in cols.items()}),
         "pct_reduction": pd.DataFrame({n: df["pct_averted"] for n, df in cols.items()}),
@@ -455,6 +514,8 @@ def main() -> None:
 
     required = set(SCENARIO_DB_NAME.values()) | {
         n for pair in VE_SCENARIO_DB_NAMES.values() for n in pair
+    } | {
+        n for by_pct in VE_SCENARIO_DB_NAMES_BY_PCT.values() for pair in by_pct.values() for n in pair
     }
     missing = sorted(required - db.scenarios_present())
     if missing:
@@ -478,6 +539,13 @@ def main() -> None:
     for sub, df in table_S_A_3(db, population, model_config_file=args.model_config).items():
         df.to_csv(os.path.join(args.out, f"S_A_3_{sub}.csv"))
 
+    for _pct in (50, 55):
+        print(f"[3/7] Table S.A.3 equivalent ({_pct}% coverage, single age group) ...")
+        for sub, df in table_S_A_3_for_target(
+            db, population, _pct, model_config_file=args.model_config
+        ).items():
+            df.to_csv(os.path.join(args.out, f"S_A_3_{_pct}pct_{sub}.csv"))
+
     print("[4/7] Table S.A.4 (VE sensitivity parameters) ...")
     cf.table_S_A_4(cf.load_base_inputs(
         model_config_file=args.model_config, fitted_params_file=args.fitted_params,
@@ -494,6 +562,11 @@ def main() -> None:
     print("[6/7] Table S.A.6 (VE sensitivity, 70% coverage) ...")
     for sub, df in table_S_A_6(db, population).items():
         df.to_csv(os.path.join(args.out, f"S_A_6_{sub}.csv"))
+
+    for _pct in (50, 55):
+        print(f"[6/7] Table S.A.6 equivalent (VE sensitivity, {_pct}% coverage) ...")
+        for sub, df in table_S_A_6_for_target(db, population, _pct).items():
+            df.to_csv(os.path.join(args.out, f"S_A_6_{_pct}pct_{sub}.csv"))
 
     print("[7/7] Vaccine-efficacy mechanism check (flow-level ratios) ...")
     for sub, df in table_vax_efficacy_check(db).items():
