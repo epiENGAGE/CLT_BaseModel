@@ -64,7 +64,6 @@ DALLAS_L6_SHARED_FILES_CONFIG = {
     "mobility_file":      "mobility_modifier.csv",
 }
 
-
 # ---------------------------------------------------------------------------
 # Subpopulation config lists
 # ---------------------------------------------------------------------------
@@ -105,7 +104,6 @@ AUSTIN_L3_SUBPOP_CONFIG = [
     },
 ]
 
-# Dallas files are dummy placeholders
 DALLAS_L6_SUBPOP_CONFIG = [
     {
         "name":           f"Dallas_{i + 1}",
@@ -115,11 +113,6 @@ DALLAS_L6_SUBPOP_CONFIG = [
     }
     for i in range(6)
 ]
-# Dallas values are dummy placeholders
-_DALLAS_HIGH_RISK_FRACTIONS = {
-    f"Dallas_{i + 1}": np.array([0.050, 0.116, 0.183, 0.352, 0.550], dtype=float)
-    for i in range(6)
-}
 
 
 # ---------------------------------------------------------------------------
@@ -134,8 +127,8 @@ ALL_LOCATION_CONFIGS = {
         "report_dir":      "Austin_L2",
         "param_tag":       "Austin2",
         "high_risk_fractions": {
-            "east": np.array([0.048, 0.111, 0.181, 0.350, 0.552], dtype=float),
-            "west": np.array([0.053, 0.121, 0.186, 0.354, 0.549], dtype=float),
+            "east": np.array([0.053, 0.121, 0.186, 0.354, 0.549], dtype=float),
+            "west": np.array([0.048, 0.111, 0.181, 0.350, 0.552], dtype=float),
         },
         "calibration_mode_dirs": {
             "normal":  "Austin_L2",
@@ -150,9 +143,9 @@ ALL_LOCATION_CONFIGS = {
         "report_dir":      "Austin_L3",
         "param_tag":       "Austin3",
         "high_risk_fractions": {
-            "east": np.array([0.048, 0.111, 0.181, 0.350, 0.552], dtype=float),
-            "mid":  np.array([0.0505, 0.116, 0.1835, 0.352, 0.5505], dtype=float),
-            "west": np.array([0.053, 0.121, 0.186, 0.354, 0.549], dtype=float),
+            "east": np.array([0.054, 0.122, 0.186, 0.354, 0.549], dtype=float),
+            "mid":  np.array([0.051, 0.116, 0.177, 0.338, 0.529], dtype=float),
+            "west": np.array([0.047, 0.110, 0.186, 0.358, 0.563], dtype=float),
         },
         "calibration_mode_dirs": {
             "normal":  "Austin_L3",
@@ -166,7 +159,14 @@ ALL_LOCATION_CONFIGS = {
         "input_prefix":    "dallas_input_files",
         "report_dir":      "Dallas_L6",
         "param_tag":       "Dallas6",
-        "high_risk_fractions": _DALLAS_HIGH_RISK_FRACTIONS,
+        "high_risk_fractions": {
+            "Dallas_1": np.array([0.056, 0.128, 0.232, 0.433, 0.666], dtype=float),
+            "Dallas_2":  np.array([0.051, 0.120, 0.194, 0.383, 0.602], dtype=float),
+            "Dallas_3": np.array([0.058, 0.134, 0.240, 0.451, 0.689], dtype=float),
+            "Dallas_4": np.array([0.062, 0.143, 0.257, 0.482, 0.729], dtype=float),
+            "Dallas_5":  np.array([0.051, 0.117, 0.200, 0.378, 0.594], dtype=float),
+            "Dallas_6": np.array([0.061, 0.139, 0.243, 0.459, 0.701], dtype=float),
+        },
         "calibration_mode_dirs": {
             "normal":  "Dallas_L6",
             "rescale": "Dallas_L6_updated",
@@ -180,7 +180,7 @@ ALL_LOCATION_CONFIGS = {
 # Active location — change only this variable to switch cities/models
 # ---------------------------------------------------------------------------
 
-CURRENT_LOCATION = "Austin_L2"
+CURRENT_LOCATION = "Dallas_L6"
 
 SHARED_FILES_CONFIG = {
     **ALL_LOCATION_CONFIGS[CURRENT_LOCATION]["shared"],

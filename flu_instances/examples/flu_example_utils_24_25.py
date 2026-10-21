@@ -180,17 +180,17 @@ HOUSTON_L11_SUBPOP_CONFIG = [
         "vaccines_file":   "daily_vaccines_R8.csv",
         "calendar_file":   "school_work_calendar_R8.csv",
     },
-    {
-    	"name":            "R9(right)",
-        "init_vals_file":  "init_vals_R9(right).json",
-        "vaccines_file":   "daily_vaccines_R9(right).csv",
-        "calendar_file":   "school_work_calendar_R9(right).csv",
-     },
      {
         "name":            "R9(left)",
         "init_vals_file":  "init_vals_R9(left).json",
         "vaccines_file":   "daily_vaccines_R9(left).csv",
         "calendar_file":   "school_work_calendar_R9(left).csv",
+    },
+    {
+    	"name":            "R9(right)",
+        "init_vals_file":  "init_vals_R9(right).json",
+        "vaccines_file":   "daily_vaccines_R9(right).csv",
+        "calendar_file":   "school_work_calendar_R9(right).csv",
     },
 ]
 
