@@ -121,7 +121,7 @@ user-editable:
 | metapop per-subpop CSV | `vaccines_<subpop>.csv` | `<df_attribute>_<subpop>.csv` |
 
 The default-named schedule keeps its historical names so existing configs,
-exported CSV bundles, and `examples/MA_vax/` keep working unchanged.
+exported CSV bundles, and `examples/MA_vax_2026_10/` keep working unchanged.
 
 Note the CSV **value column is always literally `daily_vaccines`**, for every
 schedule, regardless of what the schedule represents — it is fixed by the
@@ -284,5 +284,5 @@ generated under, which may differ from the current notebook's.
 
 **Workaround.** Re-export from the Export tab against the same config.
 
-**Currently affected.** `examples/MA_vax/run_simulations_MA_vax.py` predates
+**Currently affected.** `examples/MA_vax_2026_10/run_simulations_MA_vax.py` predates
 multi-`scheduled_exact` support and assumes a single schedule.

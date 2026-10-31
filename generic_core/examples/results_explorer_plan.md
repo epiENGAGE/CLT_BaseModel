@@ -8,7 +8,7 @@
 
 ## Context
 
-The Model Builder notebook (`generic_core/examples/model_builder_notebook.py`) produces simulation results two ways: interactively via its Analysis tab (exported as one big JSON by `_analysis_export_full`, e.g. `generic_core/examples/MA_vax/analysis_results_full_example.json`), or via the standalone `run_simulation.py` script from the Export tab (which writes `results.db`, SQLite). There is no tool for exploring either afterwards — the Analysis tab's plots exist only live in-session, and the only code that reads `results.db` back is a bespoke MA_vax-specific report script (`build_counterfactual_tables_from_db.py`).
+The Model Builder notebook (`generic_core/examples/model_builder_notebook.py`) produces simulation results two ways: interactively via its Analysis tab (exported as one big JSON by `_analysis_export_full`, e.g. `generic_core/examples/MA_vax_2026_10/analysis_results_full_example.json`), or via the standalone `run_simulation.py` script from the Export tab (which writes `results.db`, SQLite). There is no tool for exploring either afterwards — the Analysis tab's plots exist only live in-session, and the only code that reads `results.db` back is a bespoke MA_vax-specific report script (`build_counterfactual_tables_from_db.py`).
 
 The goal is a standalone marimo notebook — a generic results explorer — that loads results produced either way and lets the user build charts (time series, histogram, boxplot, stacked bar, scatter) with selectable aggregation (population total / subpop / age group / risk group / all, faceted) and scenario comparison (single, multiple, or each-vs-baseline), dynamically adding and removing chart blocks. It must generalize to any config-driven model, not just MA_vax.
 
@@ -130,7 +130,7 @@ Measured on `simulation_output_param_set_stochastic_subset/results.db` (6.2 GB, 
 ## Verification
 
 1. **Round-trip the new writer**: run a small Analysis-tab scenario set with "Keep full per-replicate results" on, export SQLite, and assert the resulting `results`/`results_full` row counts and a sampled set of values match what the equivalent JSON export produced (the two must be numerically identical — this is a format change, not a semantics change). Confirm a `meta` table is written and populated.
-2. **Fast explorer smoke test** (every iteration): open `generic_core/examples/MA_vax/simulation_output_deterministic/results.db` (116 MB, has no `meta`) — exercises the legacy/no-metadata fallback, and its single replicate exercises graceful CI degradation. Add and remove one of every chart type.
+2. **Fast explorer smoke test** (every iteration): open `generic_core/examples/MA_vax_2026_10/simulation_output_deterministic/results.db` (116 MB, has no `meta`) — exercises the legacy/no-metadata fallback, and its single replicate exercises graceful CI degradation. Add and remove one of every chart type.
 3. **Legacy JSON conversion**: point the explorer at `analysis_results_full_example.json` (1.4 GB), confirm the one-time conversion completes within bounded memory (measure peak RSS via `/usr/bin/time -l`) and that the resulting `.db` answers the same queries as the original.
 4. **Large-file performance**: against the 57 GB `results.db`, confirm discovery is instant with `meta` present (versus the measured 7.1s / 48.7s legacy scans), and audit every generated SQL string for its scenario/compartment filter before any `results_full` `GROUP BY`.
 5. **Unit tests** for `_results_explorer_lib.py` against a small hand-built fixture db — `discover_dims` with and without `meta`, and the paired vs unpaired comparison SQL against hand-computable numbers. Check `generic_core/tests/` for the existing layout and match it.
@@ -149,5 +149,5 @@ Measured on `simulation_output_param_set_stochastic_subset/results.db` (6.2 GB, 
 - `generic_core/examples/_nb_export.py:659-757` — authoritative `results.db` schema to mirror.
 - `generic_core/examples/_nb_analysis.py:1950` (`_analysis_plot_compartments`) — existing numpy median/CI logic the DuckDB queries replace; `:329-511` — `mo.ui.array` / `mo.state` callable-update idiom.
 - `generic_core/examples/_nb_shared.py` — `step_header` / `section_card` / `CLT_ACCENT`.
-- `generic_core/examples/MA_vax/build_counterfactual_tables_from_db.py:120-204` (`ResultsDB`) — existing sqlite→numpy query patterns, useful cross-check.
+- `generic_core/examples/MA_vax_2026_10/build_counterfactual_tables_from_db.py:120-204` (`ResultsDB`) — existing sqlite→numpy query patterns, useful cross-check.
 - `flu_instances/examples/flu_scenario_analysis.py:746+` — precedent for a standalone marimo notebook with dropdown-driven plots over its own results db (different schema; UI shape only).
