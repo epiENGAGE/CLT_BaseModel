@@ -1,0 +1,23 @@
+<section id="fit-params" data-transition="fade" style="background:#F7F6F2;color:#14213D;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px;display:flex;flex-direction:column;gap:48px">
+<h2 style="font-family:'Source Serif 4', Georgia, serif;font-size:72px;font-weight:600;line-height:1.1">Parameters to be fit</h2>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:32px">
+<div style="background:#FFFFFF;border:1px solid #DDE2E8;border-radius:16px;padding:40px;display:flex;flex-direction:column;gap:16px">
+<h3 style="font-size:36px;font-weight:600">Transmission</h3>
+<ul style="font-size:30px;line-height:1.5;color:#4A5568">
+<li>Baseline transmission rate β</li>
+<li>Humidity impact</li>
+<li>Initial seed scaling</li>
+<li>Time-varying multiplier m(t): 22 steps, one every 14 days</li>
+</ul>
+</div>
+<div style="background:#FFFFFF;border:1px solid #DDE2E8;border-radius:16px;padding:40px;display:flex;flex-direction:column;gap:16px">
+<h3 style="font-size:36px;font-weight:600">Severity and noise</h3>
+<ul style="font-size:30px;line-height:1.5;color:#4A5568">
+<li>Hospitalization-risk scaling, one per age group (0, 1-4, 5-12, 13-17, 18-49, 50-64, 65+)</li>
+<li>Negative binomial dispersion φ</li>
+</ul>
+</div>
+</div>
+<p style="font-size:28px;color:#4A5568">MCMC: 66 walkers × 4,000 steps; 1,700 burn-in, thinned every 200th → 715 posterior draws. Fit to daily admissions by age (Sep 1, 2025 – Jul 4, 2026) and end-of-season totals.</p>
+<aside>Target weights: 1 for the four youngest groups, 2 for 18-49 and 50-64, 5 for 65+, and 10 for the end-of-season totals by age. Posterior summaries are in the appendix.</aside>
+</section>

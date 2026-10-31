@@ -1,0 +1,2916 @@
+<!doctype html><html><head><meta charset='utf-8'><title>MA_vax report</title><style>
+body { font-family: -apple-system, Helvetica, Arial, sans-serif; font-size: 10.5pt; line-height: 1.45;
+       color: #1a1a1a; background: #fff; max-width: 980px; margin: 0 auto; padding: 24px; }
+h1 { font-size: 22pt; } h2 { font-size: 16pt; border-bottom: 1px solid #ccc; padding-bottom: 4px;
+     margin-top: 28px; page-break-after: avoid; } h3 { font-size: 12.5pt; page-break-after: avoid; }
+table { border-collapse: collapse; margin: 8px 0 14px; font-size: 8.5pt; page-break-inside: avoid; }
+th, td { border: 1px solid #d0d0d0; padding: 3px 6px; } th { background: #f2f2f2; }
+td { font-variant-numeric: tabular-nums; }
+img { max-width: 100%; display: block; margin: 8px auto 2px; page-break-inside: avoid; }
+p > em:only-child { display: block; text-align: center; font-size: 9pt; color: #555; }
+pre { background: #f6f6f6; padding: 8px; font-size: 8.5pt; overflow-x: auto; }
+code { font-size: 90%; }
+@page { size: Letter; margin: 14mm 12mm; }
+</style></head><body><h1>MA_vax: vaccination-impact analysis report</h1>
+<p>Massachusetts, 2025–2026 influenza season (2025-09-01 to 2026-07-04, 307 days). Age-structured SEIR model with a parallel vaccinated arm, calibrated to daily hospital admissions by age group with Bayesian MCMC. This report documents the model, the fit and the vaccination-impact analysis, including scenarios that raise vaccination coverage to 50–70% or cut the season's doses by 5–20%.</p>
+<p>Every count is a <strong>hospital admission over the whole 307-day season</strong> unless stated otherwise. Intervals are 95% intervals across 715 simulations, one per posterior parameter draw.</p>
+<h2>Summary</h2>
+<ul>
+<li>The fitted baseline produces <strong>8,264</strong> [7,714 – 8,789] hospitalizations, against <strong>17,709</strong> with no vaccination: the 38.6% overall coverage achieved averts <strong>9,459 [7,293 – 11,426]</strong> hospitalizations (<strong>53.4% [47.1% – 58.1%]</strong>).</li>
+<li>Raising every age group to a coverage target (groups already above it unchanged) averts 2,446 [2,060 – 2,731] more at 50%, 3,146 [2,697 – 3,461] more at 55%, 3,778 [3,298 – 4,122] more at 60%, 4,368 [3,894 – 4,744] more at 65%, 4,898 [4,427 – 5,296] more at 70% (vs. baseline).</li>
+<li>Removing doses from every age group adds 378 [311 – 430] at −5%, 767 [627 – 875] at −10%, 1,166 [949 – 1,333] at −15%, 1,574 [1,276 – 1,809] at −20% hospitalizations.</li>
+<li>Per dose, vaccinating school-age groups prevents the most hospitalizations across the population (Table S.A.2: 13-17 1,070 and 5-12 1,030 per 100,000 doses), mostly through indirect protection of 65+.</li>
+</ul>
+<hr />
+<h2>1. Model structure</h2>
+<h3>1.1 Compartments</h3>
+<p>Nine compartments, each stratified by 7 age groups (<code>0</code>, <code>1-4</code>, <code>5-12</code>, <code>13-17</code>, <code>18-49</code>, <code>50-64</code>, <code>65+</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Compartment</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>S</code></td>
+<td>Susceptible, unvaccinated</td>
+</tr>
+<tr>
+<td><code>E</code></td>
+<td>Exposed (latent), unvaccinated</td>
+</tr>
+<tr>
+<td><code>I</code></td>
+<td>Infectious, unvaccinated</td>
+</tr>
+<tr>
+<td><code>R</code></td>
+<td>Recovered (either arm)</td>
+</tr>
+<tr>
+<td><code>SV</code></td>
+<td>Susceptible, vaccinated</td>
+</tr>
+<tr>
+<td><code>EV</code></td>
+<td>Exposed (latent), vaccinated</td>
+</tr>
+<tr>
+<td><code>IV</code></td>
+<td>Infectious, vaccinated</td>
+</tr>
+<tr>
+<td><code>H</code></td>
+<td>Hospitalized (either arm)</td>
+</tr>
+<tr>
+<td><code>D</code></td>
+<td>Dead (either arm)</td>
+</tr>
+</tbody>
+</table>
+<p><img alt="Model structure" src="../figures/static/model_diagram.png" /></p>
+<p><em>Model structure</em></p>
+<p>The vaccinated arm (<code>SV → EV → IV → H/R</code>) mirrors the unvaccinated arm (<code>S → E → I → H/R</code>) with its own susceptibility and severity parameters. <code>H</code>, <code>R</code> and <code>D</code> are shared, so vaccination history is not tracked once hospitalized or recovered.</p>
+<h3>1.2 Force of infection</h3>
+<p>Contacts come from fixed age × age contact matrices (Mistry et al. 2021), with school and work contacts removed on non-school / non-work days:</p>
+<pre><code>C(t) = total_C − (1 − is_school(t))·school_C − (1 − is_work(t))·work_C
+beta_adj(t) = beta_baseline · m(t) · (1 + humidity_impact · exp(−180 · humidity(t)))
+wtd_inf_prop(t) = (I·I_relative_infectiousness + IV·IV_relative_infectiousness) / population
+foi(t) = beta_adj(t) · (C(t) @ wtd_inf_prop(t))
+S_to_E   = foi(t) · relative_suscept   · S
+SV_to_EV = foi(t) · vax_susceptibility · SV
+</code></pre>
+<p><code>m(t)</code> is a smoothly time-varying transmission multiplier (§2.3) that absorbs behavioural and seasonal variation the mechanistic terms do not capture. <code>1 − vax_susceptibility</code> is the vaccine effectiveness (VE) against infection.</p>
+<h3>1.3 Progression, hospitalization, death</h3>
+<pre><code>E_to_I  = E_to_I_rate · E                 EV_to_IV = EV_to_IV_rate · EV
+I_to_H  = I_out_rate · I_to_H_prop · I     IV_to_H  = I_out_rate · IV_to_H_prop · IV
+I_to_R  = I_out_rate · (1−I_to_H_prop)·I   IV_to_R  = I_out_rate · (1−IV_to_H_prop)·IV
+H_to_D  = H_out_rate · H_to_D_prop · H
+H_to_R  = H_out_rate · (1−H_to_D_prop)·H
+</code></pre>
+<h3>1.4 Vaccination flow</h3>
+<p>Daily doses (an age-specific share of the population, applied 14 days after the dose date to represent the delay to immunity) move an exact count from <code>S</code> to <code>SV</code> each day, capped at what remains in <code>S</code>:</p>
+<pre><code>S_to_SV(t) = min(round(vax_prop(t − delay) · (S + SV)), S)
+</code></pre>
+<p>A dose scheduled for someone who has already been infected is not delivered by the model (the cap). Those doses are still bought and given in reality, so every "per 100,000 doses" figure divides by <strong>scheduled</strong> doses (appendix B).</p>
+<h3>1.5 Simulation and uncertainty</h3>
+<p>Explicit Euler integration with 7 sub-steps per day. Every interval comes from a <strong>posterior parameter ensemble</strong>: one deterministic run per posterior draw (715 draws), the same draws for every scenario, so differences between scenarios are paired. Intervals therefore reflect calibration uncertainty, not epidemic-process noise.</p>
+<hr />
+<h2>2. Parameters</h2>
+<h3>2.1 Fixed scalar parameters</h3>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th style="text-align: right;">Value</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>relative_suscept</code></td>
+<td style="text-align: right;">1.0</td>
+<td>Susceptibility multiplier, unvaccinated arm</td>
+</tr>
+<tr>
+<td><code>I_relative_infectiousness</code></td>
+<td style="text-align: right;">1.0</td>
+<td>Infectiousness weight, unvaccinated <code>I</code></td>
+</tr>
+<tr>
+<td><code>IV_relative_infectiousness</code></td>
+<td style="text-align: right;">1.0</td>
+<td>Infectiousness weight, vaccinated <code>IV</code></td>
+</tr>
+<tr>
+<td><code>E_to_I_rate</code></td>
+<td style="text-align: right;">0.5</td>
+<td>Latent → infectious rate (/day)</td>
+</tr>
+<tr>
+<td><code>EV_to_IV_rate</code></td>
+<td style="text-align: right;">0.5</td>
+<td>Same, vaccinated arm (/day)</td>
+</tr>
+<tr>
+<td><code>I_out_rate</code></td>
+<td style="text-align: right;">0.333</td>
+<td>Infectious-period exit rate (/day)</td>
+</tr>
+<tr>
+<td><code>H_out_rate</code></td>
+<td style="text-align: right;">0.17</td>
+<td>Hospital exit rate (/day)</td>
+</tr>
+<tr>
+<td><code>vax_transfer_delay_days</code></td>
+<td style="text-align: right;">14.0</td>
+<td>Days from dose to modelled immunity</td>
+</tr>
+</tbody>
+</table>
+<h3>2.2 Age-stratified parameters</h3>
+<table>
+<thead>
+<tr>
+<th>Age group</th>
+<th style="text-align: right;">Population</th>
+<th style="text-align: right;">Hosp. risk given infection¹</th>
+<th style="text-align: right;">Hosp. risk given breakthrough¹</th>
+<th style="text-align: right;">Death risk given hosp.</th>
+<th style="text-align: right;">Residual susceptibility if vaccinated</th>
+<th style="text-align: right;">Initial infections seeded</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td style="text-align: right;">68,723</td>
+<td style="text-align: right;">1.229% (0.899–1.388%) [0.697%]</td>
+<td style="text-align: right;">1.121% (0.820–1.266%) [0.636%]</td>
+<td style="text-align: right;">1.74%</td>
+<td style="text-align: right;">0.57</td>
+<td style="text-align: right;">2</td>
+</tr>
+<tr>
+<td>1-4</td>
+<td style="text-align: right;">287,051</td>
+<td style="text-align: right;">1.008% (0.633–1.350%) [0.697%]</td>
+<td style="text-align: right;">0.919% (0.577–1.231%) [0.636%]</td>
+<td style="text-align: right;">1.74%</td>
+<td style="text-align: right;">0.57</td>
+<td style="text-align: right;">8</td>
+</tr>
+<tr>
+<td>5-12</td>
+<td style="text-align: right;">625,439</td>
+<td style="text-align: right;">0.354% (0.219–0.505%) [0.274%]</td>
+<td style="text-align: right;">0.323% (0.200–0.461%) [0.250%]</td>
+<td style="text-align: right;">1.17%</td>
+<td style="text-align: right;">0.57</td>
+<td style="text-align: right;">18</td>
+</tr>
+<tr>
+<td>13-17</td>
+<td style="text-align: right;">406,983</td>
+<td style="text-align: right;">0.186% (0.116–0.277%) [0.274%]</td>
+<td style="text-align: right;">0.170% (0.106–0.253%) [0.250%]</td>
+<td style="text-align: right;">1.17%</td>
+<td style="text-align: right;">0.57</td>
+<td style="text-align: right;">12</td>
+</tr>
+<tr>
+<td>18-49</td>
+<td style="text-align: right;">3,112,693</td>
+<td style="text-align: right;">0.215% (0.138–0.322%) [0.561%]</td>
+<td style="text-align: right;">0.196% (0.126–0.293%) [0.511%]</td>
+<td style="text-align: right;">2.63%</td>
+<td style="text-align: right;">0.79</td>
+<td style="text-align: right;">89</td>
+</tr>
+<tr>
+<td>50-64</td>
+<td style="text-align: right;">1,351,323</td>
+<td style="text-align: right;">0.647% (0.407–0.935%) [1.060%]</td>
+<td style="text-align: right;">0.589% (0.371–0.852%) [0.966%]</td>
+<td style="text-align: right;">6.30%</td>
+<td style="text-align: right;">0.79</td>
+<td style="text-align: right;">39</td>
+</tr>
+<tr>
+<td>65+</td>
+<td style="text-align: right;">1,420,722</td>
+<td style="text-align: right;">5.251% (3.439–7.388%) [9.091%]</td>
+<td style="text-align: right;">3.623% (2.373–5.098%) [6.273%]</td>
+<td style="text-align: right;">7.99%</td>
+<td style="text-align: right;">1.00</td>
+<td style="text-align: right;">41</td>
+</tr>
+</tbody>
+</table>
+<p>¹ Fitted: pre-fit value × the age group's fitted multiplier (§2.4), posterior mean (95% interval), pre-fit value in brackets. Both columns share the multiplier, so VE against hospitalization given infection is unchanged by the fit. Seeds are pre-fit values, scaled by one fitted multiplier. A residual susceptibility of 1.00 (65+) means vaccination blocks no infection there: it only reduces severity, and vaccinating 65+ has no indirect effect on other age groups.</p>
+<h3>2.3 Fitting method</h3>
+<p>Affine-invariant ensemble MCMC (64 walkers, 4000 iterations each) over the 307-day target window.</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Prior</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>beta_baseline</code></td>
+<td>Uniform(0.015, 0.06)</td>
+<td>Baseline transmission rate</td>
+</tr>
+<tr>
+<td><code>humidity_impact</code></td>
+<td>Uniform(0, 1)</td>
+<td>Strength of humidity forcing</td>
+</tr>
+<tr>
+<td>Initial-seed multiplier</td>
+<td>Log-uniform(0.1, 10.0)</td>
+<td>Multiplies the age-specific seed counts</td>
+</tr>
+<tr>
+<td>Hospitalization-risk multiplier (× 7)</td>
+<td>Uniform(0.1, 2.0)</td>
+<td>Multiplies both hospitalization-risk columns of one age group</td>
+</tr>
+<tr>
+<td><code>m(t)</code> log-increments (× 22)</td>
+<td>Normal(0, 0.25)</td>
+<td>Random-walk steps in log-transmission, knots every 14 days</td>
+</tr>
+<tr>
+<td><code>phi</code></td>
+<td>—</td>
+<td>Negative-binomial dispersion (likelihood only)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Likelihood</strong>: negative-binomial (NB2), jointly over 8 targets: daily admissions for each age group (weights 0_0: 1, 1_4: 1, 5_12: 1, 13_17: 1, 18_49: 2, 50_64: 2, 65plus: 5) and end-of-season cumulative admissions by age (weight 10).</p>
+<p><strong>Posterior sample</strong>: first 1700 iterations discarded, then every 200th kept, giving <strong>715 draws</strong>. "Best" is the draw with the highest log-posterior.</p>
+<h3>2.4 Fitted parameters</h3>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th style="text-align: right;">Posterior mean</th>
+<th style="text-align: right;">5%</th>
+<th style="text-align: right;">95%</th>
+<th style="text-align: right;">"Best"</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>beta_baseline</td>
+<td style="text-align: right;">0.0334</td>
+<td style="text-align: right;">0.0286</td>
+<td style="text-align: right;">0.0396</td>
+<td style="text-align: right;">0.0295</td>
+</tr>
+<tr>
+<td>humidity_impact</td>
+<td style="text-align: right;">0.35</td>
+<td style="text-align: right;">0.0463</td>
+<td style="text-align: right;">0.71</td>
+<td style="text-align: right;">0.40</td>
+</tr>
+<tr>
+<td>Initial-seed multiplier</td>
+<td style="text-align: right;">3.96</td>
+<td style="text-align: right;">1.43</td>
+<td style="text-align: right;">7.30</td>
+<td style="text-align: right;">3.27</td>
+</tr>
+<tr>
+<td>Hospitalization-risk multiplier – 0</td>
+<td style="text-align: right;">1.76</td>
+<td style="text-align: right;">1.39</td>
+<td style="text-align: right;">1.98</td>
+<td style="text-align: right;">1.91</td>
+</tr>
+<tr>
+<td>Hospitalization-risk multiplier – 1-4</td>
+<td style="text-align: right;">1.45</td>
+<td style="text-align: right;">0.97</td>
+<td style="text-align: right;">1.89</td>
+<td style="text-align: right;">1.35</td>
+</tr>
+<tr>
+<td>Hospitalization-risk multiplier – 5-12</td>
+<td style="text-align: right;">1.29</td>
+<td style="text-align: right;">0.87</td>
+<td style="text-align: right;">1.77</td>
+<td style="text-align: right;">1.04</td>
+</tr>
+<tr>
+<td>Hospitalization-risk multiplier – 13-17</td>
+<td style="text-align: right;">0.68</td>
+<td style="text-align: right;">0.45</td>
+<td style="text-align: right;">0.95</td>
+<td style="text-align: right;">0.58</td>
+</tr>
+<tr>
+<td>Hospitalization-risk multiplier – 18-49</td>
+<td style="text-align: right;">0.38</td>
+<td style="text-align: right;">0.27</td>
+<td style="text-align: right;">0.53</td>
+<td style="text-align: right;">0.29</td>
+</tr>
+<tr>
+<td>Hospitalization-risk multiplier – 50-64</td>
+<td style="text-align: right;">0.61</td>
+<td style="text-align: right;">0.42</td>
+<td style="text-align: right;">0.83</td>
+<td style="text-align: right;">0.55</td>
+</tr>
+<tr>
+<td>Hospitalization-risk multiplier – 65+</td>
+<td style="text-align: right;">0.58</td>
+<td style="text-align: right;">0.41</td>
+<td style="text-align: right;">0.78</td>
+<td style="text-align: right;">0.52</td>
+</tr>
+<tr>
+<td>phi (NB dispersion)</td>
+<td style="text-align: right;">105</td>
+<td style="text-align: right;">27</td>
+<td style="text-align: right;">313</td>
+<td style="text-align: right;">57</td>
+</tr>
+</tbody>
+</table>
+<p><img alt="Humidity factor, fitted m(t) and their product (posterior median and 95% band)" src="../figures/output/transmission_multiplier.png" /></p>
+<p><em>Humidity factor, fitted m(t) and their product (posterior median and 95% band)</em></p>
+<h3>2.5 Vaccination coverage</h3>
+<p>Cumulative share of each age group vaccinated by the schedule over the simulated season (after the 14-day delay):</p>
+<table>
+<thead>
+<tr>
+<th>Age group</th>
+<th style="text-align: right;">Population</th>
+<th style="text-align: right;">Scheduled coverage</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td style="text-align: right;">68,723</td>
+<td style="text-align: right;">50.6%</td>
+</tr>
+<tr>
+<td>1-4</td>
+<td style="text-align: right;">287,051</td>
+<td style="text-align: right;">47.8%</td>
+</tr>
+<tr>
+<td>5-12</td>
+<td style="text-align: right;">625,439</td>
+<td style="text-align: right;">39.5%</td>
+</tr>
+<tr>
+<td>13-17</td>
+<td style="text-align: right;">406,983</td>
+<td style="text-align: right;">37.6%</td>
+</tr>
+<tr>
+<td>18-49</td>
+<td style="text-align: right;">3,112,693</td>
+<td style="text-align: right;">27.6%</td>
+</tr>
+<tr>
+<td>50-64</td>
+<td style="text-align: right;">1,351,323</td>
+<td style="text-align: right;">38.1%</td>
+</tr>
+<tr>
+<td>65+</td>
+<td style="text-align: right;">1,420,722</td>
+<td style="text-align: right;">60.8%</td>
+</tr>
+<tr>
+<td><strong>All</strong></td>
+<td style="text-align: right;"><strong>7,272,934</strong></td>
+<td style="text-align: right;"><strong>38.6%</strong></td>
+</tr>
+</tbody>
+</table>
+<p><img alt="Cumulative scheduled vaccination coverage" src="../figures/output/vax_coverage_cumulative.png" /></p>
+<p><em>Cumulative scheduled vaccination coverage</em></p>
+<hr />
+<h2>3. Vaccination impact of the 2025–2026 programme</h2>
+<p>The fitted baseline produces a median of <strong>8,264</strong> hospitalizations across all ages, against <strong>17,709</strong> with no vaccination.</p>
+<p><img alt="Daily hospitalizations: baseline, infection protection only, no vaccination" src="../figures/output/ts_baseline_infection_protection_no_vax.png" /></p>
+<p><em>Daily hospitalizations: baseline, infection protection only, no vaccination</em></p>
+<h3>Table S.A.1 — Hospitalizations averted, infection vs. severity protection</h3>
+<p><strong>Infection protection</strong> (no vaccination → VE against infection only)</p>
+<table>
+<thead>
+<tr>
+<th>Age group</th>
+<th style="text-align: right;">Hospitalizations averted</th>
+<th style="text-align: right;">% averted</th>
+<th style="text-align: right;">Per 100,000 population</th>
+<th style="text-align: right;">Per 100,000 doses</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td style="text-align: right;">92 [66 – 108]</td>
+<td style="text-align: right;">53.4% [46.9% – 58.1%]</td>
+<td style="text-align: right;">133.5 [95.5 – 156.5]</td>
+<td style="text-align: right;">264.0 [188.9 – 309.5]</td>
+</tr>
+<tr>
+<td>1-4</td>
+<td style="text-align: right;">368 [256 – 470]</td>
+<td style="text-align: right;">54.1% [47.5% – 59.0%]</td>
+<td style="text-align: right;">128.3 [89.1 – 163.7]</td>
+<td style="text-align: right;">268.6 [186.6 – 342.7]</td>
+</tr>
+<tr>
+<td>5-12</td>
+<td style="text-align: right;">367 [237 – 496]</td>
+<td style="text-align: right;">50.7% [43.2% – 56.4%]</td>
+<td style="text-align: right;">58.6 [37.9 – 79.3]</td>
+<td style="text-align: right;">148.2 [95.8 – 200.5]</td>
+</tr>
+<tr>
+<td>13-17</td>
+<td style="text-align: right;">125 [82 – 175]</td>
+<td style="text-align: right;">49.5% [41.8% – 55.3%]</td>
+<td style="text-align: right;">30.7 [20.2 – 43.1]</td>
+<td style="text-align: right;">81.6 [53.7 – 114.6]</td>
+</tr>
+<tr>
+<td>18-49</td>
+<td style="text-align: right;">875 [620 – 1,229]</td>
+<td style="text-align: right;">46.2% [38.5% – 52.0%]</td>
+<td style="text-align: right;">28.1 [19.9 – 39.5]</td>
+<td style="text-align: right;">102.0 [72.3 – 143.3]</td>
+</tr>
+<tr>
+<td>50-64</td>
+<td style="text-align: right;">1,061 [735 – 1,408]</td>
+<td style="text-align: right;">48.0% [40.7% – 53.5%]</td>
+<td style="text-align: right;">78.5 [54.4 – 104.2]</td>
+<td style="text-align: right;">205.9 [142.7 – 273.3]</td>
+</tr>
+<tr>
+<td>65+</td>
+<td style="text-align: right;">5,401 [3,951 – 6,760]</td>
+<td style="text-align: right;">46.0% [38.8% – 51.3%]</td>
+<td style="text-align: right;">380.2 [278.1 – 475.8]</td>
+<td style="text-align: right;">624.8 [457.1 – 782.0]</td>
+</tr>
+<tr>
+<td><strong>All</strong></td>
+<td style="text-align: right;"><strong>8,306 [6,166 – 10,261]</strong></td>
+<td style="text-align: right;"><strong>46.9% [39.7% – 52.2%]</strong></td>
+<td style="text-align: right;"><strong>114.2 [84.8 – 141.1]</strong></td>
+<td style="text-align: right;"><strong>295.6 [219.5 – 365.3]</strong></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Severity protection</strong> (adding VE against hospitalization given infection)</p>
+<table>
+<thead>
+<tr>
+<th>Age group</th>
+<th style="text-align: right;">Hospitalizations averted</th>
+<th style="text-align: right;">% averted</th>
+<th style="text-align: right;">Per 100,000 population</th>
+<th style="text-align: right;">Per 100,000 doses</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td style="text-align: right;">2 [1 – 2]</td>
+<td style="text-align: right;">0.9% [0.8% – 1.0%]</td>
+<td style="text-align: right;">2.2 [1.4 – 3.2]</td>
+<td style="text-align: right;">4.4 [2.7 – 6.3]</td>
+</tr>
+<tr>
+<td>1-4</td>
+<td style="text-align: right;">7 [5 – 9]</td>
+<td style="text-align: right;">1.1% [1.0% – 1.3%]</td>
+<td style="text-align: right;">2.6 [1.9 – 3.3]</td>
+<td style="text-align: right;">5.4 [3.9 – 6.8]</td>
+</tr>
+<tr>
+<td>5-12</td>
+<td style="text-align: right;">7 [5 – 9]</td>
+<td style="text-align: right;">0.9% [0.8% – 1.1%]</td>
+<td style="text-align: right;">1.1 [0.8 – 1.4]</td>
+<td style="text-align: right;">2.7 [1.9 – 3.5]</td>
+</tr>
+<tr>
+<td>13-17</td>
+<td style="text-align: right;">2 [2 – 3]</td>
+<td style="text-align: right;">0.9% [0.8% – 1.0%]</td>
+<td style="text-align: right;">0.5 [0.4 – 0.7]</td>
+<td style="text-align: right;">1.4 [1.0 – 1.9]</td>
+</tr>
+<tr>
+<td>18-49</td>
+<td style="text-align: right;">18 [14 – 21]</td>
+<td style="text-align: right;">0.9% [0.8% – 1.1%]</td>
+<td style="text-align: right;">0.6 [0.5 – 0.7]</td>
+<td style="text-align: right;">2.1 [1.7 – 2.5]</td>
+</tr>
+<tr>
+<td>50-64</td>
+<td style="text-align: right;">29 [24 – 36]</td>
+<td style="text-align: right;">1.3% [1.2% – 1.5%]</td>
+<td style="text-align: right;">2.1 [1.8 – 2.6]</td>
+<td style="text-align: right;">5.6 [4.6 – 6.9]</td>
+</tr>
+<tr>
+<td>65+</td>
+<td style="text-align: right;">1,092 [990 – 1,186]</td>
+<td style="text-align: right;">9.3% [8.4% – 10.5%]</td>
+<td style="text-align: right;">76.9 [69.7 – 83.5]</td>
+<td style="text-align: right;">126.4 [114.5 – 137.2]</td>
+</tr>
+<tr>
+<td><strong>All</strong></td>
+<td style="text-align: right;"><strong>1,156 [1,054 – 1,253]</strong></td>
+<td style="text-align: right;"><strong>6.5% [5.8% – 7.4%]</strong></td>
+<td style="text-align: right;"><strong>15.9 [14.5 – 17.2]</strong></td>
+<td style="text-align: right;"><strong>41.2 [37.5 – 44.6]</strong></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Total</strong> (no vaccination → baseline)</p>
+<table>
+<thead>
+<tr>
+<th>Age group</th>
+<th style="text-align: right;">Hospitalizations averted</th>
+<th style="text-align: right;">% averted</th>
+<th style="text-align: right;">Per 100,000 population</th>
+<th style="text-align: right;">Per 100,000 doses</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td style="text-align: right;">93 [67 – 110]</td>
+<td style="text-align: right;">54.2% [47.9% – 58.9%]</td>
+<td style="text-align: right;">135.7 [97.2 – 159.4]</td>
+<td style="text-align: right;">268.4 [192.2 – 315.2]</td>
+</tr>
+<tr>
+<td>1-4</td>
+<td style="text-align: right;">376 [262 – 479]</td>
+<td style="text-align: right;">55.2% [48.7% – 60.0%]</td>
+<td style="text-align: right;">130.8 [91.2 – 166.9]</td>
+<td style="text-align: right;">274.0 [190.9 – 349.6]</td>
+</tr>
+<tr>
+<td>5-12</td>
+<td style="text-align: right;">373 [242 – 504]</td>
+<td style="text-align: right;">51.6% [44.3% – 57.2%]</td>
+<td style="text-align: right;">59.7 [38.7 – 80.6]</td>
+<td style="text-align: right;">151.0 [98.0 – 203.9]</td>
+</tr>
+<tr>
+<td>13-17</td>
+<td style="text-align: right;">127 [84 – 178]</td>
+<td style="text-align: right;">50.3% [42.8% – 56.0%]</td>
+<td style="text-align: right;">31.2 [20.6 – 43.7]</td>
+<td style="text-align: right;">82.9 [54.8 – 116.2]</td>
+</tr>
+<tr>
+<td>18-49</td>
+<td style="text-align: right;">892 [635 – 1,250]</td>
+<td style="text-align: right;">47.2% [39.6% – 52.8%]</td>
+<td style="text-align: right;">28.7 [20.4 – 40.2]</td>
+<td style="text-align: right;">104.1 [74.0 – 145.8]</td>
+</tr>
+<tr>
+<td>50-64</td>
+<td style="text-align: right;">1,089 [762 – 1,440]</td>
+<td style="text-align: right;">49.3% [42.2% – 54.6%]</td>
+<td style="text-align: right;">80.6 [56.4 – 106.5]</td>
+<td style="text-align: right;">211.4 [147.9 – 279.4]</td>
+</tr>
+<tr>
+<td>65+</td>
+<td style="text-align: right;">6,473 [5,013 – 7,904]</td>
+<td style="text-align: right;">55.3% [49.4% – 59.7%]</td>
+<td style="text-align: right;">455.6 [352.9 – 556.3]</td>
+<td style="text-align: right;">748.8 [579.9 – 914.4]</td>
+</tr>
+<tr>
+<td><strong>All</strong></td>
+<td style="text-align: right;"><strong>9,459 [7,293 – 11,426]</strong></td>
+<td style="text-align: right;"><strong>53.4% [47.1% – 58.1%]</strong></td>
+<td style="text-align: right;"><strong>130.1 [100.3 – 157.1]</strong></td>
+<td style="text-align: right;"><strong>336.7 [259.6 – 406.7]</strong></td>
+</tr>
+</tbody>
+</table>
+<h3>Table S.A.2 — Hospitalizations averted by age group vaccinated</h3>
+<p>Each column vaccinates one age group only (all others unvaccinated) and compares with no vaccination; <code>All</code> is the full baseline schedule. Rows are the age group in which hospitalizations are counted, so off-diagonal cells are indirect protection.</p>
+<p><strong>Hospitalizations averted</strong></p>
+<table>
+<thead>
+<tr>
+<th>Counted in</th>
+<th style="text-align: right;">0 vacc.</th>
+<th style="text-align: right;">1-4 vacc.</th>
+<th style="text-align: right;">5-12 vacc.</th>
+<th style="text-align: right;">13-17 vacc.</th>
+<th style="text-align: right;">18-49 vacc.</th>
+<th style="text-align: right;">50-64 vacc.</th>
+<th style="text-align: right;">65+ vacc.</th>
+<th style="text-align: right;">All vacc.</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td style="text-align: right;">25 [17 – 31]</td>
+<td style="text-align: right;">8 [6 – 9]</td>
+<td style="text-align: right;">25 [18 – 29]</td>
+<td style="text-align: right;">15 [11 – 17]</td>
+<td style="text-align: right;">25 [18 – 28]</td>
+<td style="text-align: right;">11 [8 – 13]</td>
+<td style="text-align: right;">0 [-0 – 0]</td>
+<td style="text-align: right;">93 [67 – 110]</td>
+</tr>
+<tr>
+<td>1-4</td>
+<td style="text-align: right;">3 [2 – 3]</td>
+<td style="text-align: right;">142 [103 – 180]</td>
+<td style="text-align: right;">103 [68 – 135]</td>
+<td style="text-align: right;">57 [37 – 76]</td>
+<td style="text-align: right;">90 [59 – 117]</td>
+<td style="text-align: right;">41 [27 – 54]</td>
+<td style="text-align: right;">0 [-0 – 0]</td>
+<td style="text-align: right;">376 [262 – 479]</td>
+</tr>
+<tr>
+<td>5-12</td>
+<td style="text-align: right;">2 [1 – 3]</td>
+<td style="text-align: right;">25 [16 – 35]</td>
+<td style="text-align: right;">201 [133 – 269]</td>
+<td style="text-align: right;">57 [35 – 81]</td>
+<td style="text-align: right;">79 [47 – 112]</td>
+<td style="text-align: right;">37 [22 – 52]</td>
+<td style="text-align: right;">0 [-0 – 0]</td>
+<td style="text-align: right;">373 [242 – 504]</td>
+</tr>
+<tr>
+<td>13-17</td>
+<td style="text-align: right;">1 [0 – 1]</td>
+<td style="text-align: right;">7 [4 – 11]</td>
+<td style="text-align: right;">30 [19 – 45]</td>
+<td style="text-align: right;">57 [38 – 79]</td>
+<td style="text-align: right;">27 [17 – 41]</td>
+<td style="text-align: right;">14 [8 – 20]</td>
+<td style="text-align: right;">0 [-0 – 0]</td>
+<td style="text-align: right;">127 [84 – 178]</td>
+</tr>
+<tr>
+<td>18-49</td>
+<td style="text-align: right;">6 [4 – 9]</td>
+<td style="text-align: right;">66 [46 – 96]</td>
+<td style="text-align: right;">243 [164 – 357]</td>
+<td style="text-align: right;">159 [107 – 236]</td>
+<td style="text-align: right;">349 [252 – 487]</td>
+<td style="text-align: right;">123 [85 – 177]</td>
+<td style="text-align: right;">0 [-0 – 0]</td>
+<td style="text-align: right;">892 [635 – 1,250]</td>
+</tr>
+<tr>
+<td>50-64</td>
+<td style="text-align: right;">7 [5 – 9]</td>
+<td style="text-align: right;">75 [49 – 102]</td>
+<td style="text-align: right;">286 [185 – 394]</td>
+<td style="text-align: right;">194 [125 – 267]</td>
+<td style="text-align: right;">300 [198 – 409]</td>
+<td style="text-align: right;">340 [249 – 441]</td>
+<td style="text-align: right;">0 [-0 – 0]</td>
+<td style="text-align: right;">1,089 [762 – 1,440]</td>
+</tr>
+<tr>
+<td>65+</td>
+<td style="text-align: right;">41 [30 – 53]</td>
+<td style="text-align: right;">439 [313 – 563]</td>
+<td style="text-align: right;">1,652 [1,153 – 2,128]</td>
+<td style="text-align: right;">1,095 [760 – 1,415]</td>
+<td style="text-align: right;">1,656 [1,185 – 2,120]</td>
+<td style="text-align: right;">898 [653 – 1,142]</td>
+<td style="text-align: right;">2,008 [1,707 – 2,321]</td>
+<td style="text-align: right;">6,473 [5,013 – 7,904]</td>
+</tr>
+<tr>
+<td><strong>All</strong></td>
+<td style="text-align: right;"><strong>86 [71 – 98]</strong></td>
+<td style="text-align: right;"><strong>763 [568 – 944]</strong></td>
+<td style="text-align: right;"><strong>2,546 [1,801 – 3,247]</strong></td>
+<td style="text-align: right;"><strong>1,637 [1,151 – 2,112]</strong></td>
+<td style="text-align: right;"><strong>2,530 [1,830 – 3,223]</strong></td>
+<td style="text-align: right;"><strong>1,467 [1,091 – 1,853]</strong></td>
+<td style="text-align: right;"><strong>2,008 [1,707 – 2,321]</strong></td>
+<td style="text-align: right;"><strong>9,459 [7,293 – 11,426]</strong></td>
+</tr>
+</tbody>
+</table>
+<p><strong>% reduction</strong></p>
+<table>
+<thead>
+<tr>
+<th>Counted in</th>
+<th style="text-align: right;">0 vacc.</th>
+<th style="text-align: right;">1-4 vacc.</th>
+<th style="text-align: right;">5-12 vacc.</th>
+<th style="text-align: right;">13-17 vacc.</th>
+<th style="text-align: right;">18-49 vacc.</th>
+<th style="text-align: right;">50-64 vacc.</th>
+<th style="text-align: right;">65+ vacc.</th>
+<th style="text-align: right;">All vacc.</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td style="text-align: right;">14.8% [14.3% – 15.3%]</td>
+<td style="text-align: right;">4.4% [3.7% – 5.0%]</td>
+<td style="text-align: right;">14.5% [11.7% – 16.8%]</td>
+<td style="text-align: right;">8.9% [7.1% – 10.4%]</td>
+<td style="text-align: right;">14.3% [11.9% – 16.5%]</td>
+<td style="text-align: right;">6.5% [5.3% – 7.5%]</td>
+<td style="text-align: right;">0.0% [-0.0% – 0.0%]</td>
+<td style="text-align: right;">54.2% [47.9% – 58.9%]</td>
+</tr>
+<tr>
+<td>1-4</td>
+<td style="text-align: right;">0.4% [0.3% – 0.5%]</td>
+<td style="text-align: right;">20.9% [19.9% – 21.9%]</td>
+<td style="text-align: right;">15.2% [12.3% – 17.6%]</td>
+<td style="text-align: right;">8.4% [6.6% – 9.9%]</td>
+<td style="text-align: right;">13.2% [10.7% – 15.3%]</td>
+<td style="text-align: right;">6.0% [4.8% – 7.0%]</td>
+<td style="text-align: right;">0.0% [-0.0% – 0.0%]</td>
+<td style="text-align: right;">55.2% [48.7% – 60.0%]</td>
+</tr>
+<tr>
+<td>5-12</td>
+<td style="text-align: right;">0.3% [0.2% – 0.3%]</td>
+<td style="text-align: right;">3.5% [2.8% – 4.1%]</td>
+<td style="text-align: right;">27.7% [24.5% – 30.4%]</td>
+<td style="text-align: right;">7.9% [6.1% – 9.5%]</td>
+<td style="text-align: right;">10.9% [8.5% – 13.1%]</td>
+<td style="text-align: right;">5.1% [4.0% – 6.2%]</td>
+<td style="text-align: right;">0.0% [-0.0% – 0.0%]</td>
+<td style="text-align: right;">51.6% [44.3% – 57.2%]</td>
+</tr>
+<tr>
+<td>13-17</td>
+<td style="text-align: right;">0.3% [0.2% – 0.3%]</td>
+<td style="text-align: right;">2.8% [2.2% – 3.4%]</td>
+<td style="text-align: right;">12.1% [9.4% – 14.5%]</td>
+<td style="text-align: right;">22.5% [20.1% – 24.6%]</td>
+<td style="text-align: right;">10.9% [8.5% – 13.1%]</td>
+<td style="text-align: right;">5.4% [4.2% – 6.5%]</td>
+<td style="text-align: right;">0.0% [-0.0% – 0.0%]</td>
+<td style="text-align: right;">50.3% [42.8% – 56.0%]</td>
+</tr>
+<tr>
+<td>18-49</td>
+<td style="text-align: right;">0.3% [0.3% – 0.4%]</td>
+<td style="text-align: right;">3.5% [2.8% – 4.1%]</td>
+<td style="text-align: right;">12.9% [10.1% – 15.3%]</td>
+<td style="text-align: right;">8.5% [6.6% – 10.1%]</td>
+<td style="text-align: right;">18.4% [15.8% – 20.7%]</td>
+<td style="text-align: right;">6.5% [5.3% – 7.6%]</td>
+<td style="text-align: right;">0.0% [-0.0% – 0.0%]</td>
+<td style="text-align: right;">47.2% [39.6% – 52.8%]</td>
+</tr>
+<tr>
+<td>50-64</td>
+<td style="text-align: right;">0.3% [0.3% – 0.4%]</td>
+<td style="text-align: right;">3.3% [2.7% – 3.9%]</td>
+<td style="text-align: right;">12.9% [10.1% – 15.2%]</td>
+<td style="text-align: right;">8.7% [6.9% – 10.3%]</td>
+<td style="text-align: right;">13.5% [11.0% – 15.7%]</td>
+<td style="text-align: right;">15.4% [14.0% – 16.7%]</td>
+<td style="text-align: right;">0.0% [-0.0% – 0.0%]</td>
+<td style="text-align: right;">49.3% [42.2% – 54.6%]</td>
+</tr>
+<tr>
+<td>65+</td>
+<td style="text-align: right;">0.4% [0.3% – 0.4%]</td>
+<td style="text-align: right;">3.7% [3.1% – 4.3%]</td>
+<td style="text-align: right;">14.1% [11.4% – 16.3%]</td>
+<td style="text-align: right;">9.3% [7.5% – 10.9%]</td>
+<td style="text-align: right;">14.1% [11.7% – 16.2%]</td>
+<td style="text-align: right;">7.6% [6.4% – 8.7%]</td>
+<td style="text-align: right;">17.2% [17.0% – 17.3%]</td>
+<td style="text-align: right;">55.3% [49.4% – 59.7%]</td>
+</tr>
+<tr>
+<td><strong>All</strong></td>
+<td style="text-align: right;"><strong>0.5% [0.4% – 0.5%]</strong></td>
+<td style="text-align: right;"><strong>4.3% [3.6% – 4.9%]</strong></td>
+<td style="text-align: right;"><strong>14.4% [11.7% – 16.6%]</strong></td>
+<td style="text-align: right;"><strong>9.2% [7.4% – 10.8%]</strong></td>
+<td style="text-align: right;"><strong>14.3% [11.8% – 16.5%]</strong></td>
+<td style="text-align: right;"><strong>8.3% [7.0% – 9.4%]</strong></td>
+<td style="text-align: right;"><strong>11.4% [10.8% – 11.9%]</strong></td>
+<td style="text-align: right;"><strong>53.4% [47.1% – 58.1%]</strong></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Per 100,000 doses given to the column's age group</strong></p>
+<table>
+<thead>
+<tr>
+<th>Counted in</th>
+<th style="text-align: right;">0 vacc.</th>
+<th style="text-align: right;">1-4 vacc.</th>
+<th style="text-align: right;">5-12 vacc.</th>
+<th style="text-align: right;">13-17 vacc.</th>
+<th style="text-align: right;">18-49 vacc.</th>
+<th style="text-align: right;">50-64 vacc.</th>
+<th style="text-align: right;">65+ vacc.</th>
+<th style="text-align: right;">All vacc.</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td style="text-align: right;">72.7 [50.1 – 90.6]</td>
+<td style="text-align: right;">5.5 [4.0 – 6.4]</td>
+<td style="text-align: right;">10.1 [7.3 – 11.6]</td>
+<td style="text-align: right;">10.0 [7.3 – 11.4]</td>
+<td style="text-align: right;">2.9 [2.1 – 3.3]</td>
+<td style="text-align: right;">2.2 [1.6 – 2.5]</td>
+<td style="text-align: right;">0.0 [-0.0 – 0.0]</td>
+<td style="text-align: right;">268.4 [192.2 – 315.2]</td>
+</tr>
+<tr>
+<td>1-4</td>
+<td style="text-align: right;">7.7 [5.2 – 10.0]</td>
+<td style="text-align: right;">103.8 [75.1 – 131.5]</td>
+<td style="text-align: right;">41.8 [27.4 – 54.7]</td>
+<td style="text-align: right;">37.3 [24.1 – 49.4]</td>
+<td style="text-align: right;">10.5 [6.9 – 13.7]</td>
+<td style="text-align: right;">7.9 [5.2 – 10.4]</td>
+<td style="text-align: right;">0.0 [-0.0 – 0.0]</td>
+<td style="text-align: right;">274.0 [190.9 – 349.6]</td>
+</tr>
+<tr>
+<td>5-12</td>
+<td style="text-align: right;">6.0 [3.6 – 8.4]</td>
+<td style="text-align: right;">18.5 [11.4 – 25.8]</td>
+<td style="text-align: right;">81.3 [53.9 – 108.9]</td>
+<td style="text-align: right;">37.6 [22.7 – 52.9]</td>
+<td style="text-align: right;">9.2 [5.5 – 13.0]</td>
+<td style="text-align: right;">7.2 [4.3 – 10.2]</td>
+<td style="text-align: right;">0.0 [-0.0 – 0.0]</td>
+<td style="text-align: right;">151.0 [98.0 – 203.9]</td>
+</tr>
+<tr>
+<td>13-17</td>
+<td style="text-align: right;">1.9 [1.2 – 2.8]</td>
+<td style="text-align: right;">5.2 [3.2 – 7.7]</td>
+<td style="text-align: right;">12.3 [7.6 – 18.3]</td>
+<td style="text-align: right;">37.2 [25.1 – 51.3]</td>
+<td style="text-align: right;">3.2 [2.0 – 4.8]</td>
+<td style="text-align: right;">2.6 [1.6 – 3.9]</td>
+<td style="text-align: right;">0.0 [-0.0 – 0.0]</td>
+<td style="text-align: right;">82.9 [54.8 – 116.2]</td>
+</tr>
+<tr>
+<td>18-49</td>
+<td style="text-align: right;">18.5 [12.8 – 26.7]</td>
+<td style="text-align: right;">48.5 [33.5 – 70.3]</td>
+<td style="text-align: right;">98.2 [66.5 – 144.5]</td>
+<td style="text-align: right;">104.2 [70.1 – 153.9]</td>
+<td style="text-align: right;">40.7 [29.4 – 56.8]</td>
+<td style="text-align: right;">23.9 [16.5 – 34.4]</td>
+<td style="text-align: right;">0.0 [-0.0 – 0.0]</td>
+<td style="text-align: right;">104.1 [74.0 – 145.8]</td>
+</tr>
+<tr>
+<td>50-64</td>
+<td style="text-align: right;">19.9 [13.1 – 27.3]</td>
+<td style="text-align: right;">54.4 [35.5 – 74.4]</td>
+<td style="text-align: right;">115.7 [74.7 – 159.3]</td>
+<td style="text-align: right;">126.9 [81.6 – 174.6]</td>
+<td style="text-align: right;">35.0 [23.1 – 47.7]</td>
+<td style="text-align: right;">66.0 [48.4 – 85.5]</td>
+<td style="text-align: right;">0.0 [-0.0 – 0.0]</td>
+<td style="text-align: right;">211.4 [147.9 – 279.4]</td>
+</tr>
+<tr>
+<td>65+</td>
+<td style="text-align: right;">118.8 [85.5 – 152.3]</td>
+<td style="text-align: right;">320.5 [228.1 – 410.9]</td>
+<td style="text-align: right;">668.1 [466.4 – 860.6]</td>
+<td style="text-align: right;">715.6 [496.7 – 924.7]</td>
+<td style="text-align: right;">193.1 [138.2 – 247.2]</td>
+<td style="text-align: right;">174.3 [126.7 – 221.7]</td>
+<td style="text-align: right;">232.3 [197.5 – 268.5]</td>
+<td style="text-align: right;">748.8 [579.9 – 914.4]</td>
+</tr>
+<tr>
+<td><strong>All</strong></td>
+<td style="text-align: right;"><strong>246.4 [205.3 – 282.1]</strong></td>
+<td style="text-align: right;"><strong>556.8 [414.0 – 688.9]</strong></td>
+<td style="text-align: right;"><strong>1029.5 [728.2 – 1313.2]</strong></td>
+<td style="text-align: right;"><strong>1069.5 [751.7 – 1379.7]</strong></td>
+<td style="text-align: right;"><strong>295.0 [213.4 – 375.9]</strong></td>
+<td style="text-align: right;"><strong>284.7 [211.8 – 359.6]</strong></td>
+<td style="text-align: right;"><strong>232.3 [197.5 – 268.5]</strong></td>
+<td style="text-align: right;"><strong>336.7 [259.6 – 406.7]</strong></td>
+</tr>
+</tbody>
+</table>
+<p><img alt="Share of each age group's averted hospitalizations, by age group vaccinated" src="../figures/output/S_A_2_pct_reduction_stacked_bar.png" /></p>
+<p><em>Share of each age group's averted hospitalizations, by age group vaccinated</em></p>
+<h3>Table S.A.4 — Vaccine-effectiveness sensitivity scenarios</h3>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>Age group</th>
+<th style="text-align: right;">VE_infection</th>
+<th style="text-align: right;">VE_hosp_infection</th>
+<th style="text-align: right;">VE_hosp_given_infection</th>
+<th style="text-align: right;">VE_transmission_blocking</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>low_ve</td>
+<td>0</td>
+<td style="text-align: right;">33%</td>
+<td style="text-align: right;">33%</td>
+<td style="text-align: right;">0%</td>
+<td style="text-align: right;">0%</td>
+</tr>
+<tr>
+<td>low_ve</td>
+<td>1-4</td>
+<td style="text-align: right;">33%</td>
+<td style="text-align: right;">33%</td>
+<td style="text-align: right;">0%</td>
+<td style="text-align: right;">0%</td>
+</tr>
+<tr>
+<td>low_ve</td>
+<td>5-12</td>
+<td style="text-align: right;">33%</td>
+<td style="text-align: right;">33%</td>
+<td style="text-align: right;">0%</td>
+<td style="text-align: right;">0%</td>
+</tr>
+<tr>
+<td>low_ve</td>
+<td>13-17</td>
+<td style="text-align: right;">33%</td>
+<td style="text-align: right;">33%</td>
+<td style="text-align: right;">0%</td>
+<td style="text-align: right;">0%</td>
+</tr>
+<tr>
+<td>low_ve</td>
+<td>18-49</td>
+<td style="text-align: right;">6%</td>
+<td style="text-align: right;">10%</td>
+<td style="text-align: right;">4%</td>
+<td style="text-align: right;">0%</td>
+</tr>
+<tr>
+<td>low_ve</td>
+<td>50-64</td>
+<td style="text-align: right;">6%</td>
+<td style="text-align: right;">10%</td>
+<td style="text-align: right;">4%</td>
+<td style="text-align: right;">0%</td>
+</tr>
+<tr>
+<td>low_ve</td>
+<td>65+</td>
+<td style="text-align: right;">0%</td>
+<td style="text-align: right;">21%</td>
+<td style="text-align: right;">21%</td>
+<td style="text-align: right;">0%</td>
+</tr>
+<tr>
+<td>baseline_ve</td>
+<td>0</td>
+<td style="text-align: right;">43%</td>
+<td style="text-align: right;">48%</td>
+<td style="text-align: right;">9%</td>
+<td style="text-align: right;">0%</td>
+</tr>
+<tr>
+<td>baseline_ve</td>
+<td>1-4</td>
+<td style="text-align: right;">43%</td>
+<td style="text-align: right;">48%</td>
+<td style="text-align: right;">9%</td>
+<td style="text-align: right;">0%</td>
+</tr>
+<tr>
+<td>baseline_ve</td>
+<td>5-12</td>
+<td style="text-align: right;">43%</td>
+<td style="text-align: right;">48%</td>
+<td style="text-align: right;">9%</td>
+<td style="text-align: right;">0%</td>
+</tr>
+<tr>
+<td>baseline_ve</td>
+<td>13-17</td>
+<td style="text-align: right;">43%</td>
+<td style="text-align: right;">48%</td>
+<td style="text-align: right;">9%</td>
+<td style="text-align: right;">0%</td>
+</tr>
+<tr>
+<td>baseline_ve</td>
+<td>18-49</td>
+<td style="text-align: right;">21%</td>
+<td style="text-align: right;">28%</td>
+<td style="text-align: right;">9%</td>
+<td style="text-align: right;">0%</td>
+</tr>
+<tr>
+<td>baseline_ve</td>
+<td>50-64</td>
+<td style="text-align: right;">21%</td>
+<td style="text-align: right;">28%</td>
+<td style="text-align: right;">9%</td>
+<td style="text-align: right;">0%</td>
+</tr>
+<tr>
+<td>baseline_ve</td>
+<td>65+</td>
+<td style="text-align: right;">0%</td>
+<td style="text-align: right;">31%</td>
+<td style="text-align: right;">31%</td>
+<td style="text-align: right;">0%</td>
+</tr>
+<tr>
+<td>high_ve</td>
+<td>0</td>
+<td style="text-align: right;">51%</td>
+<td style="text-align: right;">78%</td>
+<td style="text-align: right;">55%</td>
+<td style="text-align: right;">0%</td>
+</tr>
+<tr>
+<td>high_ve</td>
+<td>1-4</td>
+<td style="text-align: right;">51%</td>
+<td style="text-align: right;">78%</td>
+<td style="text-align: right;">55%</td>
+<td style="text-align: right;">0%</td>
+</tr>
+<tr>
+<td>high_ve</td>
+<td>5-12</td>
+<td style="text-align: right;">51%</td>
+<td style="text-align: right;">78%</td>
+<td style="text-align: right;">55%</td>
+<td style="text-align: right;">0%</td>
+</tr>
+<tr>
+<td>high_ve</td>
+<td>13-17</td>
+<td style="text-align: right;">51%</td>
+<td style="text-align: right;">78%</td>
+<td style="text-align: right;">55%</td>
+<td style="text-align: right;">0%</td>
+</tr>
+<tr>
+<td>high_ve</td>
+<td>18-49</td>
+<td style="text-align: right;">34%</td>
+<td style="text-align: right;">44%</td>
+<td style="text-align: right;">16%</td>
+<td style="text-align: right;">0%</td>
+</tr>
+<tr>
+<td>high_ve</td>
+<td>50-64</td>
+<td style="text-align: right;">34%</td>
+<td style="text-align: right;">44%</td>
+<td style="text-align: right;">16%</td>
+<td style="text-align: right;">0%</td>
+</tr>
+<tr>
+<td>high_ve</td>
+<td>65+</td>
+<td style="text-align: right;">14%</td>
+<td style="text-align: right;">39%</td>
+<td style="text-align: right;">29%</td>
+<td style="text-align: right;">0%</td>
+</tr>
+</tbody>
+</table>
+<h3>Table S.A.5 — Hospitalizations averted across VE scenarios (vs. no vaccination)</h3>
+<p><strong>Hospitalizations averted</strong></p>
+<table>
+<thead>
+<tr>
+<th>Age group</th>
+<th style="text-align: right;">Low VE</th>
+<th style="text-align: right;">Baseline VE</th>
+<th style="text-align: right;">High VE</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td style="text-align: right;">59 [43 – 69]</td>
+<td style="text-align: right;">93 [67 – 110]</td>
+<td style="text-align: right;">121 [85 – 147]</td>
+</tr>
+<tr>
+<td>1-4</td>
+<td style="text-align: right;">242 [167 – 311]</td>
+<td style="text-align: right;">376 [262 – 479]</td>
+<td style="text-align: right;">490 [350 – 622]</td>
+</tr>
+<tr>
+<td>5-12</td>
+<td style="text-align: right;">238 [152 – 326]</td>
+<td style="text-align: right;">373 [242 – 504]</td>
+<td style="text-align: right;">497 [329 – 656]</td>
+</tr>
+<tr>
+<td>13-17</td>
+<td style="text-align: right;">79 [52 – 113]</td>
+<td style="text-align: right;">127 [84 – 178]</td>
+<td style="text-align: right;">169 [114 – 232]</td>
+</tr>
+<tr>
+<td>18-49</td>
+<td style="text-align: right;">500 [347 – 715]</td>
+<td style="text-align: right;">892 [635 – 1,250]</td>
+<td style="text-align: right;">1,201 [879 – 1,643]</td>
+</tr>
+<tr>
+<td>50-64</td>
+<td style="text-align: right;">607 [406 – 824]</td>
+<td style="text-align: right;">1,089 [762 – 1,440]</td>
+<td style="text-align: right;">1,451 [1,049 – 1,870]</td>
+</tr>
+<tr>
+<td>65+</td>
+<td style="text-align: right;">4,124 [3,150 – 5,107]</td>
+<td style="text-align: right;">6,473 [5,013 – 7,904]</td>
+<td style="text-align: right;">8,205 [6,525 – 9,868]</td>
+</tr>
+<tr>
+<td><strong>All</strong></td>
+<td style="text-align: right;"><strong>5,863 [4,427 – 7,193]</strong></td>
+<td style="text-align: right;"><strong>9,459 [7,293 – 11,426]</strong></td>
+<td style="text-align: right;"><strong>12,186 [9,678 – 14,378]</strong></td>
+</tr>
+</tbody>
+</table>
+<p><strong>% reduction</strong></p>
+<table>
+<thead>
+<tr>
+<th>Age group</th>
+<th style="text-align: right;">Low VE</th>
+<th style="text-align: right;">Baseline VE</th>
+<th style="text-align: right;">High VE</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td style="text-align: right;">34.3% [29.8% – 38.1%]</td>
+<td style="text-align: right;">54.2% [47.9% – 58.9%]</td>
+<td style="text-align: right;">70.9% [65.2% – 74.8%]</td>
+</tr>
+<tr>
+<td>1-4</td>
+<td style="text-align: right;">35.5% [30.8% – 39.4%]</td>
+<td style="text-align: right;">55.2% [48.7% – 60.0%]</td>
+<td style="text-align: right;">72.2% [66.4% – 76.1%]</td>
+</tr>
+<tr>
+<td>5-12</td>
+<td style="text-align: right;">32.8% [27.7% – 37.2%]</td>
+<td style="text-align: right;">51.6% [44.3% – 57.2%]</td>
+<td style="text-align: right;">68.3% [61.3% – 73.2%]</td>
+</tr>
+<tr>
+<td>13-17</td>
+<td style="text-align: right;">31.5% [26.3% – 35.9%]</td>
+<td style="text-align: right;">50.3% [42.8% – 56.0%]</td>
+<td style="text-align: right;">67.1% [59.8% – 72.1%]</td>
+</tr>
+<tr>
+<td>18-49</td>
+<td style="text-align: right;">26.3% [21.4% – 30.6%]</td>
+<td style="text-align: right;">47.2% [39.6% – 52.8%]</td>
+<td style="text-align: right;">63.3% [55.3% – 68.5%]</td>
+</tr>
+<tr>
+<td>50-64</td>
+<td style="text-align: right;">27.4% [22.5% – 31.5%]</td>
+<td style="text-align: right;">49.3% [42.2% – 54.6%]</td>
+<td style="text-align: right;">65.7% [58.5% – 70.6%]</td>
+</tr>
+<tr>
+<td>65+</td>
+<td style="text-align: right;">35.2% [31.0% – 38.7%]</td>
+<td style="text-align: right;">55.3% [49.4% – 59.7%]</td>
+<td style="text-align: right;">70.1% [64.2% – 74.1%]</td>
+</tr>
+<tr>
+<td><strong>All</strong></td>
+<td style="text-align: right;"><strong>33.1% [28.7% – 36.8%]</strong></td>
+<td style="text-align: right;"><strong>53.4% [47.1% – 58.1%]</strong></td>
+<td style="text-align: right;"><strong>68.8% [62.4% – 73.0%]</strong></td>
+</tr>
+</tbody>
+</table>
+<p><img alt="Daily hospitalizations under low, baseline and high VE" src="../figures/output/ts_ve.png" /></p>
+<p><em>Daily hospitalizations under low, baseline and high VE</em></p>
+<hr />
+<h2>4. Coverage scenarios</h2>
+<p>Two families of counterfactual schedules, each applied either to <strong>every age group at once</strong> or to <strong>one age group at a time</strong> (others keep the baseline schedule), and compared with the baseline:</p>
+<ul>
+<li>
+<p><strong>Coverage targets</strong> (50%, 55%, 60%, 65%, 70%): each targeted group's daily doses are scaled by <code>target / baseline coverage</code>, so its season coverage reaches the target. A group already above the target keeps its schedule.</p>
+</li>
+<li>
+<p><strong>Fewer doses</strong> (−5%, −10%, −15%, −20%): each targeted group's daily doses are cut by that share (a relative decrease, e.g. 60% coverage becomes 54% at −10%). Timing is unchanged.</p>
+</li>
+</ul>
+<h3>4.1 All age groups together</h3>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th style="text-align: right;">Overall coverage</th>
+<th style="text-align: right;">Doses vs. baseline</th>
+<th style="text-align: right;">Hospitalizations</th>
+<th style="text-align: right;">Change vs. baseline</th>
+<th style="text-align: right;">% change</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>No vaccination</td>
+<td style="text-align: right;">0.0%</td>
+<td style="text-align: right;">-2,809,361</td>
+<td style="text-align: right;">17,709 [15,358 – 19,823]</td>
+<td style="text-align: right;">+9,459 [+7,293 – +11,426]</td>
+<td style="text-align: right;">+114.8% [+88.9% – +138.6%]</td>
+</tr>
+<tr>
+<td>-20%</td>
+<td style="text-align: right;">30.9%</td>
+<td style="text-align: right;">-561,872</td>
+<td style="text-align: right;">9,837 [9,194 – 10,472]</td>
+<td style="text-align: right;">+1,574 [+1,276 – +1,809]</td>
+<td style="text-align: right;">+19.1% [+15.5% – +21.9%]</td>
+</tr>
+<tr>
+<td>-15%</td>
+<td style="text-align: right;">32.8%</td>
+<td style="text-align: right;">-421,404</td>
+<td style="text-align: right;">9,427 [8,817 – 10,008]</td>
+<td style="text-align: right;">+1,166 [+949 – +1,333]</td>
+<td style="text-align: right;">+14.1% [+11.5% – +16.1%]</td>
+</tr>
+<tr>
+<td>-10%</td>
+<td style="text-align: right;">34.8%</td>
+<td style="text-align: right;">-280,936</td>
+<td style="text-align: right;">9,031 [8,439 – 9,602]</td>
+<td style="text-align: right;">+767 [+627 – +875]</td>
+<td style="text-align: right;">+9.3% [+7.6% – +10.6%]</td>
+</tr>
+<tr>
+<td>-5%</td>
+<td style="text-align: right;">36.7%</td>
+<td style="text-align: right;">-140,468</td>
+<td style="text-align: right;">8,639 [8,079 – 9,200]</td>
+<td style="text-align: right;">+378 [+311 – +430]</td>
+<td style="text-align: right;">+4.6% [+3.8% – +5.2%]</td>
+</tr>
+<tr>
+<td>Baseline</td>
+<td style="text-align: right;">38.6%</td>
+<td style="text-align: right;">+0</td>
+<td style="text-align: right;">8,264 [7,714 – 8,789]</td>
+<td style="text-align: right;">+0 [+0 – +0]</td>
+<td style="text-align: right;">+0.0% [+0.0% – +0.0%]</td>
+</tr>
+<tr>
+<td>50% target</td>
+<td style="text-align: right;">52.1%</td>
+<td style="text-align: right;">+981,541</td>
+<td style="text-align: right;">5,835 [5,338 – 6,344]</td>
+<td style="text-align: right;">-2,446 [-2,731 – -2,060]</td>
+<td style="text-align: right;">-29.7% [-32.5% – -24.9%]</td>
+</tr>
+<tr>
+<td>55% target</td>
+<td style="text-align: right;">56.1%</td>
+<td style="text-align: right;">+1,273,763</td>
+<td style="text-align: right;">5,133 [4,667 – 5,663]</td>
+<td style="text-align: right;">-3,146 [-3,461 – -2,697]</td>
+<td style="text-align: right;">-38.1% [-41.2% – -32.7%]</td>
+</tr>
+<tr>
+<td>60% target</td>
+<td style="text-align: right;">60.2%</td>
+<td style="text-align: right;">+1,566,373</td>
+<td style="text-align: right;">4,495 [4,062 – 5,028]</td>
+<td style="text-align: right;">-3,778 [-4,122 – -3,298]</td>
+<td style="text-align: right;">-45.8% [-48.8% – -40.1%]</td>
+</tr>
+<tr>
+<td>65% target</td>
+<td style="text-align: right;">65.0%</td>
+<td style="text-align: right;">+1,918,046</td>
+<td style="text-align: right;">3,893 [3,505 – 4,412]</td>
+<td style="text-align: right;">-4,368 [-4,744 – -3,894]</td>
+<td style="text-align: right;">-53.1% [-56.0% – -47.5%]</td>
+</tr>
+<tr>
+<td>70% target</td>
+<td style="text-align: right;">70.0%</td>
+<td style="text-align: right;">+2,281,693</td>
+<td style="text-align: right;">3,361 [3,015 – 3,822]</td>
+<td style="text-align: right;">-4,898 [-5,296 – -4,427]</td>
+<td style="text-align: right;">-59.5% [-62.2% – -54.4%]</td>
+</tr>
+</tbody>
+</table>
+<p>Overall coverage = scheduled doses summed over all age groups ÷ total population, i.e. the population-weighted average of each age group's scheduled coverage.</p>
+<p><img alt="Season hospitalizations against overall scheduled coverage" src="../figures/output/coverage_response.png" /></p>
+<p><em>Season hospitalizations against overall scheduled coverage</em></p>
+<p><img alt="Daily hospitalizations: baseline and coverage targets (all ages)" src="../figures/output/ts_coverage_targets.png" /></p>
+<p><em>Daily hospitalizations: baseline and coverage targets (all ages)</em></p>
+<p><img alt="Daily hospitalizations: baseline and fewer doses (all ages)" src="../figures/output/ts_coverage_decreases.png" /></p>
+<p><em>Daily hospitalizations: baseline and fewer doses (all ages)</em></p>
+<h3>4.2 One age group at a time</h3>
+<p>Change in <strong>total</strong> (all-ages) hospitalizations when only the row's age group is changed, median across draws (95% intervals in appendix A):</p>
+<p><img alt="% change in total hospitalizations, by age group changed and level" src="../figures/output/coverage_heatmap.png" /></p>
+<p><em>% change in total hospitalizations, by age group changed and level</em></p>
+<p><strong>Hospitalizations averted vs. baseline, all ages counted</strong></p>
+<table>
+<thead>
+<tr>
+<th>Raised to target</th>
+<th style="text-align: right;">50%</th>
+<th style="text-align: right;">55%</th>
+<th style="text-align: right;">60%</th>
+<th style="text-align: right;">65%</th>
+<th style="text-align: right;">70%</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0 only</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">5 [4 – 5]</td>
+<td style="text-align: right;">10 [10 – 11]</td>
+<td style="text-align: right;">16 [15 – 17]</td>
+<td style="text-align: right;">22 [20 – 23]</td>
+</tr>
+<tr>
+<td>1-4 only</td>
+<td style="text-align: right;">24 [20 – 27]</td>
+<td style="text-align: right;">77 [63 – 87]</td>
+<td style="text-align: right;">130 [107 – 146]</td>
+<td style="text-align: right;">182 [150 – 205]</td>
+<td style="text-align: right;">235 [193 – 263]</td>
+</tr>
+<tr>
+<td>5-12 only</td>
+<td style="text-align: right;">462 [364 – 532]</td>
+<td style="text-align: right;">675 [533 – 774]</td>
+<td style="text-align: right;">881 [700 – 1,007]</td>
+<td style="text-align: right;">1,083 [863 – 1,232]</td>
+<td style="text-align: right;">1,279 [1,024 – 1,450]</td>
+</tr>
+<tr>
+<td>13-17 only</td>
+<td style="text-align: right;">376 [294 – 435]</td>
+<td style="text-align: right;">522 [410 – 602]</td>
+<td style="text-align: right;">666 [525 – 766]</td>
+<td style="text-align: right;">806 [638 – 926]</td>
+<td style="text-align: right;">944 [749 – 1,081]</td>
+</tr>
+<tr>
+<td>18-49 only</td>
+<td style="text-align: right;">1,406 [1,163 – 1,591]</td>
+<td style="text-align: right;">1,699 [1,413 – 1,912]</td>
+<td style="text-align: right;">1,982 [1,660 – 2,224]</td>
+<td style="text-align: right;">2,257 [1,904 – 2,522]</td>
+<td style="text-align: right;">2,523 [2,139 – 2,807]</td>
+</tr>
+<tr>
+<td>50-64 only</td>
+<td style="text-align: right;">314 [260 – 354]</td>
+<td style="text-align: right;">443 [368 – 500]</td>
+<td style="text-align: right;">571 [475 – 644]</td>
+<td style="text-align: right;">697 [582 – 785]</td>
+<td style="text-align: right;">822 [687 – 924]</td>
+</tr>
+<tr>
+<td>65+ only</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">75 [68 – 81]</td>
+<td style="text-align: right;">164 [149 – 179]</td>
+</tr>
+<tr>
+<td>All ages</td>
+<td style="text-align: right;">2,446 [2,060 – 2,731]</td>
+<td style="text-align: right;">3,146 [2,697 – 3,461]</td>
+<td style="text-align: right;">3,778 [3,298 – 4,122]</td>
+<td style="text-align: right;">4,368 [3,894 – 4,744]</td>
+<td style="text-align: right;">4,898 [4,427 – 5,296]</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Additional hospitalizations vs. baseline, all ages counted</strong></p>
+<table>
+<thead>
+<tr>
+<th>Doses cut</th>
+<th style="text-align: right;">−5%</th>
+<th style="text-align: right;">−10%</th>
+<th style="text-align: right;">−15%</th>
+<th style="text-align: right;">−20%</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0 only</td>
+<td style="text-align: right;">3 [3 – 3]</td>
+<td style="text-align: right;">6 [5 – 6]</td>
+<td style="text-align: right;">8 [8 – 9]</td>
+<td style="text-align: right;">11 [10 – 12]</td>
+</tr>
+<tr>
+<td>1-4 only</td>
+<td style="text-align: right;">26 [21 – 29]</td>
+<td style="text-align: right;">51 [42 – 58]</td>
+<td style="text-align: right;">77 [63 – 87]</td>
+<td style="text-align: right;">103 [84 – 116]</td>
+</tr>
+<tr>
+<td>5-12 only</td>
+<td style="text-align: right;">90 [70 – 104]</td>
+<td style="text-align: right;">181 [140 – 210]</td>
+<td style="text-align: right;">273 [211 – 317]</td>
+<td style="text-align: right;">365 [283 – 426]</td>
+</tr>
+<tr>
+<td>13-17 only</td>
+<td style="text-align: right;">58 [45 – 68]</td>
+<td style="text-align: right;">118 [91 – 137]</td>
+<td style="text-align: right;">177 [137 – 206]</td>
+<td style="text-align: right;">237 [183 – 276]</td>
+</tr>
+<tr>
+<td>18-49 only</td>
+<td style="text-align: right;">91 [73 – 105]</td>
+<td style="text-align: right;">183 [147 – 212]</td>
+<td style="text-align: right;">276 [221 – 319]</td>
+<td style="text-align: right;">369 [295 – 426]</td>
+</tr>
+<tr>
+<td>50-64 only</td>
+<td style="text-align: right;">51 [42 – 58]</td>
+<td style="text-align: right;">103 [85 – 117]</td>
+<td style="text-align: right;">154 [127 – 175]</td>
+<td style="text-align: right;">206 [170 – 234]</td>
+</tr>
+<tr>
+<td>65+ only</td>
+<td style="text-align: right;">55 [50 – 59]</td>
+<td style="text-align: right;">109 [99 – 119]</td>
+<td style="text-align: right;">164 [148 – 178]</td>
+<td style="text-align: right;">218 [198 – 237]</td>
+</tr>
+<tr>
+<td>All ages</td>
+<td style="text-align: right;">378 [311 – 430]</td>
+<td style="text-align: right;">767 [627 – 875]</td>
+<td style="text-align: right;">1,166 [949 – 1,333]</td>
+<td style="text-align: right;">1,574 [1,276 – 1,809]</td>
+</tr>
+</tbody>
+</table>
+<h3>4.3 Efficiency per dose</h3>
+<p>Hospitalizations averted per 100,000 <strong>additional</strong> doses (targets) and added per 100,000 doses <strong>removed</strong> (cuts), all ages counted. For targets the denominator is the extra doses the target requires in that group (<code>All ages</code>: in every group).</p>
+<table>
+<thead>
+<tr>
+<th>Age group changed</th>
+<th style="text-align: right;">50% target</th>
+<th style="text-align: right;">55% target</th>
+<th style="text-align: right;">60% target</th>
+<th style="text-align: right;">65% target</th>
+<th style="text-align: right;">70% target</th>
+<th style="text-align: right;">−5%</th>
+<th style="text-align: right;">−10%</th>
+<th style="text-align: right;">−15%</th>
+<th style="text-align: right;">−20%</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0 only</td>
+<td style="text-align: right;">—</td>
+<td style="text-align: right;">161.6 [146.5 – 173.1]</td>
+<td style="text-align: right;">161.7 [146.7 – 172.7]</td>
+<td style="text-align: right;">161.7 [147.0 – 172.9]</td>
+<td style="text-align: right;">161.2 [146.6 – 172.2]</td>
+<td style="text-align: right;">160.7 [146.1 – 171.9]</td>
+<td style="text-align: right;">160.6 [145.8 – 171.4]</td>
+<td style="text-align: right;">161.8 [147.0 – 172.8]</td>
+<td style="text-align: right;">161.0 [145.9 – 172.2]</td>
+</tr>
+<tr>
+<td>1-4 only</td>
+<td style="text-align: right;">370.9 [304.3 – 417.7]</td>
+<td style="text-align: right;">370.4 [303.9 – 416.4]</td>
+<td style="text-align: right;">369.4 [303.6 – 415.6]</td>
+<td style="text-align: right;">368.3 [303.0 – 414.0]</td>
+<td style="text-align: right;">367.3 [302.4 – 412.5]</td>
+<td style="text-align: right;">372.3 [305.4 – 419.1]</td>
+<td style="text-align: right;">373.2 [305.8 – 420.6]</td>
+<td style="text-align: right;">373.9 [306.1 – 421.2]</td>
+<td style="text-align: right;">374.4 [306.3 – 421.9]</td>
+</tr>
+<tr>
+<td>5-12 only</td>
+<td style="text-align: right;">706.8 [555.6 – 812.5]</td>
+<td style="text-align: right;">697.6 [551.1 – 800.4]</td>
+<td style="text-align: right;">688.7 [546.6 – 787.2]</td>
+<td style="text-align: right;">679.8 [542.0 – 773.4]</td>
+<td style="text-align: right;">671.1 [537.6 – 760.8]</td>
+<td style="text-align: right;">728.6 [566.6 – 844.9]</td>
+<td style="text-align: right;">731.3 [568.0 – 849.1]</td>
+<td style="text-align: right;">735.4 [569.9 – 855.3]</td>
+<td style="text-align: right;">738.4 [571.3 – 860.5]</td>
+</tr>
+<tr>
+<td>13-17 only</td>
+<td style="text-align: right;">745.2 [583.8 – 861.7]</td>
+<td style="text-align: right;">737.8 [579.8 – 851.1]</td>
+<td style="text-align: right;">730.5 [575.8 – 840.8]</td>
+<td style="text-align: right;">723.1 [572.1 – 830.5]</td>
+<td style="text-align: right;">715.8 [568.3 – 820.2]</td>
+<td style="text-align: right;">763.6 [592.9 – 890.2]</td>
+<td style="text-align: right;">769.7 [596.5 – 896.3]</td>
+<td style="text-align: right;">771.6 [597.3 – 899.3]</td>
+<td style="text-align: right;">774.0 [598.3 – 902.4]</td>
+</tr>
+<tr>
+<td>18-49 only</td>
+<td style="text-align: right;">201.2 [166.5 – 227.6]</td>
+<td style="text-align: right;">198.8 [165.4 – 223.7]</td>
+<td style="text-align: right;">196.2 [164.3 – 220.2]</td>
+<td style="text-align: right;">193.6 [163.3 – 216.4]</td>
+<td style="text-align: right;">191.0 [161.9 – 212.5]</td>
+<td style="text-align: right;">213.2 [171.1 – 245.8]</td>
+<td style="text-align: right;">213.7 [171.3 – 246.7]</td>
+<td style="text-align: right;">214.3 [171.6 – 247.7]</td>
+<td style="text-align: right;">214.9 [171.8 – 248.6]</td>
+</tr>
+<tr>
+<td>50-64 only</td>
+<td style="text-align: right;">195.5 [162.1 – 220.9]</td>
+<td style="text-align: right;">194.3 [161.4 – 219.3]</td>
+<td style="text-align: right;">193.1 [160.8 – 217.7]</td>
+<td style="text-align: right;">192.0 [160.2 – 216.1]</td>
+<td style="text-align: right;">190.8 [159.6 – 214.5]</td>
+<td style="text-align: right;">199.1 [163.9 – 225.7]</td>
+<td style="text-align: right;">199.4 [164.1 – 226.2]</td>
+<td style="text-align: right;">199.8 [164.3 – 226.7]</td>
+<td style="text-align: right;">200.3 [164.5 – 227.4]</td>
+</tr>
+<tr>
+<td>65+ only</td>
+<td style="text-align: right;">—</td>
+<td style="text-align: right;">—</td>
+<td style="text-align: right;">—</td>
+<td style="text-align: right;">126.4 [114.5 – 137.2]</td>
+<td style="text-align: right;">126.4 [114.5 – 137.2]</td>
+<td style="text-align: right;">126.4 [114.5 – 137.3]</td>
+<td style="text-align: right;">126.4 [114.5 – 137.3]</td>
+<td style="text-align: right;">126.4 [114.5 – 137.3]</td>
+<td style="text-align: right;">126.4 [114.5 – 137.3]</td>
+</tr>
+<tr>
+<td>All ages</td>
+<td style="text-align: right;">249.2 [209.9 – 278.2]</td>
+<td style="text-align: right;">246.9 [211.8 – 271.7]</td>
+<td style="text-align: right;">241.2 [210.5 – 263.2]</td>
+<td style="text-align: right;">227.8 [203.0 – 247.3]</td>
+<td style="text-align: right;">214.7 [194.0 – 232.1]</td>
+<td style="text-align: right;">269.0 [221.1 – 305.9]</td>
+<td style="text-align: right;">273.0 [223.2 – 311.4]</td>
+<td style="text-align: right;">276.7 [225.2 – 316.4]</td>
+<td style="text-align: right;">280.1 [227.2 – 322.0]</td>
+</tr>
+</tbody>
+</table>
+<p><img alt="50% target: hospitalizations averted per 100,000 additional doses, by age group hospitalized" src="../figures/output/S_A_3_50pct_per_100k_doses_stacked_bar.png" /></p>
+<p><em>50% target: hospitalizations averted per 100,000 additional doses, by age group hospitalized</em></p>
+<p><img alt="70% target: hospitalizations averted per 100,000 additional doses, by age group hospitalized" src="../figures/output/S_A_3_70pct_per_100k_doses_stacked_bar.png" /></p>
+<p><em>70% target: hospitalizations averted per 100,000 additional doses, by age group hospitalized</em></p>
+<p><img alt="10% fewer doses: additional hospitalizations per 100,000 doses removed" src="../figures/output/DECREASE_10pct_per_100k_doses_stacked_bar.png" /></p>
+<p><em>10% fewer doses: additional hospitalizations per 100,000 doses removed</em></p>
+<p>A relative dose cut removes the most doses where coverage is highest, so per removed dose its cost mirrors the per-dose benefit of Table S.A.2; coverage targets add doses mostly to the least-covered groups (18-49 needs the largest relative increase).</p>
+<hr />
+<h2>5. Baseline fit check</h2>
+<p>Cumulative admissions over 2025-09-01 – 2026-07-04:</p>
+<table>
+<thead>
+<tr>
+<th>Age group</th>
+<th style="text-align: right;">Simulated (median)</th>
+<th style="text-align: right;">Simulated 95% interval</th>
+<th style="text-align: right;">Observed</th>
+<th style="text-align: right;">% difference</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td style="text-align: right;">78.6</td>
+<td style="text-align: right;">49.1 – 110.8</td>
+<td style="text-align: right;">114.0</td>
+<td style="text-align: right;">-31.0%</td>
+</tr>
+<tr>
+<td>1-4</td>
+<td style="text-align: right;">305.9</td>
+<td style="text-align: right;">221.6 – 390.9</td>
+<td style="text-align: right;">302.9</td>
+<td style="text-align: right;">+1.0%</td>
+</tr>
+<tr>
+<td>5-12</td>
+<td style="text-align: right;">348.7</td>
+<td style="text-align: right;">253.0 – 448.8</td>
+<td style="text-align: right;">347.0</td>
+<td style="text-align: right;">+0.5%</td>
+</tr>
+<tr>
+<td>13-17</td>
+<td style="text-align: right;">125.1</td>
+<td style="text-align: right;">90.4 – 163.8</td>
+<td style="text-align: right;">123.0</td>
+<td style="text-align: right;">+1.7%</td>
+</tr>
+<tr>
+<td>18-49</td>
+<td style="text-align: right;">1,013.6</td>
+<td style="text-align: right;">821.3 – 1,227.7</td>
+<td style="text-align: right;">984.7</td>
+<td style="text-align: right;">+2.9%</td>
+</tr>
+<tr>
+<td>50-64</td>
+<td style="text-align: right;">1,120.5</td>
+<td style="text-align: right;">921.0 – 1,385.7</td>
+<td style="text-align: right;">1,108.7</td>
+<td style="text-align: right;">+1.1%</td>
+</tr>
+<tr>
+<td>65+</td>
+<td style="text-align: right;">5,264.1</td>
+<td style="text-align: right;">4,750.6 – 5,733.3</td>
+<td style="text-align: right;">5,388.9</td>
+<td style="text-align: right;">-2.3%</td>
+</tr>
+<tr>
+<td><strong>Total</strong></td>
+<td style="text-align: right;"><strong>8,263.8</strong></td>
+<td style="text-align: right;"><strong>7,714.3 – 8,789.1</strong></td>
+<td style="text-align: right;"><strong>8,369.1</strong></td>
+<td style="text-align: right;"><strong>-1.3%</strong></td>
+</tr>
+</tbody>
+</table>
+<p><img alt="Daily admissions: posterior median and 95% band vs. observed" src="../figures/output/fit_check_daily_by_age.png" /></p>
+<p><em>Daily admissions: posterior median and 95% band vs. observed</em></p>
+<p><img alt="Cumulative admissions: posterior median and 95% band vs. observed" src="../figures/output/fit_check_cumulative_by_age.png" /></p>
+<p><em>Cumulative admissions: posterior median and 95% band vs. observed</em></p>
+<hr />
+<h2>6. Data sources</h2>
+<table>
+<thead>
+<tr>
+<th>Input</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Hospital admissions (calibration target)</td>
+<td>Massachusetts Department of Public Health (MA DPH): weekly influenza admissions by county and age group (<code>influenza_timeseries_*.csv</code>, <code>ed_admits_count</code>), summed over counties and spread evenly over each MMWR week (<code>data/prepare_hospitalizations.py</code>)</td>
+</tr>
+<tr>
+<td>Vaccination</td>
+<td>MA DPH: weekly cumulative first doses by county and age (<code>MA_influenza_coverage_2025-2026.csv</code>), differenced and spread over each week (<code>data/prepare_vaccination.py</code>)</td>
+</tr>
+<tr>
+<td>Population by age group</td>
+<td>MA DPH: <code>POP_ESTIMATE</code> of the vaccination file, summed over counties</td>
+</tr>
+<tr>
+<td>Contact matrices</td>
+<td>Mistry et al. 2021 synthetic contact matrices</td>
+</tr>
+<tr>
+<td>Absolute humidity</td>
+<td>gridMET daily specific humidity averaged over Massachusetts (× 1.2 kg/m³, <code>data/extract_ma_humidity.py</code>)</td>
+</tr>
+<tr>
+<td>School/work calendar</td>
+<td>Constructed state school/work-day calendar</td>
+</tr>
+</tbody>
+</table>
+<h2>7. Notes</h2>
+<ul>
+<li>Intervals reflect calibration uncertainty (posterior draws, deterministic transitions), not epidemic-process noise.</li>
+<li><code>m(t)</code> is a statistical smoothing device, not an independently measured behavioural signal.</li>
+<li>Coverage-target multipliers are computed from the scheduled coverage over the simulated window; the model's cap means delivered coverage lands slightly below the target (appendix B).</li>
+<li>"Per 100,000 doses" uses scheduled doses: doses the model declines to deliver to already-infected people are still bought and given.</li>
+<li>Vaccinating 65+ has no indirect effect on other age groups because vaccination blocks no infection in 65+ in the fitted model (residual susceptibility 1.00).</li>
+</ul>
+<hr />
+<h2>Appendix A — Coverage-scenario tables by age group hospitalized</h2>
+<h3>50% coverage target — hospitalizations averted vs. baseline</h3>
+<table>
+<thead>
+<tr>
+<th>Counted in</th>
+<th style="text-align: right;">0 raised</th>
+<th style="text-align: right;">1-4 raised</th>
+<th style="text-align: right;">5-12 raised</th>
+<th style="text-align: right;">13-17 raised</th>
+<th style="text-align: right;">18-49 raised</th>
+<th style="text-align: right;">50-64 raised</th>
+<th style="text-align: right;">65+ raised</th>
+<th style="text-align: right;">All raised</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">4 [3 – 5]</td>
+<td style="text-align: right;">3 [2 – 4]</td>
+<td style="text-align: right;">13 [9 – 17]</td>
+<td style="text-align: right;">2 [2 – 3]</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">23 [15 – 29]</td>
+</tr>
+<tr>
+<td>1-4</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">4 [3 – 5]</td>
+<td style="text-align: right;">18 [13 – 23]</td>
+<td style="text-align: right;">13 [9 – 17]</td>
+<td style="text-align: right;">50 [35 – 63]</td>
+<td style="text-align: right;">9 [6 – 11]</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">89 [65 – 113]</td>
+</tr>
+<tr>
+<td>5-12</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">1 [1 – 1]</td>
+<td style="text-align: right;">38 [26 – 48]</td>
+<td style="text-align: right;">15 [10 – 20]</td>
+<td style="text-align: right;">52 [34 – 67]</td>
+<td style="text-align: right;">10 [6 – 13]</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">107 [75 – 139]</td>
+</tr>
+<tr>
+<td>13-17</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">6 [4 – 9]</td>
+<td style="text-align: right;">13 [9 – 17]</td>
+<td style="text-align: right;">18 [12 – 25]</td>
+<td style="text-align: right;">4 [2 – 5]</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">39 [27 – 52]</td>
+</tr>
+<tr>
+<td>18-49</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">3 [2 – 3]</td>
+<td style="text-align: right;">52 [38 – 71]</td>
+<td style="text-align: right;">44 [32 – 59]</td>
+<td style="text-align: right;">211 [165 – 273]</td>
+<td style="text-align: right;">32 [24 – 43]</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">323 [252 – 417]</td>
+</tr>
+<tr>
+<td>50-64</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">3 [2 – 3]</td>
+<td style="text-align: right;">58 [41 – 74]</td>
+<td style="text-align: right;">49 [35 – 64]</td>
+<td style="text-align: right;">185 [138 – 234]</td>
+<td style="text-align: right;">72 [58 – 90]</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">344 [264 – 429]</td>
+</tr>
+<tr>
+<td>65+</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">13 [10 – 16]</td>
+<td style="text-align: right;">283 [220 – 335]</td>
+<td style="text-align: right;">237 [184 – 281]</td>
+<td style="text-align: right;">872 [707 – 1,012]</td>
+<td style="text-align: right;">183 [148 – 214]</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">1,506 [1,245 – 1,727]</td>
+</tr>
+<tr>
+<td><strong>All</strong></td>
+<td style="text-align: right;"><strong>0 [0 – 0]</strong></td>
+<td style="text-align: right;"><strong>24 [20 – 27]</strong></td>
+<td style="text-align: right;"><strong>462 [364 – 532]</strong></td>
+<td style="text-align: right;"><strong>376 [294 – 435]</strong></td>
+<td style="text-align: right;"><strong>1,406 [1,163 – 1,591]</strong></td>
+<td style="text-align: right;"><strong>314 [260 – 354]</strong></td>
+<td style="text-align: right;"><strong>0 [0 – 0]</strong></td>
+<td style="text-align: right;"><strong>2,446 [2,060 – 2,731]</strong></td>
+</tr>
+</tbody>
+</table>
+<h3>55% coverage target — hospitalizations averted vs. baseline</h3>
+<table>
+<thead>
+<tr>
+<th>Counted in</th>
+<th style="text-align: right;">0 raised</th>
+<th style="text-align: right;">1-4 raised</th>
+<th style="text-align: right;">5-12 raised</th>
+<th style="text-align: right;">13-17 raised</th>
+<th style="text-align: right;">18-49 raised</th>
+<th style="text-align: right;">50-64 raised</th>
+<th style="text-align: right;">65+ raised</th>
+<th style="text-align: right;">All raised</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td style="text-align: right;">1 [1 – 2]</td>
+<td style="text-align: right;">1 [1 – 1]</td>
+<td style="text-align: right;">6 [4 – 8]</td>
+<td style="text-align: right;">5 [3 – 6]</td>
+<td style="text-align: right;">16 [11 – 20]</td>
+<td style="text-align: right;">3 [2 – 4]</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">30 [20 – 38]</td>
+</tr>
+<tr>
+<td>1-4</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">13 [9 – 17]</td>
+<td style="text-align: right;">27 [19 – 34]</td>
+<td style="text-align: right;">18 [13 – 23]</td>
+<td style="text-align: right;">60 [43 – 76]</td>
+<td style="text-align: right;">13 [9 – 16]</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">118 [87 – 151]</td>
+</tr>
+<tr>
+<td>5-12</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">3 [2 – 4]</td>
+<td style="text-align: right;">55 [38 – 70]</td>
+<td style="text-align: right;">21 [14 – 28]</td>
+<td style="text-align: right;">63 [42 – 81]</td>
+<td style="text-align: right;">14 [9 – 18]</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">141 [98 – 181]</td>
+</tr>
+<tr>
+<td>13-17</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">1 [1 – 1]</td>
+<td style="text-align: right;">9 [6 – 13]</td>
+<td style="text-align: right;">18 [13 – 24]</td>
+<td style="text-align: right;">22 [15 – 30]</td>
+<td style="text-align: right;">5 [3 – 7]</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">50 [36 – 67]</td>
+</tr>
+<tr>
+<td>18-49</td>
+<td style="text-align: right;">0 [0 – 1]</td>
+<td style="text-align: right;">8 [6 – 11]</td>
+<td style="text-align: right;">77 [56 – 103]</td>
+<td style="text-align: right;">61 [44 – 82]</td>
+<td style="text-align: right;">254 [199 – 327]</td>
+<td style="text-align: right;">45 [34 – 60]</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">410 [322 – 525]</td>
+</tr>
+<tr>
+<td>50-64</td>
+<td style="text-align: right;">0 [0 – 1]</td>
+<td style="text-align: right;">9 [6 – 11]</td>
+<td style="text-align: right;">84 [60 – 108]</td>
+<td style="text-align: right;">68 [49 – 88]</td>
+<td style="text-align: right;">224 [168 – 283]</td>
+<td style="text-align: right;">102 [82 – 126]</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">442 [346 – 548]</td>
+</tr>
+<tr>
+<td>65+</td>
+<td style="text-align: right;">2 [2 – 3]</td>
+<td style="text-align: right;">42 [34 – 50]</td>
+<td style="text-align: right;">413 [322 – 487]</td>
+<td style="text-align: right;">329 [256 – 389]</td>
+<td style="text-align: right;">1,053 [860 – 1,215]</td>
+<td style="text-align: right;">259 [210 – 302]</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">1,937 [1,630 – 2,194]</td>
+</tr>
+<tr>
+<td><strong>All</strong></td>
+<td style="text-align: right;"><strong>5 [4 – 5]</strong></td>
+<td style="text-align: right;"><strong>77 [63 – 87]</strong></td>
+<td style="text-align: right;"><strong>675 [533 – 774]</strong></td>
+<td style="text-align: right;"><strong>522 [410 – 602]</strong></td>
+<td style="text-align: right;"><strong>1,699 [1,413 – 1,912]</strong></td>
+<td style="text-align: right;"><strong>443 [368 – 500]</strong></td>
+<td style="text-align: right;"><strong>0 [0 – 0]</strong></td>
+<td style="text-align: right;"><strong>3,146 [2,697 – 3,461]</strong></td>
+</tr>
+</tbody>
+</table>
+<h3>60% coverage target — hospitalizations averted vs. baseline</h3>
+<table>
+<thead>
+<tr>
+<th>Counted in</th>
+<th style="text-align: right;">0 raised</th>
+<th style="text-align: right;">1-4 raised</th>
+<th style="text-align: right;">5-12 raised</th>
+<th style="text-align: right;">13-17 raised</th>
+<th style="text-align: right;">18-49 raised</th>
+<th style="text-align: right;">50-64 raised</th>
+<th style="text-align: right;">65+ raised</th>
+<th style="text-align: right;">All raised</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td style="text-align: right;">3 [2 – 4]</td>
+<td style="text-align: right;">1 [1 – 2]</td>
+<td style="text-align: right;">8 [6 – 10]</td>
+<td style="text-align: right;">6 [4 – 7]</td>
+<td style="text-align: right;">19 [13 – 24]</td>
+<td style="text-align: right;">4 [3 – 5]</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">37 [24 – 48]</td>
+</tr>
+<tr>
+<td>1-4</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">22 [16 – 28]</td>
+<td style="text-align: right;">35 [25 – 44]</td>
+<td style="text-align: right;">23 [16 – 29]</td>
+<td style="text-align: right;">70 [51 – 89]</td>
+<td style="text-align: right;">16 [12 – 21]</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">144 [106 – 184]</td>
+</tr>
+<tr>
+<td>5-12</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">5 [3 – 6]</td>
+<td style="text-align: right;">71 [50 – 91]</td>
+<td style="text-align: right;">27 [18 – 35]</td>
+<td style="text-align: right;">73 [49 – 95]</td>
+<td style="text-align: right;">18 [12 – 23]</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">169 [120 – 219]</td>
+</tr>
+<tr>
+<td>13-17</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">1 [1 – 2]</td>
+<td style="text-align: right;">12 [8 – 17]</td>
+<td style="text-align: right;">23 [16 – 30]</td>
+<td style="text-align: right;">26 [18 – 35]</td>
+<td style="text-align: right;">6 [4 – 9]</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">61 [43 – 80]</td>
+</tr>
+<tr>
+<td>18-49</td>
+<td style="text-align: right;">1 [1 – 1]</td>
+<td style="text-align: right;">14 [10 – 18]</td>
+<td style="text-align: right;">100 [74 – 134]</td>
+<td style="text-align: right;">77 [57 – 104]</td>
+<td style="text-align: right;">295 [231 – 379]</td>
+<td style="text-align: right;">59 [44 – 78]</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">488 [385 – 618]</td>
+</tr>
+<tr>
+<td>50-64</td>
+<td style="text-align: right;">1 [1 – 1]</td>
+<td style="text-align: right;">14 [10 – 19]</td>
+<td style="text-align: right;">110 [79 – 141]</td>
+<td style="text-align: right;">87 [63 – 112]</td>
+<td style="text-align: right;">262 [196 – 330]</td>
+<td style="text-align: right;">131 [105 – 162]</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">530 [420 – 653]</td>
+</tr>
+<tr>
+<td>65+</td>
+<td style="text-align: right;">5 [4 – 6]</td>
+<td style="text-align: right;">72 [57 – 84]</td>
+<td style="text-align: right;">540 [423 – 635]</td>
+<td style="text-align: right;">419 [327 – 494]</td>
+<td style="text-align: right;">1,228 [1,012 – 1,412]</td>
+<td style="text-align: right;">334 [271 – 389]</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">2,332 [1,997 – 2,615]</td>
+</tr>
+<tr>
+<td><strong>All</strong></td>
+<td style="text-align: right;"><strong>10 [10 – 11]</strong></td>
+<td style="text-align: right;"><strong>130 [107 – 146]</strong></td>
+<td style="text-align: right;"><strong>881 [700 – 1,007]</strong></td>
+<td style="text-align: right;"><strong>666 [525 – 766]</strong></td>
+<td style="text-align: right;"><strong>1,982 [1,660 – 2,224]</strong></td>
+<td style="text-align: right;"><strong>571 [475 – 644]</strong></td>
+<td style="text-align: right;"><strong>0 [0 – 0]</strong></td>
+<td style="text-align: right;"><strong>3,778 [3,298 – 4,122]</strong></td>
+</tr>
+</tbody>
+</table>
+<h3>65% coverage target — hospitalizations averted vs. baseline</h3>
+<table>
+<thead>
+<tr>
+<th>Counted in</th>
+<th style="text-align: right;">0 raised</th>
+<th style="text-align: right;">1-4 raised</th>
+<th style="text-align: right;">5-12 raised</th>
+<th style="text-align: right;">13-17 raised</th>
+<th style="text-align: right;">18-49 raised</th>
+<th style="text-align: right;">50-64 raised</th>
+<th style="text-align: right;">65+ raised</th>
+<th style="text-align: right;">All raised</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td style="text-align: right;">4 [3 – 6]</td>
+<td style="text-align: right;">2 [1 – 2]</td>
+<td style="text-align: right;">10 [7 – 13]</td>
+<td style="text-align: right;">7 [5 – 9]</td>
+<td style="text-align: right;">22 [14 – 27]</td>
+<td style="text-align: right;">5 [4 – 7]</td>
+<td style="text-align: right;">0 [-0 – 0]</td>
+<td style="text-align: right;">42 [27 – 56]</td>
+</tr>
+<tr>
+<td>1-4</td>
+<td style="text-align: right;">1 [0 – 1]</td>
+<td style="text-align: right;">31 [22 – 39]</td>
+<td style="text-align: right;">43 [30 – 54]</td>
+<td style="text-align: right;">28 [20 – 36]</td>
+<td style="text-align: right;">79 [58 – 101]</td>
+<td style="text-align: right;">20 [14 – 26]</td>
+<td style="text-align: right;">0 [-0 – 0]</td>
+<td style="text-align: right;">167 [123 – 214]</td>
+</tr>
+<tr>
+<td>5-12</td>
+<td style="text-align: right;">0 [0 – 1]</td>
+<td style="text-align: right;">7 [5 – 9]</td>
+<td style="text-align: right;">86 [61 – 111]</td>
+<td style="text-align: right;">33 [22 – 43]</td>
+<td style="text-align: right;">84 [56 – 108]</td>
+<td style="text-align: right;">22 [14 – 28]</td>
+<td style="text-align: right;">0 [-0 – 0]</td>
+<td style="text-align: right;">195 [138 – 251]</td>
+</tr>
+<tr>
+<td>13-17</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">2 [1 – 3]</td>
+<td style="text-align: right;">15 [10 – 21]</td>
+<td style="text-align: right;">28 [20 – 37]</td>
+<td style="text-align: right;">30 [21 – 40]</td>
+<td style="text-align: right;">8 [5 – 11]</td>
+<td style="text-align: right;">0 [-0 – 0]</td>
+<td style="text-align: right;">69 [49 – 91]</td>
+</tr>
+<tr>
+<td>18-49</td>
+<td style="text-align: right;">1 [1 – 2]</td>
+<td style="text-align: right;">19 [14 – 26]</td>
+<td style="text-align: right;">123 [91 – 165]</td>
+<td style="text-align: right;">94 [69 – 126]</td>
+<td style="text-align: right;">334 [262 – 428]</td>
+<td style="text-align: right;">72 [54 – 95]</td>
+<td style="text-align: right;">0 [-0 – 0]</td>
+<td style="text-align: right;">557 [439 – 699]</td>
+</tr>
+<tr>
+<td>50-64</td>
+<td style="text-align: right;">2 [1 – 2]</td>
+<td style="text-align: right;">20 [15 – 26]</td>
+<td style="text-align: right;">135 [98 – 174]</td>
+<td style="text-align: right;">106 [76 – 136]</td>
+<td style="text-align: right;">298 [225 – 374]</td>
+<td style="text-align: right;">159 [127 – 197]</td>
+<td style="text-align: right;">0 [-0 – 0]</td>
+<td style="text-align: right;">608 [485 – 751]</td>
+</tr>
+<tr>
+<td>65+</td>
+<td style="text-align: right;">8 [6 – 9]</td>
+<td style="text-align: right;">101 [80 – 118]</td>
+<td style="text-align: right;">662 [522 – 778]</td>
+<td style="text-align: right;">507 [397 – 596]</td>
+<td style="text-align: right;">1,399 [1,159 – 1,603]</td>
+<td style="text-align: right;">408 [333 – 474]</td>
+<td style="text-align: right;">75 [68 – 81]</td>
+<td style="text-align: right;">2,723 [2,371 – 3,033]</td>
+</tr>
+<tr>
+<td><strong>All</strong></td>
+<td style="text-align: right;"><strong>16 [15 – 17]</strong></td>
+<td style="text-align: right;"><strong>182 [150 – 205]</strong></td>
+<td style="text-align: right;"><strong>1,083 [863 – 1,232]</strong></td>
+<td style="text-align: right;"><strong>806 [638 – 926]</strong></td>
+<td style="text-align: right;"><strong>2,257 [1,904 – 2,522]</strong></td>
+<td style="text-align: right;"><strong>697 [582 – 785]</strong></td>
+<td style="text-align: right;"><strong>75 [68 – 81]</strong></td>
+<td style="text-align: right;"><strong>4,368 [3,894 – 4,744]</strong></td>
+</tr>
+</tbody>
+</table>
+<h3>70% coverage target — hospitalizations averted vs. baseline</h3>
+<table>
+<thead>
+<tr>
+<th>Counted in</th>
+<th style="text-align: right;">0 raised</th>
+<th style="text-align: right;">1-4 raised</th>
+<th style="text-align: right;">5-12 raised</th>
+<th style="text-align: right;">13-17 raised</th>
+<th style="text-align: right;">18-49 raised</th>
+<th style="text-align: right;">50-64 raised</th>
+<th style="text-align: right;">65+ raised</th>
+<th style="text-align: right;">All raised</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td style="text-align: right;">6 [3 – 8]</td>
+<td style="text-align: right;">2 [2 – 3]</td>
+<td style="text-align: right;">12 [8 – 15]</td>
+<td style="text-align: right;">9 [6 – 11]</td>
+<td style="text-align: right;">24 [16 – 31]</td>
+<td style="text-align: right;">6 [4 – 8]</td>
+<td style="text-align: right;">0 [-0 – 0]</td>
+<td style="text-align: right;">47 [30 – 63]</td>
+</tr>
+<tr>
+<td>1-4</td>
+<td style="text-align: right;">1 [0 – 1]</td>
+<td style="text-align: right;">39 [29 – 50]</td>
+<td style="text-align: right;">50 [36 – 64]</td>
+<td style="text-align: right;">33 [23 – 42]</td>
+<td style="text-align: right;">89 [65 – 113]</td>
+<td style="text-align: right;">24 [17 – 30]</td>
+<td style="text-align: right;">0 [-0 – 0]</td>
+<td style="text-align: right;">187 [137 – 240]</td>
+</tr>
+<tr>
+<td>5-12</td>
+<td style="text-align: right;">1 [0 – 1]</td>
+<td style="text-align: right;">9 [6 – 12]</td>
+<td style="text-align: right;">101 [72 – 130]</td>
+<td style="text-align: right;">38 [25 – 50]</td>
+<td style="text-align: right;">94 [64 – 122]</td>
+<td style="text-align: right;">25 [17 – 33]</td>
+<td style="text-align: right;">0 [-0 – 0]</td>
+<td style="text-align: right;">218 [155 – 279]</td>
+</tr>
+<tr>
+<td>13-17</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">3 [2 – 4]</td>
+<td style="text-align: right;">18 [12 – 24]</td>
+<td style="text-align: right;">32 [23 – 43]</td>
+<td style="text-align: right;">33 [23 – 45]</td>
+<td style="text-align: right;">9 [6 – 13]</td>
+<td style="text-align: right;">0 [-0 – 0]</td>
+<td style="text-align: right;">77 [55 – 102]</td>
+</tr>
+<tr>
+<td>18-49</td>
+<td style="text-align: right;">2 [2 – 3]</td>
+<td style="text-align: right;">25 [19 – 33]</td>
+<td style="text-align: right;">146 [108 – 195]</td>
+<td style="text-align: right;">110 [81 – 147]</td>
+<td style="text-align: right;">373 [293 – 474]</td>
+<td style="text-align: right;">85 [64 – 112]</td>
+<td style="text-align: right;">0 [-0 – 0]</td>
+<td style="text-align: right;">619 [491 – 771]</td>
+</tr>
+<tr>
+<td>50-64</td>
+<td style="text-align: right;">2 [2 – 3]</td>
+<td style="text-align: right;">26 [19 – 33]</td>
+<td style="text-align: right;">160 [116 – 205]</td>
+<td style="text-align: right;">124 [90 – 159]</td>
+<td style="text-align: right;">333 [254 – 417]</td>
+<td style="text-align: right;">187 [149 – 231]</td>
+<td style="text-align: right;">0 [-0 – 0]</td>
+<td style="text-align: right;">676 [542 – 837]</td>
+</tr>
+<tr>
+<td>65+</td>
+<td style="text-align: right;">10 [8 – 12]</td>
+<td style="text-align: right;">129 [104 – 152]</td>
+<td style="text-align: right;">782 [619 – 918]</td>
+<td style="text-align: right;">594 [466 – 697]</td>
+<td style="text-align: right;">1,564 [1,304 – 1,782]</td>
+<td style="text-align: right;">481 [393 – 558]</td>
+<td style="text-align: right;">164 [149 – 179]</td>
+<td style="text-align: right;">3,068 [2,699 – 3,408]</td>
+</tr>
+<tr>
+<td><strong>All</strong></td>
+<td style="text-align: right;"><strong>22 [20 – 23]</strong></td>
+<td style="text-align: right;"><strong>235 [193 – 263]</strong></td>
+<td style="text-align: right;"><strong>1,279 [1,024 – 1,450]</strong></td>
+<td style="text-align: right;"><strong>944 [749 – 1,081]</strong></td>
+<td style="text-align: right;"><strong>2,523 [2,139 – 2,807]</strong></td>
+<td style="text-align: right;"><strong>822 [687 – 924]</strong></td>
+<td style="text-align: right;"><strong>164 [149 – 179]</strong></td>
+<td style="text-align: right;"><strong>4,898 [4,427 – 5,296]</strong></td>
+</tr>
+</tbody>
+</table>
+<h3>5% fewer doses — additional hospitalizations vs. baseline</h3>
+<table>
+<thead>
+<tr>
+<th>Counted in</th>
+<th style="text-align: right;">0 cut</th>
+<th style="text-align: right;">1-4 cut</th>
+<th style="text-align: right;">5-12 cut</th>
+<th style="text-align: right;">13-17 cut</th>
+<th style="text-align: right;">18-49 cut</th>
+<th style="text-align: right;">50-64 cut</th>
+<th style="text-align: right;">65+ cut</th>
+<th style="text-align: right;">All cut</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td style="text-align: right;">1 [0 – 1]</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">1 [1 – 1]</td>
+<td style="text-align: right;">1 [0 – 1]</td>
+<td style="text-align: right;">1 [1 – 1]</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">0 [-0 – 0]</td>
+<td style="text-align: right;">4 [3 – 5]</td>
+</tr>
+<tr>
+<td>1-4</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">4 [3 – 6]</td>
+<td style="text-align: right;">4 [2 – 5]</td>
+<td style="text-align: right;">2 [1 – 3]</td>
+<td style="text-align: right;">3 [2 – 4]</td>
+<td style="text-align: right;">1 [1 – 2]</td>
+<td style="text-align: right;">0 [-0 – 0]</td>
+<td style="text-align: right;">15 [11 – 19]</td>
+</tr>
+<tr>
+<td>5-12</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">1 [1 – 1]</td>
+<td style="text-align: right;">7 [5 – 10]</td>
+<td style="text-align: right;">2 [2 – 3]</td>
+<td style="text-align: right;">3 [2 – 4]</td>
+<td style="text-align: right;">2 [1 – 2]</td>
+<td style="text-align: right;">0 [-0 – 0]</td>
+<td style="text-align: right;">16 [11 – 21]</td>
+</tr>
+<tr>
+<td>13-17</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">1 [1 – 2]</td>
+<td style="text-align: right;">2 [1 – 3]</td>
+<td style="text-align: right;">1 [1 – 2]</td>
+<td style="text-align: right;">1 [0 – 1]</td>
+<td style="text-align: right;">0 [-0 – 0]</td>
+<td style="text-align: right;">5 [4 – 7]</td>
+</tr>
+<tr>
+<td>18-49</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">3 [2 – 4]</td>
+<td style="text-align: right;">10 [7 – 14]</td>
+<td style="text-align: right;">7 [5 – 9]</td>
+<td style="text-align: right;">14 [11 – 18]</td>
+<td style="text-align: right;">5 [4 – 7]</td>
+<td style="text-align: right;">0 [-0 – 0]</td>
+<td style="text-align: right;">39 [29 – 53]</td>
+</tr>
+<tr>
+<td>50-64</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">3 [2 – 4]</td>
+<td style="text-align: right;">11 [8 – 14]</td>
+<td style="text-align: right;">8 [5 – 10]</td>
+<td style="text-align: right;">12 [9 – 15]</td>
+<td style="text-align: right;">12 [10 – 15]</td>
+<td style="text-align: right;">0 [-0 – 0]</td>
+<td style="text-align: right;">46 [34 – 59]</td>
+</tr>
+<tr>
+<td>65+</td>
+<td style="text-align: right;">1 [1 – 2]</td>
+<td style="text-align: right;">14 [11 – 17]</td>
+<td style="text-align: right;">55 [42 – 66]</td>
+<td style="text-align: right;">37 [28 – 44]</td>
+<td style="text-align: right;">57 [45 – 67]</td>
+<td style="text-align: right;">30 [24 – 35]</td>
+<td style="text-align: right;">55 [50 – 59]</td>
+<td style="text-align: right;">251 [207 – 291]</td>
+</tr>
+<tr>
+<td><strong>All</strong></td>
+<td style="text-align: right;"><strong>3 [3 – 3]</strong></td>
+<td style="text-align: right;"><strong>26 [21 – 29]</strong></td>
+<td style="text-align: right;"><strong>90 [70 – 104]</strong></td>
+<td style="text-align: right;"><strong>58 [45 – 68]</strong></td>
+<td style="text-align: right;"><strong>91 [73 – 105]</strong></td>
+<td style="text-align: right;"><strong>51 [42 – 58]</strong></td>
+<td style="text-align: right;"><strong>55 [50 – 59]</strong></td>
+<td style="text-align: right;"><strong>378 [311 – 430]</strong></td>
+</tr>
+</tbody>
+</table>
+<h3>10% fewer doses — additional hospitalizations vs. baseline</h3>
+<table>
+<thead>
+<tr>
+<th>Counted in</th>
+<th style="text-align: right;">0 cut</th>
+<th style="text-align: right;">1-4 cut</th>
+<th style="text-align: right;">5-12 cut</th>
+<th style="text-align: right;">13-17 cut</th>
+<th style="text-align: right;">18-49 cut</th>
+<th style="text-align: right;">50-64 cut</th>
+<th style="text-align: right;">65+ cut</th>
+<th style="text-align: right;">All cut</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td style="text-align: right;">1 [1 – 2]</td>
+<td style="text-align: right;">0 [0 – 1]</td>
+<td style="text-align: right;">2 [1 – 2]</td>
+<td style="text-align: right;">1 [1 – 1]</td>
+<td style="text-align: right;">2 [1 – 2]</td>
+<td style="text-align: right;">1 [1 – 1]</td>
+<td style="text-align: right;">0 [-0 – 0]</td>
+<td style="text-align: right;">7 [5 – 9]</td>
+</tr>
+<tr>
+<td>1-4</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">9 [6 – 11]</td>
+<td style="text-align: right;">7 [5 – 9]</td>
+<td style="text-align: right;">4 [3 – 5]</td>
+<td style="text-align: right;">6 [4 – 8]</td>
+<td style="text-align: right;">3 [2 – 4]</td>
+<td style="text-align: right;">0 [-0 – 0]</td>
+<td style="text-align: right;">30 [22 – 38]</td>
+</tr>
+<tr>
+<td>5-12</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">2 [1 – 3]</td>
+<td style="text-align: right;">15 [11 – 19]</td>
+<td style="text-align: right;">5 [3 – 6]</td>
+<td style="text-align: right;">7 [4 – 9]</td>
+<td style="text-align: right;">3 [2 – 4]</td>
+<td style="text-align: right;">0 [-0 – 0]</td>
+<td style="text-align: right;">32 [21 – 42]</td>
+</tr>
+<tr>
+<td>13-17</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">1 [0 – 1]</td>
+<td style="text-align: right;">3 [2 – 3]</td>
+<td style="text-align: right;">4 [3 – 6]</td>
+<td style="text-align: right;">2 [2 – 3]</td>
+<td style="text-align: right;">1 [1 – 2]</td>
+<td style="text-align: right;">0 [-0 – 0]</td>
+<td style="text-align: right;">11 [8 – 15]</td>
+</tr>
+<tr>
+<td>18-49</td>
+<td style="text-align: right;">1 [0 – 1]</td>
+<td style="text-align: right;">5 [4 – 7]</td>
+<td style="text-align: right;">20 [15 – 28]</td>
+<td style="text-align: right;">14 [10 – 18]</td>
+<td style="text-align: right;">28 [22 – 37]</td>
+<td style="text-align: right;">10 [8 – 14]</td>
+<td style="text-align: right;">0 [-0 – 0]</td>
+<td style="text-align: right;">79 [59 – 106]</td>
+</tr>
+<tr>
+<td>50-64</td>
+<td style="text-align: right;">1 [0 – 1]</td>
+<td style="text-align: right;">6 [4 – 7]</td>
+<td style="text-align: right;">22 [16 – 29]</td>
+<td style="text-align: right;">15 [11 – 20]</td>
+<td style="text-align: right;">24 [17 – 31]</td>
+<td style="text-align: right;">24 [19 – 30]</td>
+<td style="text-align: right;">0 [-0 – 0]</td>
+<td style="text-align: right;">93 [68 – 120]</td>
+</tr>
+<tr>
+<td>65+</td>
+<td style="text-align: right;">3 [2 – 3]</td>
+<td style="text-align: right;">28 [22 – 33]</td>
+<td style="text-align: right;">111 [85 – 132]</td>
+<td style="text-align: right;">74 [57 – 89]</td>
+<td style="text-align: right;">113 [90 – 135]</td>
+<td style="text-align: right;">60 [48 – 70]</td>
+<td style="text-align: right;">109 [99 – 119]</td>
+<td style="text-align: right;">510 [418 – 594]</td>
+</tr>
+<tr>
+<td><strong>All</strong></td>
+<td style="text-align: right;"><strong>6 [5 – 6]</strong></td>
+<td style="text-align: right;"><strong>51 [42 – 58]</strong></td>
+<td style="text-align: right;"><strong>181 [140 – 210]</strong></td>
+<td style="text-align: right;"><strong>118 [91 – 137]</strong></td>
+<td style="text-align: right;"><strong>183 [147 – 212]</strong></td>
+<td style="text-align: right;"><strong>103 [85 – 117]</strong></td>
+<td style="text-align: right;"><strong>109 [99 – 119]</strong></td>
+<td style="text-align: right;"><strong>767 [627 – 875]</strong></td>
+</tr>
+</tbody>
+</table>
+<h3>15% fewer doses — additional hospitalizations vs. baseline</h3>
+<table>
+<thead>
+<tr>
+<th>Counted in</th>
+<th style="text-align: right;">0 cut</th>
+<th style="text-align: right;">1-4 cut</th>
+<th style="text-align: right;">5-12 cut</th>
+<th style="text-align: right;">13-17 cut</th>
+<th style="text-align: right;">18-49 cut</th>
+<th style="text-align: right;">50-64 cut</th>
+<th style="text-align: right;">65+ cut</th>
+<th style="text-align: right;">All cut</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td style="text-align: right;">2 [1 – 3]</td>
+<td style="text-align: right;">1 [1 – 1]</td>
+<td style="text-align: right;">3 [2 – 3]</td>
+<td style="text-align: right;">2 [1 – 2]</td>
+<td style="text-align: right;">3 [2 – 3]</td>
+<td style="text-align: right;">1 [1 – 1]</td>
+<td style="text-align: right;">0 [-0 – 0]</td>
+<td style="text-align: right;">11 [8 – 14]</td>
+</tr>
+<tr>
+<td>1-4</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">13 [10 – 17]</td>
+<td style="text-align: right;">11 [8 – 14]</td>
+<td style="text-align: right;">6 [4 – 8]</td>
+<td style="text-align: right;">10 [7 – 12]</td>
+<td style="text-align: right;">4 [3 – 6]</td>
+<td style="text-align: right;">0 [-0 – 0]</td>
+<td style="text-align: right;">46 [33 – 58]</td>
+</tr>
+<tr>
+<td>5-12</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">3 [2 – 4]</td>
+<td style="text-align: right;">23 [16 – 29]</td>
+<td style="text-align: right;">7 [5 – 9]</td>
+<td style="text-align: right;">10 [6 – 13]</td>
+<td style="text-align: right;">5 [3 – 6]</td>
+<td style="text-align: right;">0 [-0 – 0]</td>
+<td style="text-align: right;">49 [33 – 64]</td>
+</tr>
+<tr>
+<td>13-17</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">1 [1 – 1]</td>
+<td style="text-align: right;">4 [3 – 5]</td>
+<td style="text-align: right;">6 [4 – 8]</td>
+<td style="text-align: right;">4 [2 – 5]</td>
+<td style="text-align: right;">2 [1 – 2]</td>
+<td style="text-align: right;">0 [-0 – 0]</td>
+<td style="text-align: right;">17 [11 – 23]</td>
+</tr>
+<tr>
+<td>18-49</td>
+<td style="text-align: right;">1 [1 – 1]</td>
+<td style="text-align: right;">8 [6 – 11]</td>
+<td style="text-align: right;">31 [22 – 42]</td>
+<td style="text-align: right;">21 [15 – 28]</td>
+<td style="text-align: right;">42 [33 – 56]</td>
+<td style="text-align: right;">16 [12 – 21]</td>
+<td style="text-align: right;">0 [-0 – 0]</td>
+<td style="text-align: right;">120 [88 – 161]</td>
+</tr>
+<tr>
+<td>50-64</td>
+<td style="text-align: right;">1 [1 – 1]</td>
+<td style="text-align: right;">8 [6 – 11]</td>
+<td style="text-align: right;">34 [24 – 44]</td>
+<td style="text-align: right;">23 [16 – 30]</td>
+<td style="text-align: right;">36 [26 – 46]</td>
+<td style="text-align: right;">36 [29 – 45]</td>
+<td style="text-align: right;">0 [-0 – 0]</td>
+<td style="text-align: right;">141 [103 – 182]</td>
+</tr>
+<tr>
+<td>65+</td>
+<td style="text-align: right;">4 [3 – 5]</td>
+<td style="text-align: right;">42 [34 – 50]</td>
+<td style="text-align: right;">167 [128 – 200]</td>
+<td style="text-align: right;">112 [85 – 133]</td>
+<td style="text-align: right;">170 [134 – 203]</td>
+<td style="text-align: right;">90 [72 – 106]</td>
+<td style="text-align: right;">164 [148 – 178]</td>
+<td style="text-align: right;">776 [633 – 909]</td>
+</tr>
+<tr>
+<td><strong>All</strong></td>
+<td style="text-align: right;"><strong>8 [8 – 9]</strong></td>
+<td style="text-align: right;"><strong>77 [63 – 87]</strong></td>
+<td style="text-align: right;"><strong>273 [211 – 317]</strong></td>
+<td style="text-align: right;"><strong>177 [137 – 206]</strong></td>
+<td style="text-align: right;"><strong>276 [221 – 319]</strong></td>
+<td style="text-align: right;"><strong>154 [127 – 175]</strong></td>
+<td style="text-align: right;"><strong>164 [148 – 178]</strong></td>
+<td style="text-align: right;"><strong>1,166 [949 – 1,333]</strong></td>
+</tr>
+</tbody>
+</table>
+<h3>20% fewer doses — additional hospitalizations vs. baseline</h3>
+<table>
+<thead>
+<tr>
+<th>Counted in</th>
+<th style="text-align: right;">0 cut</th>
+<th style="text-align: right;">1-4 cut</th>
+<th style="text-align: right;">5-12 cut</th>
+<th style="text-align: right;">13-17 cut</th>
+<th style="text-align: right;">18-49 cut</th>
+<th style="text-align: right;">50-64 cut</th>
+<th style="text-align: right;">65+ cut</th>
+<th style="text-align: right;">All cut</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td style="text-align: right;">3 [2 – 4]</td>
+<td style="text-align: right;">1 [1 – 1]</td>
+<td style="text-align: right;">3 [2 – 4]</td>
+<td style="text-align: right;">2 [2 – 3]</td>
+<td style="text-align: right;">4 [2 – 4]</td>
+<td style="text-align: right;">2 [1 – 2]</td>
+<td style="text-align: right;">0 [-0 – 0]</td>
+<td style="text-align: right;">15 [11 – 19]</td>
+</tr>
+<tr>
+<td>1-4</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">17 [13 – 22]</td>
+<td style="text-align: right;">14 [10 – 18]</td>
+<td style="text-align: right;">8 [6 – 10]</td>
+<td style="text-align: right;">13 [9 – 16]</td>
+<td style="text-align: right;">6 [4 – 7]</td>
+<td style="text-align: right;">0 [-0 – 0]</td>
+<td style="text-align: right;">62 [45 – 78]</td>
+</tr>
+<tr>
+<td>5-12</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">4 [3 – 5]</td>
+<td style="text-align: right;">31 [21 – 39]</td>
+<td style="text-align: right;">9 [6 – 13]</td>
+<td style="text-align: right;">13 [9 – 18]</td>
+<td style="text-align: right;">6 [4 – 8]</td>
+<td style="text-align: right;">0 [-0 – 0]</td>
+<td style="text-align: right;">66 [44 – 86]</td>
+</tr>
+<tr>
+<td>13-17</td>
+<td style="text-align: right;">0 [0 – 0]</td>
+<td style="text-align: right;">1 [1 – 2]</td>
+<td style="text-align: right;">5 [3 – 7]</td>
+<td style="text-align: right;">9 [6 – 11]</td>
+<td style="text-align: right;">5 [3 – 6]</td>
+<td style="text-align: right;">2 [2 – 3]</td>
+<td style="text-align: right;">0 [-0 – 0]</td>
+<td style="text-align: right;">22 [15 – 30]</td>
+</tr>
+<tr>
+<td>18-49</td>
+<td style="text-align: right;">1 [1 – 1]</td>
+<td style="text-align: right;">11 [8 – 14]</td>
+<td style="text-align: right;">41 [30 – 56]</td>
+<td style="text-align: right;">27 [20 – 37]</td>
+<td style="text-align: right;">57 [43 – 75]</td>
+<td style="text-align: right;">21 [16 – 28]</td>
+<td style="text-align: right;">0 [-0 – 0]</td>
+<td style="text-align: right;">161 [118 – 217]</td>
+</tr>
+<tr>
+<td>50-64</td>
+<td style="text-align: right;">1 [1 – 1]</td>
+<td style="text-align: right;">11 [8 – 15]</td>
+<td style="text-align: right;">45 [32 – 59]</td>
+<td style="text-align: right;">31 [22 – 40]</td>
+<td style="text-align: right;">48 [35 – 62]</td>
+<td style="text-align: right;">48 [38 – 60]</td>
+<td style="text-align: right;">0 [-0 – 0]</td>
+<td style="text-align: right;">190 [138 – 246]</td>
+</tr>
+<tr>
+<td>65+</td>
+<td style="text-align: right;">5 [4 – 6]</td>
+<td style="text-align: right;">56 [45 – 67]</td>
+<td style="text-align: right;">223 [170 – 268]</td>
+<td style="text-align: right;">149 [114 – 179]</td>
+<td style="text-align: right;">228 [179 – 271]</td>
+<td style="text-align: right;">120 [96 – 141]</td>
+<td style="text-align: right;">218 [198 – 237]</td>
+<td style="text-align: right;">1,049 [853 – 1,232]</td>
+</tr>
+<tr>
+<td><strong>All</strong></td>
+<td style="text-align: right;"><strong>11 [10 – 12]</strong></td>
+<td style="text-align: right;"><strong>103 [84 – 116]</strong></td>
+<td style="text-align: right;"><strong>365 [283 – 426]</strong></td>
+<td style="text-align: right;"><strong>237 [183 – 276]</strong></td>
+<td style="text-align: right;"><strong>369 [295 – 426]</strong></td>
+<td style="text-align: right;"><strong>206 [170 – 234]</strong></td>
+<td style="text-align: right;"><strong>218 [198 – 237]</strong></td>
+<td style="text-align: right;"><strong>1,574 [1,276 – 1,809]</strong></td>
+</tr>
+</tbody>
+</table>
+<h2>Appendix B — Dose accounting: scheduled vs. delivered doses</h2>
+<table>
+<thead>
+<tr>
+<th>Age group</th>
+<th style="text-align: right;">Population</th>
+<th style="text-align: right;">Scheduled doses</th>
+<th style="text-align: right;">Delivered doses</th>
+<th style="text-align: right;">Wasted doses</th>
+<th style="text-align: right;">Pct wasted</th>
+<th style="text-align: right;">Scheduled coverage</th>
+<th style="text-align: right;">Delivered coverage</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td style="text-align: right;">68,723</td>
+<td style="text-align: right;">34,751</td>
+<td style="text-align: right;">33,558</td>
+<td style="text-align: right;">1,193</td>
+<td style="text-align: right;">3.4%</td>
+<td style="text-align: right;">50.6%</td>
+<td style="text-align: right;">48.8%</td>
+</tr>
+<tr>
+<td>1-4</td>
+<td style="text-align: right;">287,051</td>
+<td style="text-align: right;">137,081</td>
+<td style="text-align: right;">134,036</td>
+<td style="text-align: right;">3,045</td>
+<td style="text-align: right;">2.2%</td>
+<td style="text-align: right;">47.8%</td>
+<td style="text-align: right;">46.7%</td>
+</tr>
+<tr>
+<td>5-12</td>
+<td style="text-align: right;">625,439</td>
+<td style="text-align: right;">247,286</td>
+<td style="text-align: right;">238,271</td>
+<td style="text-align: right;">9,015</td>
+<td style="text-align: right;">3.6%</td>
+<td style="text-align: right;">39.5%</td>
+<td style="text-align: right;">38.1%</td>
+</tr>
+<tr>
+<td>13-17</td>
+<td style="text-align: right;">406,983</td>
+<td style="text-align: right;">153,066</td>
+<td style="text-align: right;">146,744</td>
+<td style="text-align: right;">6,322</td>
+<td style="text-align: right;">4.1%</td>
+<td style="text-align: right;">37.6%</td>
+<td style="text-align: right;">36.1%</td>
+</tr>
+<tr>
+<td>18-49</td>
+<td style="text-align: right;">3,112,693</td>
+<td style="text-align: right;">857,553</td>
+<td style="text-align: right;">833,336</td>
+<td style="text-align: right;">24,217</td>
+<td style="text-align: right;">2.8%</td>
+<td style="text-align: right;">27.6%</td>
+<td style="text-align: right;">26.8%</td>
+</tr>
+<tr>
+<td>50-64</td>
+<td style="text-align: right;">1,351,323</td>
+<td style="text-align: right;">515,217</td>
+<td style="text-align: right;">505,033</td>
+<td style="text-align: right;">10,184</td>
+<td style="text-align: right;">2.0%</td>
+<td style="text-align: right;">38.1%</td>
+<td style="text-align: right;">37.4%</td>
+</tr>
+<tr>
+<td>65+</td>
+<td style="text-align: right;">1,420,722</td>
+<td style="text-align: right;">864,407</td>
+<td style="text-align: right;">857,022</td>
+<td style="text-align: right;">7,385</td>
+<td style="text-align: right;">0.9%</td>
+<td style="text-align: right;">60.8%</td>
+<td style="text-align: right;">60.3%</td>
+</tr>
+<tr>
+<td><strong>All</strong></td>
+<td style="text-align: right;"><strong>7,272,934</strong></td>
+<td style="text-align: right;"><strong>2,809,361</strong></td>
+<td style="text-align: right;"><strong>2,748,000</strong></td>
+<td style="text-align: right;"><strong>61,361</strong></td>
+<td style="text-align: right;"><strong>2.2%</strong></td>
+<td style="text-align: right;"><strong>38.6%</strong></td>
+<td style="text-align: right;"><strong>37.8%</strong></td>
+</tr>
+</tbody>
+</table>
+<p><img alt="Daily scheduled vaccination proportion" src="../figures/output/vax_coverage_daily.png" /></p>
+<p><em>Daily scheduled vaccination proportion</em></p>
+<h2>Appendix C — Attack rate by vaccination status (baseline)</h2>
+<p>Share of each group infected over the season, median [95% interval]. Vaccinated = vaccinated at any point in the season (delivered doses), with their infections after vaccination; unvaccinated = everyone else, seeded infections included. The model never vaccinates someone already infected, so an infection before a person's vaccination date counts as unvaccinated. This timing effect lowers the vaccinated attack rate even where vaccination blocks no infection (65+).</p>
+<table>
+<thead>
+<tr>
+<th>Age group</th>
+<th style="text-align: right;">Share vaccinated</th>
+<th style="text-align: right;">Vaccinated</th>
+<th style="text-align: right;">Unvaccinated</th>
+<th style="text-align: right;">Total</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td style="text-align: right;">49.0%</td>
+<td style="text-align: right;">4.1% [2.9–6.4%]</td>
+<td style="text-align: right;">14.4% [10.3–21.1%]</td>
+<td style="text-align: right;">9.3% [6.6–14.0%]</td>
+</tr>
+<tr>
+<td>1-4</td>
+<td style="text-align: right;">46.8%</td>
+<td style="text-align: right;">6.2% [4.3–9.4%]</td>
+<td style="text-align: right;">15.0% [10.8–22.0%]</td>
+<td style="text-align: right;">10.9% [7.7–16.1%]</td>
+</tr>
+<tr>
+<td>5-12</td>
+<td style="text-align: right;">38.2%</td>
+<td style="text-align: right;">8.9% [6.3–13.4%]</td>
+<td style="text-align: right;">20.8% [15.1–29.6%]</td>
+<td style="text-align: right;">16.3% [11.7–23.5%]</td>
+</tr>
+<tr>
+<td>13-17</td>
+<td style="text-align: right;">36.2%</td>
+<td style="text-align: right;">9.1% [6.5–13.7%]</td>
+<td style="text-align: right;">21.6% [15.7–30.7%]</td>
+<td style="text-align: right;">17.1% [12.3–24.7%]</td>
+</tr>
+<tr>
+<td>18-49</td>
+<td style="text-align: right;">27.0%</td>
+<td style="text-align: right;">11.1% [7.9–16.7%]</td>
+<td style="text-align: right;">17.3% [12.4–25.3%]</td>
+<td style="text-align: right;">15.6% [11.2–23.0%]</td>
+</tr>
+<tr>
+<td>50-64</td>
+<td style="text-align: right;">37.6%</td>
+<td style="text-align: right;">10.0% [7.0–15.1%]</td>
+<td style="text-align: right;">15.4% [11.0–22.7%]</td>
+<td style="text-align: right;">13.4% [9.5–19.9%]</td>
+</tr>
+<tr>
+<td>65+</td>
+<td style="text-align: right;">61.0%</td>
+<td style="text-align: right;">7.8% [5.5–11.9%]</td>
+<td style="text-align: right;">9.8% [7.0–14.7%]</td>
+<td style="text-align: right;">8.6% [6.1–13.0%]</td>
+</tr>
+<tr>
+<td><strong>All</strong></td>
+<td style="text-align: right;"><strong>38.1%</strong></td>
+<td style="text-align: right;"><strong>9.3% [6.5–14.0%]</strong></td>
+<td style="text-align: right;"><strong>16.5% [11.8–24.1%]</strong></td>
+<td style="text-align: right;"><strong>13.7% [9.8–20.3%]</strong></td>
+</tr>
+</tbody>
+</table></body></html>

@@ -35,3 +35,7 @@ generic_core/examples/MA_vax_2026_10/MA_scenario_config_VE_hosp_only.json
 generic_core/examples/MA_vax_2026_10/analysis/VE hosp expected vs simulated.xlsx
 .tmp/
 temp/
+# Restricted raw data (not shareable) -- only the censored copies are tracked.
+generic_core/examples/MA_vax/data/original/*
+!generic_core/examples/MA_vax/data/original/.gitkeep
+!generic_core/examples/MA_vax/data/original/censored_data/

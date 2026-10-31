@@ -1,0 +1,1 @@
+[fitting] MCMC (emcee): 66 walkers x 4000 steps, ndim=33, 10 processes

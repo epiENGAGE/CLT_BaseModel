@@ -1,0 +1,59 @@
+Source: `simulation_output_MA_vax_param_set_stochastic/results_parquet` (715 replicates). Median [95% interval] across replicates.
+
+## Hospitalizations averted
+
+| Measure | Age group | Hospitalizations Averted | % Hospitalizations Averted |
+|---|---|---|---|
+| Infection protection only | 0 | 92 [66 – 108] | 53.4% [46.9% – 58.1%] |
+| Infection protection only | 1-4 | 368 [256 – 470] | 54.1% [47.5% – 59.0%] |
+| Infection protection only | 5-12 | 367 [237 – 496] | 50.7% [43.2% – 56.4%] |
+| Infection protection only | 13-17 | 125 [82 – 175] | 49.5% [41.8% – 55.3%] |
+| Infection protection only | 18-49 | 875 [620 – 1,229] | 46.2% [38.5% – 52.0%] |
+| Infection protection only | 50-64 | 1,061 [735 – 1,408] | 48.0% [40.7% – 53.5%] |
+| Infection protection only | 65+ | 5,401 [3,951 – 6,760] | 46.0% [38.8% – 51.3%] |
+| Infection protection only | All | 8,306 [6,166 – 10,261] | 46.9% [39.7% – 52.2%] |
+| Hospitalization protection only | 0 | 2 [1 – 2] | 0.9% [0.8% – 1.0%] |
+| Hospitalization protection only | 1-4 | 7 [5 – 9] | 1.1% [1.0% – 1.3%] |
+| Hospitalization protection only | 5-12 | 7 [5 – 9] | 0.9% [0.8% – 1.1%] |
+| Hospitalization protection only | 13-17 | 2 [2 – 3] | 0.9% [0.8% – 1.0%] |
+| Hospitalization protection only | 18-49 | 18 [14 – 21] | 0.9% [0.8% – 1.1%] |
+| Hospitalization protection only | 50-64 | 29 [24 – 36] | 1.3% [1.2% – 1.5%] |
+| Hospitalization protection only | 65+ | 1,092 [990 – 1,186] | 9.3% [8.4% – 10.5%] |
+| Hospitalization protection only | All | 1,156 [1,054 – 1,253] | 6.5% [5.8% – 7.4%] |
+| Total | 0 | 93 [67 – 110] | 54.2% [47.9% – 58.9%] |
+| Total | 1-4 | 376 [262 – 479] | 55.2% [48.7% – 60.0%] |
+| Total | 5-12 | 373 [242 – 504] | 51.6% [44.3% – 57.2%] |
+| Total | 13-17 | 127 [84 – 178] | 50.3% [42.8% – 56.0%] |
+| Total | 18-49 | 892 [635 – 1,250] | 47.2% [39.6% – 52.8%] |
+| Total | 50-64 | 1,089 [762 – 1,440] | 49.3% [42.2% – 54.6%] |
+| Total | 65+ | 6,473 [5,013 – 7,904] | 55.3% [49.4% – 59.7%] |
+| Total | All | 9,459 [7,293 – 11,426] | 53.4% [47.1% – 58.1%] |
+
+## Cumulative hospitalizations
+
+| Scenario | Age Group | Hospitalizations |
+|---|---|---|
+| baseline | 0 | 79 [49 – 111] |
+| baseline | 1-4 | 306 [222 – 391] |
+| baseline | 5-12 | 349 [253 – 449] |
+| baseline | 13-17 | 125 [90 – 164] |
+| baseline | 18-49 | 1,014 [821 – 1,228] |
+| baseline | 50-64 | 1,120 [921 – 1,386] |
+| baseline | 65+ | 5,264 [4,751 – 5,733] |
+| baseline | All | 8,264 [7,714 – 8,789] |
+| Infection protection only | 0 | 80 [50 – 113] |
+| Infection protection only | 1-4 | 313 [227 – 400] |
+| Infection protection only | 5-12 | 355 [258 – 457] |
+| Infection protection only | 13-17 | 127 [92 – 167] |
+| Infection protection only | 18-49 | 1,031 [836 – 1,249] |
+| Infection protection only | 50-64 | 1,149 [945 – 1,421] |
+| Infection protection only | 65+ | 6,357 [5,740 – 6,919] |
+| Infection protection only | All | 9,418 [8,800 – 10,049] |
+| no vax | 0 | 171 [115 – 219] |
+| no vax | 1-4 | 680 [501 – 860] |
+| no vax | 5-12 | 726 [507 – 928] |
+| no vax | 13-17 | 251 [176 – 334] |
+| no vax | 18-49 | 1,905 [1,496 – 2,473] |
+| no vax | 50-64 | 2,212 [1,755 – 2,771] |
+| no vax | 65+ | 11,701 [10,005 – 13,476] |
+| no vax | All | 17,709 [15,358 – 19,823] |
