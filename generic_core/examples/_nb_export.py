@@ -48,7 +48,7 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
     from datetime import datetime
     from pathlib import Path
     from types import SimpleNamespace
-    from concurrent.futures import ProcessPoolExecutor, as_completed
+    from concurrent.futures import ProcessPoolExecutor, FIRST_COMPLETED, wait
 
     # ---- Configurable ----
     MODEL_CONFIG_FILE = "model_config.json"
@@ -750,6 +750,10 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
         _stage_path = OUTPUT_DIR / f"{_out_dir.name}.stage.duckdb"
         _stage_path.unlink(missing_ok=True)
         _con = duckdb.connect(str(_stage_path))
+        # Cap DuckDB's buffer pool (default: 80% of RAM). A large staging file
+        # otherwise grows this process until the machine swaps, and every
+        # append slows down with it.
+        _con.execute("SET memory_limit = '4GB'")
         results_io.create_results_tables(_con)
         print(f"Writing results for {len(SCENARIOS)} scenario(s) to {_out_dir}")
 
@@ -790,25 +794,38 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
             for _t in _tasks:
                 _store(*_run_one(*_t))
         else:
+            # Tasks are submitted in batches -- at most a few per worker in
+            # flight -- rather than all at once. With every task submitted up
+            # front the workers run far ahead of the single DuckDB writer
+            # below, and every finished-but-unwritten replicate's arrays sit
+            # in this process's memory: on a 60k-run ensemble that reached
+            # 25 GB, the machine swapped and the appends slowed to a crawl.
+            _max_in_flight = 3 * _n_workers
+            _task_iter = iter(_tasks)
             with ProcessPoolExecutor(max_workers=_n_workers) as _ex:
-                _futures = {_ex.submit(_run_one, *_t) for _t in _tasks}
-                # as_completed copies the set it is given, so discarding from
-                # ours below is safe and is what actually frees each finished
-                # future (as_completed drops only its own reference).
-                for _fut in as_completed(_futures):
-                    _scen, _rep, _psi, _h, _h_full, _kinds = _fut.result()
-                    print(f"Finished scenario={_scen} rep={_rep}")
-                    # Appended here, while the remaining runs are still going,
-                    # rather than after the pool closes. DuckDB allows a single
-                    # writer connection, so these appends cannot themselves run
-                    # in parallel -- but running them in the gaps of an
-                    # unfinished pool hides most of their cost instead of
-                    # adding it to the end of the run, and lets each
-                    # replicate's arrays be freed as soon as they are on disk
-                    # rather than holding the whole ensemble in the parent.
-                    _store(_scen, _rep, _psi, _h, _h_full, _kinds)
-                    _futures.discard(_fut)
-                    del _h, _h_full, _kinds, _fut
+                _futures = set()
+                for _t in _task_iter:
+                    _futures.add(_ex.submit(_run_one, *_t))
+                    if len(_futures) >= _max_in_flight:
+                        break
+                while _futures:
+                    _done_futs, _futures = wait(_futures, return_when=FIRST_COMPLETED)
+                    for _fut in _done_futs:
+                        _scen, _rep, _psi, _h, _h_full, _kinds = _fut.result()
+                        print(f"Finished scenario={_scen} rep={_rep}")
+                        # Appended here, while the remaining runs are still
+                        # going, rather than after the pool closes. DuckDB
+                        # allows a single writer connection, so these appends
+                        # cannot themselves run in parallel -- but running
+                        # them in the gaps of an unfinished pool hides most
+                        # of their cost, and frees each replicate's arrays
+                        # once they are on disk.
+                        _store(_scen, _rep, _psi, _h, _h_full, _kinds)
+                        del _h, _h_full, _kinds, _fut
+                    for _t in _task_iter:
+                        _futures.add(_ex.submit(_run_one, *_t))
+                        if len(_futures) >= _max_in_flight:
+                            break
         _sim_secs = time.perf_counter() - _t_start
         for _scen, _n in _written.items():
             print(f"{_scen}: wrote {_n} replicate(s)")
