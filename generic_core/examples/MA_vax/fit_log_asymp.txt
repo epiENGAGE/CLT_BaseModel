@@ -1,0 +1,3 @@
+[fitting] MCMC (emcee): 66 walkers x 4000 steps, ndim=33, 10 processes
+[fitting] MCMC done — 726 posterior draws (dropped 0/66 walkers)
+Wrote /Users/rfp437/Work/CityLevelTransmission/CLT_BaseModel/generic_core/examples/MA_vax/fitted_params_MA_vax_asymp.json

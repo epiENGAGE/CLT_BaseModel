@@ -1,0 +1,3845 @@
+Applying fitted seed scaling to: ['E']
+Reconstructing m(t) from 22 fitted log-increment(s) (fit period 307 days, knots every 14 days)
+Parameter uncertainty: 726 set(s) sampled from 726 accepted, 726 run(s) per scenario (deterministic transitions)
+Running 3630 simulation(s) across 11 worker process(es)
+Writing results for 5 scenario(s) to /Users/rfp437/Work/CityLevelTransmission/CLT_BaseModel/generic_core/examples/MA_vax/simulation_output_MA_vax_asymp/results_parquet
+Finished scenario=baseline rep=5
+Finished scenario=baseline rep=10
+Finished scenario=baseline rep=1
+Finished scenario=baseline rep=9
+Finished scenario=baseline rep=3
+Finished scenario=baseline rep=8
+Finished scenario=baseline rep=6
+Finished scenario=baseline rep=0
+Finished scenario=baseline rep=2
+Finished scenario=baseline rep=7
+Finished scenario=baseline rep=4
+Finished scenario=baseline rep=17
+Finished scenario=baseline rep=13
+Finished scenario=baseline rep=11
+Finished scenario=baseline rep=18
+Finished scenario=baseline rep=12
+Finished scenario=baseline rep=14
+Finished scenario=baseline rep=19
+Finished scenario=baseline rep=16
+Finished scenario=baseline rep=21
+  baseline: wrote 20/726 replicate(s)
+Finished scenario=baseline rep=15
+Finished scenario=baseline rep=20
+Finished scenario=baseline rep=23
+Finished scenario=baseline rep=30
+Finished scenario=baseline rep=25
+Finished scenario=baseline rep=26
+Finished scenario=baseline rep=27
+Finished scenario=baseline rep=29
+Finished scenario=baseline rep=24
+Finished scenario=baseline rep=32
+Finished scenario=baseline rep=31
+Finished scenario=baseline rep=28
+Finished scenario=baseline rep=22
+Finished scenario=baseline rep=35
+Finished scenario=baseline rep=40
+Finished scenario=baseline rep=34
+Finished scenario=baseline rep=41
+Finished scenario=baseline rep=37
+Finished scenario=baseline rep=38
+Finished scenario=baseline rep=33
+  baseline: wrote 40/726 replicate(s)
+Finished scenario=baseline rep=36
+Finished scenario=baseline rep=43
+Finished scenario=baseline rep=39
+Finished scenario=baseline rep=42
+Finished scenario=baseline rep=50
+Finished scenario=baseline rep=63
+Finished scenario=baseline rep=56
+Finished scenario=baseline rep=49
+Finished scenario=baseline rep=51
+Finished scenario=baseline rep=47
+Finished scenario=baseline rep=62
+Finished scenario=baseline rep=61
+Finished scenario=baseline rep=52
+Finished scenario=baseline rep=46
+Finished scenario=baseline rep=53
+Finished scenario=baseline rep=55
+Finished scenario=baseline rep=60
+Finished scenario=baseline rep=45
+Finished scenario=baseline rep=58
+Finished scenario=baseline rep=48
+  baseline: wrote 60/726 replicate(s)
+Finished scenario=baseline rep=44
+Finished scenario=baseline rep=54
+Finished scenario=baseline rep=57
+Finished scenario=baseline rep=59
+Finished scenario=baseline rep=66
+Finished scenario=baseline rep=74
+Finished scenario=baseline rep=70
+Finished scenario=baseline rep=72
+Finished scenario=baseline rep=69
+Finished scenario=baseline rep=71
+Finished scenario=baseline rep=76
+Finished scenario=baseline rep=64
+Finished scenario=baseline rep=67
+Finished scenario=baseline rep=75
+Finished scenario=baseline rep=73
+Finished scenario=baseline rep=65
+Finished scenario=baseline rep=68
+Finished scenario=baseline rep=78
+Finished scenario=baseline rep=85
+Finished scenario=baseline rep=90
+  baseline: wrote 80/726 replicate(s)
+Finished scenario=baseline rep=96
+Finished scenario=baseline rep=83
+Finished scenario=baseline rep=77
+Finished scenario=baseline rep=88
+Finished scenario=baseline rep=86
+Finished scenario=baseline rep=87
+Finished scenario=baseline rep=82
+Finished scenario=baseline rep=92
+Finished scenario=baseline rep=94
+Finished scenario=baseline rep=95
+Finished scenario=baseline rep=80
+Finished scenario=baseline rep=84
+Finished scenario=baseline rep=81
+Finished scenario=baseline rep=93
+Finished scenario=baseline rep=89
+Finished scenario=baseline rep=91
+Finished scenario=baseline rep=79
+Finished scenario=baseline rep=109
+Finished scenario=baseline rep=108
+Finished scenario=baseline rep=106
+  baseline: wrote 100/726 replicate(s)
+Finished scenario=baseline rep=97
+Finished scenario=baseline rep=101
+Finished scenario=baseline rep=105
+Finished scenario=baseline rep=104
+Finished scenario=baseline rep=102
+Finished scenario=baseline rep=100
+Finished scenario=baseline rep=98
+Finished scenario=baseline rep=103
+Finished scenario=baseline rep=107
+Finished scenario=baseline rep=99
+Finished scenario=baseline rep=113
+Finished scenario=baseline rep=111
+Finished scenario=baseline rep=114
+Finished scenario=baseline rep=115
+Finished scenario=baseline rep=112
+Finished scenario=baseline rep=119
+Finished scenario=baseline rep=117
+Finished scenario=baseline rep=118
+Finished scenario=baseline rep=120
+Finished scenario=baseline rep=116
+  baseline: wrote 120/726 replicate(s)
+Finished scenario=baseline rep=110
+Finished scenario=baseline rep=123
+Finished scenario=baseline rep=127
+Finished scenario=baseline rep=122
+Finished scenario=baseline rep=131
+Finished scenario=baseline rep=124
+Finished scenario=baseline rep=125
+Finished scenario=baseline rep=128
+Finished scenario=baseline rep=126
+Finished scenario=baseline rep=130
+Finished scenario=baseline rep=121
+Finished scenario=baseline rep=129
+Finished scenario=baseline rep=143
+Finished scenario=baseline rep=151
+Finished scenario=baseline rep=144
+Finished scenario=baseline rep=137
+Finished scenario=baseline rep=146
+Finished scenario=baseline rep=133
+Finished scenario=baseline rep=141
+Finished scenario=baseline rep=148
+  baseline: wrote 140/726 replicate(s)
+Finished scenario=baseline rep=134
+Finished scenario=baseline rep=149
+Finished scenario=baseline rep=138
+Finished scenario=baseline rep=147
+Finished scenario=baseline rep=139
+Finished scenario=baseline rep=150
+Finished scenario=baseline rep=145
+Finished scenario=baseline rep=142
+Finished scenario=baseline rep=132
+Finished scenario=baseline rep=135
+Finished scenario=baseline rep=136
+Finished scenario=baseline rep=140
+Finished scenario=baseline rep=156
+Finished scenario=baseline rep=154
+Finished scenario=baseline rep=161
+Finished scenario=baseline rep=160
+Finished scenario=baseline rep=162
+Finished scenario=baseline rep=155
+Finished scenario=baseline rep=164
+Finished scenario=baseline rep=153
+  baseline: wrote 160/726 replicate(s)
+Finished scenario=baseline rep=158
+Finished scenario=baseline rep=159
+Finished scenario=baseline rep=152
+Finished scenario=baseline rep=157
+Finished scenario=baseline rep=163
+Finished scenario=baseline rep=173
+Finished scenario=baseline rep=172
+Finished scenario=baseline rep=166
+Finished scenario=baseline rep=165
+Finished scenario=baseline rep=175
+Finished scenario=baseline rep=168
+Finished scenario=baseline rep=174
+Finished scenario=baseline rep=167
+Finished scenario=baseline rep=170
+Finished scenario=baseline rep=169
+Finished scenario=baseline rep=171
+Finished scenario=baseline rep=177
+Finished scenario=baseline rep=186
+Finished scenario=baseline rep=187
+Finished scenario=baseline rep=194
+  baseline: wrote 180/726 replicate(s)
+Finished scenario=baseline rep=183
+Finished scenario=baseline rep=182
+Finished scenario=baseline rep=178
+Finished scenario=baseline rep=179
+Finished scenario=baseline rep=191
+Finished scenario=baseline rep=176
+Finished scenario=baseline rep=188
+Finished scenario=baseline rep=192
+Finished scenario=baseline rep=181
+Finished scenario=baseline rep=180
+Finished scenario=baseline rep=193
+Finished scenario=baseline rep=184
+Finished scenario=baseline rep=185
+Finished scenario=baseline rep=189
+Finished scenario=baseline rep=190
+Finished scenario=baseline rep=196
+Finished scenario=baseline rep=199
+Finished scenario=baseline rep=205
+Finished scenario=baseline rep=201
+Finished scenario=baseline rep=206
+  baseline: wrote 200/726 replicate(s)
+Finished scenario=baseline rep=197
+Finished scenario=baseline rep=200
+Finished scenario=baseline rep=198
+Finished scenario=baseline rep=208
+Finished scenario=baseline rep=203
+Finished scenario=baseline rep=202
+Finished scenario=baseline rep=204
+Finished scenario=baseline rep=195
+Finished scenario=baseline rep=207
+Finished scenario=baseline rep=219
+Finished scenario=baseline rep=211
+Finished scenario=baseline rep=214
+Finished scenario=baseline rep=215
+Finished scenario=baseline rep=217
+Finished scenario=baseline rep=210
+Finished scenario=baseline rep=209
+Finished scenario=baseline rep=216
+Finished scenario=baseline rep=212
+Finished scenario=baseline rep=213
+Finished scenario=baseline rep=218
+  baseline: wrote 220/726 replicate(s)
+Finished scenario=baseline rep=234
+Finished scenario=baseline rep=223
+Finished scenario=baseline rep=230
+Finished scenario=baseline rep=235
+Finished scenario=baseline rep=227
+Finished scenario=baseline rep=238
+Finished scenario=baseline rep=226
+Finished scenario=baseline rep=236
+Finished scenario=baseline rep=231
+Finished scenario=baseline rep=220
+Finished scenario=baseline rep=229
+Finished scenario=baseline rep=221
+Finished scenario=baseline rep=225
+Finished scenario=baseline rep=233
+Finished scenario=baseline rep=224
+Finished scenario=baseline rep=237
+Finished scenario=baseline rep=228
+Finished scenario=baseline rep=232
+Finished scenario=baseline rep=222
+Finished scenario=baseline rep=240
+  baseline: wrote 240/726 replicate(s)
+Finished scenario=baseline rep=239
+Finished scenario=baseline rep=246
+Finished scenario=baseline rep=247
+Finished scenario=baseline rep=243
+Finished scenario=baseline rep=242
+Finished scenario=baseline rep=249
+Finished scenario=baseline rep=245
+Finished scenario=baseline rep=248
+Finished scenario=baseline rep=241
+Finished scenario=baseline rep=250
+Finished scenario=baseline rep=252
+Finished scenario=baseline rep=251
+Finished scenario=baseline rep=244
+Finished scenario=baseline rep=255
+Finished scenario=baseline rep=257
+Finished scenario=baseline rep=260
+Finished scenario=baseline rep=263
+Finished scenario=baseline rep=259
+Finished scenario=baseline rep=254
+Finished scenario=baseline rep=262
+  baseline: wrote 260/726 replicate(s)
+Finished scenario=baseline rep=261
+Finished scenario=baseline rep=253
+Finished scenario=baseline rep=256
+Finished scenario=baseline rep=258
+Finished scenario=baseline rep=274
+Finished scenario=baseline rep=264
+Finished scenario=baseline rep=266
+Finished scenario=baseline rep=268
+Finished scenario=baseline rep=269
+Finished scenario=baseline rep=276
+Finished scenario=baseline rep=267
+Finished scenario=baseline rep=272
+Finished scenario=baseline rep=279
+Finished scenario=baseline rep=273
+Finished scenario=baseline rep=275
+Finished scenario=baseline rep=270
+Finished scenario=baseline rep=265
+Finished scenario=baseline rep=271
+Finished scenario=baseline rep=277
+Finished scenario=baseline rep=291
+  baseline: wrote 280/726 replicate(s)
+Finished scenario=baseline rep=286
+Finished scenario=baseline rep=287
+Finished scenario=baseline rep=280
+Finished scenario=baseline rep=296
+Finished scenario=baseline rep=284
+Finished scenario=baseline rep=282
+Finished scenario=baseline rep=293
+Finished scenario=baseline rep=283
+Finished scenario=baseline rep=285
+Finished scenario=baseline rep=281
+Finished scenario=baseline rep=292
+Finished scenario=baseline rep=294
+Finished scenario=baseline rep=290
+Finished scenario=baseline rep=289
+Finished scenario=baseline rep=295
+Finished scenario=baseline rep=288
+Finished scenario=baseline rep=278
+Finished scenario=baseline rep=301
+Finished scenario=baseline rep=306
+Finished scenario=baseline rep=298
+  baseline: wrote 300/726 replicate(s)
+Finished scenario=baseline rep=311
+Finished scenario=baseline rep=308
+Finished scenario=baseline rep=300
+Finished scenario=baseline rep=305
+Finished scenario=baseline rep=304
+Finished scenario=baseline rep=297
+Finished scenario=baseline rep=310
+Finished scenario=baseline rep=309
+Finished scenario=baseline rep=307
+Finished scenario=baseline rep=299
+Finished scenario=baseline rep=302
+Finished scenario=baseline rep=303
+Finished scenario=baseline rep=312
+Finished scenario=baseline rep=313
+Finished scenario=baseline rep=317
+Finished scenario=baseline rep=315
+Finished scenario=baseline rep=322
+Finished scenario=baseline rep=321
+Finished scenario=baseline rep=316
+Finished scenario=baseline rep=318
+  baseline: wrote 320/726 replicate(s)
+Finished scenario=baseline rep=320
+Finished scenario=baseline rep=319
+Finished scenario=baseline rep=314
+Finished scenario=baseline rep=330
+Finished scenario=baseline rep=331
+Finished scenario=baseline rep=324
+Finished scenario=baseline rep=326
+Finished scenario=baseline rep=328
+Finished scenario=baseline rep=327
+Finished scenario=baseline rep=329
+Finished scenario=baseline rep=333
+Finished scenario=baseline rep=332
+Finished scenario=baseline rep=325
+Finished scenario=baseline rep=323
+Finished scenario=baseline rep=335
+Finished scenario=baseline rep=338
+Finished scenario=baseline rep=336
+Finished scenario=baseline rep=341
+Finished scenario=baseline rep=346
+Finished scenario=baseline rep=342
+  baseline: wrote 340/726 replicate(s)
+Finished scenario=baseline rep=343
+Finished scenario=baseline rep=347
+Finished scenario=baseline rep=350
+Finished scenario=baseline rep=344
+Finished scenario=baseline rep=345
+Finished scenario=baseline rep=349
+Finished scenario=baseline rep=334
+Finished scenario=baseline rep=348
+Finished scenario=baseline rep=339
+Finished scenario=baseline rep=340
+Finished scenario=baseline rep=337
+Finished scenario=baseline rep=357
+Finished scenario=baseline rep=359
+Finished scenario=baseline rep=351
+Finished scenario=baseline rep=358
+Finished scenario=baseline rep=365
+Finished scenario=baseline rep=363
+Finished scenario=baseline rep=355
+Finished scenario=baseline rep=354
+Finished scenario=baseline rep=353
+  baseline: wrote 360/726 replicate(s)
+Finished scenario=baseline rep=361
+Finished scenario=baseline rep=366
+Finished scenario=baseline rep=360
+Finished scenario=baseline rep=356
+Finished scenario=baseline rep=362
+Finished scenario=baseline rep=364
+Finished scenario=baseline rep=352
+Finished scenario=baseline rep=372
+Finished scenario=baseline rep=371
+Finished scenario=baseline rep=367
+Finished scenario=baseline rep=376
+Finished scenario=baseline rep=377
+Finished scenario=baseline rep=374
+Finished scenario=baseline rep=373
+Finished scenario=baseline rep=368
+Finished scenario=baseline rep=370
+Finished scenario=baseline rep=375
+Finished scenario=baseline rep=369
+Finished scenario=baseline rep=380
+Finished scenario=baseline rep=383
+  baseline: wrote 380/726 replicate(s)
+Finished scenario=baseline rep=381
+Finished scenario=baseline rep=378
+Finished scenario=baseline rep=389
+Finished scenario=baseline rep=379
+Finished scenario=baseline rep=387
+Finished scenario=baseline rep=392
+Finished scenario=baseline rep=382
+Finished scenario=baseline rep=385
+Finished scenario=baseline rep=388
+Finished scenario=baseline rep=394
+Finished scenario=baseline rep=391
+Finished scenario=baseline rep=393
+Finished scenario=baseline rep=386
+Finished scenario=baseline rep=384
+Finished scenario=baseline rep=390
+Finished scenario=baseline rep=401
+Finished scenario=baseline rep=395
+Finished scenario=baseline rep=399
+Finished scenario=baseline rep=407
+Finished scenario=baseline rep=396
+  baseline: wrote 400/726 replicate(s)
+Finished scenario=baseline rep=408
+Finished scenario=baseline rep=397
+Finished scenario=baseline rep=406
+Finished scenario=baseline rep=409
+Finished scenario=baseline rep=402
+Finished scenario=baseline rep=398
+Finished scenario=baseline rep=404
+Finished scenario=baseline rep=400
+Finished scenario=baseline rep=405
+Finished scenario=baseline rep=403
+Finished scenario=baseline rep=414
+Finished scenario=baseline rep=425
+Finished scenario=baseline rep=410
+Finished scenario=baseline rep=421
+Finished scenario=baseline rep=424
+Finished scenario=baseline rep=416
+Finished scenario=baseline rep=426
+Finished scenario=baseline rep=412
+Finished scenario=baseline rep=418
+Finished scenario=baseline rep=415
+  baseline: wrote 420/726 replicate(s)
+Finished scenario=baseline rep=420
+Finished scenario=baseline rep=417
+Finished scenario=baseline rep=427
+Finished scenario=baseline rep=419
+Finished scenario=baseline rep=411
+Finished scenario=baseline rep=413
+Finished scenario=baseline rep=422
+Finished scenario=baseline rep=423
+Finished scenario=baseline rep=429
+Finished scenario=baseline rep=428
+Finished scenario=baseline rep=435
+Finished scenario=baseline rep=431
+Finished scenario=baseline rep=432
+Finished scenario=baseline rep=434
+Finished scenario=baseline rep=436
+Finished scenario=baseline rep=430
+Finished scenario=baseline rep=433
+Finished scenario=baseline rep=437
+Finished scenario=baseline rep=439
+Finished scenario=baseline rep=441
+  baseline: wrote 440/726 replicate(s)
+Finished scenario=baseline rep=440
+Finished scenario=baseline rep=438
+Finished scenario=baseline rep=442
+Finished scenario=baseline rep=447
+Finished scenario=baseline rep=448
+Finished scenario=baseline rep=444
+Finished scenario=baseline rep=450
+Finished scenario=baseline rep=446
+Finished scenario=baseline rep=445
+Finished scenario=baseline rep=451
+Finished scenario=baseline rep=453
+Finished scenario=baseline rep=454
+Finished scenario=baseline rep=452
+Finished scenario=baseline rep=449
+Finished scenario=baseline rep=443
+Finished scenario=baseline rep=457
+Finished scenario=baseline rep=466
+Finished scenario=baseline rep=456
+Finished scenario=baseline rep=471
+Finished scenario=baseline rep=467
+  baseline: wrote 460/726 replicate(s)
+Finished scenario=baseline rep=462
+Finished scenario=baseline rep=468
+Finished scenario=baseline rep=463
+Finished scenario=baseline rep=459
+Finished scenario=baseline rep=461
+Finished scenario=baseline rep=470
+Finished scenario=baseline rep=458
+Finished scenario=baseline rep=460
+Finished scenario=baseline rep=469
+Finished scenario=baseline rep=464
+Finished scenario=baseline rep=465
+Finished scenario=baseline rep=472
+Finished scenario=baseline rep=455
+Finished scenario=baseline rep=482
+Finished scenario=baseline rep=473
+Finished scenario=baseline rep=484
+Finished scenario=baseline rep=481
+Finished scenario=baseline rep=478
+Finished scenario=baseline rep=486
+Finished scenario=baseline rep=487
+  baseline: wrote 480/726 replicate(s)
+Finished scenario=baseline rep=475
+Finished scenario=baseline rep=477
+Finished scenario=baseline rep=480
+Finished scenario=baseline rep=476
+Finished scenario=baseline rep=479
+Finished scenario=baseline rep=483
+Finished scenario=baseline rep=474
+Finished scenario=baseline rep=485
+Finished scenario=baseline rep=491
+Finished scenario=baseline rep=505
+Finished scenario=baseline rep=498
+Finished scenario=baseline rep=489
+Finished scenario=baseline rep=502
+Finished scenario=baseline rep=496
+Finished scenario=baseline rep=500
+Finished scenario=baseline rep=497
+Finished scenario=baseline rep=492
+Finished scenario=baseline rep=493
+Finished scenario=baseline rep=488
+Finished scenario=baseline rep=490
+  baseline: wrote 500/726 replicate(s)
+Finished scenario=baseline rep=494
+Finished scenario=baseline rep=499
+Finished scenario=baseline rep=495
+Finished scenario=baseline rep=517
+Finished scenario=baseline rep=503
+Finished scenario=baseline rep=514
+Finished scenario=baseline rep=506
+Finished scenario=baseline rep=510
+Finished scenario=baseline rep=511
+Finished scenario=baseline rep=513
+Finished scenario=baseline rep=509
+Finished scenario=baseline rep=515
+Finished scenario=baseline rep=501
+Finished scenario=baseline rep=507
+Finished scenario=baseline rep=508
+Finished scenario=baseline rep=504
+Finished scenario=baseline rep=512
+Finished scenario=baseline rep=516
+Finished scenario=baseline rep=524
+Finished scenario=baseline rep=526
+  baseline: wrote 520/726 replicate(s)
+Finished scenario=baseline rep=527
+Finished scenario=baseline rep=528
+Finished scenario=baseline rep=530
+Finished scenario=baseline rep=521
+Finished scenario=baseline rep=522
+Finished scenario=baseline rep=531
+Finished scenario=baseline rep=532
+Finished scenario=baseline rep=529
+Finished scenario=baseline rep=520
+Finished scenario=baseline rep=518
+Finished scenario=baseline rep=519
+Finished scenario=baseline rep=523
+Finished scenario=baseline rep=525
+Finished scenario=baseline rep=547
+Finished scenario=baseline rep=544
+Finished scenario=baseline rep=537
+Finished scenario=baseline rep=548
+Finished scenario=baseline rep=540
+Finished scenario=baseline rep=535
+Finished scenario=baseline rep=541
+  baseline: wrote 540/726 replicate(s)
+Finished scenario=baseline rep=542
+Finished scenario=baseline rep=534
+Finished scenario=baseline rep=543
+Finished scenario=baseline rep=538
+Finished scenario=baseline rep=533
+Finished scenario=baseline rep=539
+Finished scenario=baseline rep=545
+Finished scenario=baseline rep=546
+Finished scenario=baseline rep=549
+Finished scenario=baseline rep=536
+Finished scenario=baseline rep=550
+Finished scenario=baseline rep=556
+Finished scenario=baseline rep=563
+Finished scenario=baseline rep=565
+Finished scenario=baseline rep=559
+Finished scenario=baseline rep=555
+Finished scenario=baseline rep=560
+Finished scenario=baseline rep=562
+Finished scenario=baseline rep=557
+Finished scenario=baseline rep=564
+  baseline: wrote 560/726 replicate(s)
+Finished scenario=baseline rep=551
+Finished scenario=baseline rep=558
+Finished scenario=baseline rep=552
+Finished scenario=baseline rep=553
+Finished scenario=baseline rep=554
+Finished scenario=baseline rep=561
+Finished scenario=baseline rep=566
+Finished scenario=baseline rep=573
+Finished scenario=baseline rep=568
+Finished scenario=baseline rep=574
+Finished scenario=baseline rep=571
+Finished scenario=baseline rep=569
+Finished scenario=baseline rep=570
+Finished scenario=baseline rep=567
+Finished scenario=baseline rep=572
+Finished scenario=baseline rep=576
+Finished scenario=baseline rep=575
+Finished scenario=baseline rep=577
+Finished scenario=baseline rep=585
+Finished scenario=baseline rep=592
+  baseline: wrote 580/726 replicate(s)
+Finished scenario=baseline rep=579
+Finished scenario=baseline rep=591
+Finished scenario=baseline rep=581
+Finished scenario=baseline rep=584
+Finished scenario=baseline rep=588
+Finished scenario=baseline rep=590
+Finished scenario=baseline rep=586
+Finished scenario=baseline rep=593
+Finished scenario=baseline rep=583
+Finished scenario=baseline rep=587
+Finished scenario=baseline rep=580
+Finished scenario=baseline rep=582
+Finished scenario=baseline rep=578
+Finished scenario=baseline rep=589
+Finished scenario=baseline rep=597
+Finished scenario=baseline rep=605
+Finished scenario=baseline rep=595
+Finished scenario=baseline rep=606
+Finished scenario=baseline rep=596
+Finished scenario=baseline rep=601
+  baseline: wrote 600/726 replicate(s)
+Finished scenario=baseline rep=600
+Finished scenario=baseline rep=608
+Finished scenario=baseline rep=594
+Finished scenario=baseline rep=598
+Finished scenario=baseline rep=599
+Finished scenario=baseline rep=602
+Finished scenario=baseline rep=609
+Finished scenario=baseline rep=603
+Finished scenario=baseline rep=607
+Finished scenario=baseline rep=604
+Finished scenario=baseline rep=626
+Finished scenario=baseline rep=620
+Finished scenario=baseline rep=610
+Finished scenario=baseline rep=619
+Finished scenario=baseline rep=624
+Finished scenario=baseline rep=612
+Finished scenario=baseline rep=618
+Finished scenario=baseline rep=611
+Finished scenario=baseline rep=615
+Finished scenario=baseline rep=614
+  baseline: wrote 620/726 replicate(s)
+Finished scenario=baseline rep=621
+Finished scenario=baseline rep=625
+Finished scenario=baseline rep=623
+Finished scenario=baseline rep=622
+Finished scenario=baseline rep=613
+Finished scenario=baseline rep=617
+Finished scenario=baseline rep=616
+Finished scenario=baseline rep=632
+Finished scenario=baseline rep=627
+Finished scenario=baseline rep=636
+Finished scenario=baseline rep=631
+Finished scenario=baseline rep=638
+Finished scenario=baseline rep=634
+Finished scenario=baseline rep=633
+Finished scenario=baseline rep=629
+Finished scenario=baseline rep=639
+Finished scenario=baseline rep=642
+Finished scenario=baseline rep=640
+Finished scenario=baseline rep=630
+Finished scenario=baseline rep=635
+  baseline: wrote 640/726 replicate(s)
+Finished scenario=baseline rep=637
+Finished scenario=baseline rep=641
+Finished scenario=baseline rep=628
+Finished scenario=baseline rep=645
+Finished scenario=baseline rep=654
+Finished scenario=baseline rep=656
+Finished scenario=baseline rep=657
+Finished scenario=baseline rep=649
+Finished scenario=baseline rep=646
+Finished scenario=baseline rep=643
+Finished scenario=baseline rep=647
+Finished scenario=baseline rep=650
+Finished scenario=baseline rep=648
+Finished scenario=baseline rep=659
+Finished scenario=baseline rep=652
+Finished scenario=baseline rep=655
+Finished scenario=baseline rep=644
+Finished scenario=baseline rep=653
+Finished scenario=baseline rep=651
+Finished scenario=baseline rep=661
+  baseline: wrote 660/726 replicate(s)
+Finished scenario=baseline rep=669
+Finished scenario=baseline rep=658
+Finished scenario=baseline rep=675
+Finished scenario=baseline rep=672
+Finished scenario=baseline rep=665
+Finished scenario=baseline rep=662
+Finished scenario=baseline rep=671
+Finished scenario=baseline rep=663
+Finished scenario=baseline rep=664
+Finished scenario=baseline rep=674
+Finished scenario=baseline rep=667
+Finished scenario=baseline rep=670
+Finished scenario=baseline rep=666
+Finished scenario=baseline rep=660
+Finished scenario=baseline rep=668
+Finished scenario=baseline rep=673
+Finished scenario=baseline rep=686
+Finished scenario=baseline rep=681
+Finished scenario=baseline rep=676
+Finished scenario=baseline rep=684
+  baseline: wrote 680/726 replicate(s)
+Finished scenario=baseline rep=682
+Finished scenario=baseline rep=677
+Finished scenario=baseline rep=688
+Finished scenario=baseline rep=678
+Finished scenario=baseline rep=680
+Finished scenario=baseline rep=683
+Finished scenario=baseline rep=689
+Finished scenario=baseline rep=685
+Finished scenario=baseline rep=679
+Finished scenario=baseline rep=690
+Finished scenario=baseline rep=687
+Finished scenario=baseline rep=698
+Finished scenario=baseline rep=692
+Finished scenario=baseline rep=701
+Finished scenario=baseline rep=700
+Finished scenario=baseline rep=695
+Finished scenario=baseline rep=694
+Finished scenario=baseline rep=702
+Finished scenario=baseline rep=696
+Finished scenario=baseline rep=699
+  baseline: wrote 700/726 replicate(s)
+Finished scenario=baseline rep=691
+Finished scenario=baseline rep=697
+Finished scenario=baseline rep=693
+Finished scenario=baseline rep=716
+Finished scenario=baseline rep=703
+Finished scenario=baseline rep=712
+Finished scenario=baseline rep=706
+Finished scenario=baseline rep=713
+Finished scenario=baseline rep=707
+Finished scenario=baseline rep=711
+Finished scenario=baseline rep=704
+Finished scenario=baseline rep=708
+Finished scenario=baseline rep=710
+Finished scenario=baseline rep=705
+Finished scenario=baseline rep=714
+Finished scenario=baseline rep=718
+Finished scenario=baseline rep=709
+Finished scenario=baseline rep=715
+Finished scenario=baseline rep=722
+Finished scenario=baseline rep=717
+  baseline: wrote 720/726 replicate(s)
+Finished scenario=baseline rep=719
+Finished scenario=baseline rep=720
+Finished scenario=baseline rep=724
+Finished scenario=no vax rep=0
+Finished scenario=baseline rep=723
+Finished scenario=no vax rep=13
+Finished scenario=no vax rep=11
+Finished scenario=no vax rep=5
+Finished scenario=no vax rep=2
+Finished scenario=no vax rep=12
+Finished scenario=no vax rep=14
+Finished scenario=no vax rep=1
+Finished scenario=no vax rep=3
+Finished scenario=no vax rep=6
+Finished scenario=no vax rep=7
+Finished scenario=no vax rep=17
+Finished scenario=baseline rep=725
+Finished scenario=no vax rep=4
+Finished scenario=no vax rep=10
+Finished scenario=no vax rep=8
+Finished scenario=no vax rep=16
+Finished scenario=no vax rep=15
+Finished scenario=baseline rep=721
+Finished scenario=no vax rep=9
+Finished scenario=no vax rep=21
+Finished scenario=no vax rep=28
+  no vax: wrote 20/726 replicate(s)
+Finished scenario=no vax rep=30
+Finished scenario=no vax rep=19
+Finished scenario=no vax rep=18
+Finished scenario=no vax rep=25
+Finished scenario=no vax rep=27
+Finished scenario=no vax rep=24
+Finished scenario=no vax rep=23
+Finished scenario=no vax rep=20
+Finished scenario=no vax rep=22
+Finished scenario=no vax rep=29
+Finished scenario=no vax rep=26
+Finished scenario=no vax rep=31
+Finished scenario=no vax rep=34
+Finished scenario=no vax rep=35
+Finished scenario=no vax rep=41
+Finished scenario=no vax rep=48
+Finished scenario=no vax rep=38
+Finished scenario=no vax rep=37
+Finished scenario=no vax rep=39
+Finished scenario=no vax rep=36
+  no vax: wrote 40/726 replicate(s)
+Finished scenario=no vax rep=33
+Finished scenario=no vax rep=49
+Finished scenario=no vax rep=42
+Finished scenario=no vax rep=44
+Finished scenario=no vax rep=40
+Finished scenario=no vax rep=32
+Finished scenario=no vax rep=51
+Finished scenario=no vax rep=64
+Finished scenario=no vax rep=59
+Finished scenario=no vax rep=62
+Finished scenario=no vax rep=53
+Finished scenario=no vax rep=56
+Finished scenario=no vax rep=52
+Finished scenario=no vax rep=46
+Finished scenario=no vax rep=47
+Finished scenario=no vax rep=55
+Finished scenario=no vax rep=45
+Finished scenario=no vax rep=63
+Finished scenario=no vax rep=61
+Finished scenario=no vax rep=50
+  no vax: wrote 60/726 replicate(s)
+Finished scenario=no vax rep=57
+Finished scenario=no vax rep=43
+Finished scenario=no vax rep=58
+Finished scenario=no vax rep=60
+Finished scenario=no vax rep=54
+Finished scenario=no vax rep=71
+Finished scenario=no vax rep=72
+Finished scenario=no vax rep=73
+Finished scenario=no vax rep=67
+Finished scenario=no vax rep=74
+Finished scenario=no vax rep=77
+Finished scenario=no vax rep=78
+Finished scenario=no vax rep=69
+Finished scenario=no vax rep=66
+Finished scenario=no vax rep=65
+Finished scenario=no vax rep=70
+Finished scenario=no vax rep=68
+Finished scenario=no vax rep=75
+Finished scenario=no vax rep=76
+Finished scenario=no vax rep=86
+  no vax: wrote 80/726 replicate(s)
+Finished scenario=no vax rep=79
+Finished scenario=no vax rep=81
+Finished scenario=no vax rep=84
+Finished scenario=no vax rep=83
+Finished scenario=no vax rep=85
+Finished scenario=no vax rep=90
+Finished scenario=no vax rep=89
+Finished scenario=no vax rep=93
+Finished scenario=no vax rep=92
+Finished scenario=no vax rep=82
+Finished scenario=no vax rep=80
+Finished scenario=no vax rep=88
+Finished scenario=no vax rep=87
+Finished scenario=no vax rep=95
+Finished scenario=no vax rep=98
+Finished scenario=no vax rep=106
+Finished scenario=no vax rep=101
+Finished scenario=no vax rep=103
+Finished scenario=no vax rep=102
+Finished scenario=no vax rep=105
+  no vax: wrote 100/726 replicate(s)
+Finished scenario=no vax rep=99
+Finished scenario=no vax rep=100
+Finished scenario=no vax rep=94
+Finished scenario=no vax rep=104
+Finished scenario=no vax rep=91
+Finished scenario=no vax rep=108
+Finished scenario=no vax rep=96
+Finished scenario=no vax rep=107
+Finished scenario=no vax rep=97
+Finished scenario=no vax rep=122
+Finished scenario=no vax rep=117
+Finished scenario=no vax rep=114
+Finished scenario=no vax rep=125
+Finished scenario=no vax rep=113
+Finished scenario=no vax rep=115
+Finished scenario=no vax rep=111
+Finished scenario=no vax rep=110
+Finished scenario=no vax rep=123
+Finished scenario=no vax rep=109
+Finished scenario=no vax rep=119
+  no vax: wrote 120/726 replicate(s)
+Finished scenario=no vax rep=118
+Finished scenario=no vax rep=120
+Finished scenario=no vax rep=116
+Finished scenario=no vax rep=124
+Finished scenario=no vax rep=121
+Finished scenario=no vax rep=112
+Finished scenario=no vax rep=139
+Finished scenario=no vax rep=136
+Finished scenario=no vax rep=140
+Finished scenario=no vax rep=129
+Finished scenario=no vax rep=130
+Finished scenario=no vax rep=133
+Finished scenario=no vax rep=131
+Finished scenario=no vax rep=126
+Finished scenario=no vax rep=132
+Finished scenario=no vax rep=128
+Finished scenario=no vax rep=138
+Finished scenario=no vax rep=137
+Finished scenario=no vax rep=141
+Finished scenario=no vax rep=127
+  no vax: wrote 140/726 replicate(s)
+Finished scenario=no vax rep=135
+Finished scenario=no vax rep=134
+Finished scenario=no vax rep=148
+Finished scenario=no vax rep=154
+Finished scenario=no vax rep=149
+Finished scenario=no vax rep=155
+Finished scenario=no vax rep=157
+Finished scenario=no vax rep=147
+Finished scenario=no vax rep=152
+Finished scenario=no vax rep=158
+Finished scenario=no vax rep=143
+Finished scenario=no vax rep=145
+Finished scenario=no vax rep=144
+Finished scenario=no vax rep=151
+Finished scenario=no vax rep=142
+Finished scenario=no vax rep=153
+Finished scenario=no vax rep=146
+Finished scenario=no vax rep=156
+Finished scenario=no vax rep=150
+Finished scenario=no vax rep=168
+  no vax: wrote 160/726 replicate(s)
+Finished scenario=no vax rep=169
+Finished scenario=no vax rep=159
+Finished scenario=no vax rep=160
+Finished scenario=no vax rep=162
+Finished scenario=no vax rep=167
+Finished scenario=no vax rep=163
+Finished scenario=no vax rep=172
+Finished scenario=no vax rep=161
+Finished scenario=no vax rep=170
+Finished scenario=no vax rep=166
+Finished scenario=no vax rep=164
+Finished scenario=no vax rep=174
+Finished scenario=no vax rep=171
+Finished scenario=no vax rep=173
+Finished scenario=no vax rep=165
+Finished scenario=no vax rep=179
+Finished scenario=no vax rep=181
+Finished scenario=no vax rep=184
+Finished scenario=no vax rep=176
+Finished scenario=no vax rep=175
+  no vax: wrote 180/726 replicate(s)
+Finished scenario=no vax rep=189
+Finished scenario=no vax rep=186
+Finished scenario=no vax rep=187
+Finished scenario=no vax rep=182
+Finished scenario=no vax rep=188
+Finished scenario=no vax rep=178
+Finished scenario=no vax rep=191
+Finished scenario=no vax rep=185
+Finished scenario=no vax rep=180
+Finished scenario=no vax rep=177
+Finished scenario=no vax rep=183
+Finished scenario=no vax rep=200
+Finished scenario=no vax rep=204
+Finished scenario=no vax rep=192
+Finished scenario=no vax rep=193
+Finished scenario=no vax rep=190
+Finished scenario=no vax rep=197
+Finished scenario=no vax rep=203
+Finished scenario=no vax rep=201
+Finished scenario=no vax rep=195
+  no vax: wrote 200/726 replicate(s)
+Finished scenario=no vax rep=196
+Finished scenario=no vax rep=194
+Finished scenario=no vax rep=206
+Finished scenario=no vax rep=202
+Finished scenario=no vax rep=198
+Finished scenario=no vax rep=205
+Finished scenario=no vax rep=199
+Finished scenario=no vax rep=208
+Finished scenario=no vax rep=211
+Finished scenario=no vax rep=217
+Finished scenario=no vax rep=214
+Finished scenario=no vax rep=207
+Finished scenario=no vax rep=212
+Finished scenario=no vax rep=219
+Finished scenario=no vax rep=222
+Finished scenario=no vax rep=213
+Finished scenario=no vax rep=220
+Finished scenario=no vax rep=218
+Finished scenario=no vax rep=210
+Finished scenario=no vax rep=221
+  no vax: wrote 220/726 replicate(s)
+Finished scenario=no vax rep=215
+Finished scenario=no vax rep=209
+Finished scenario=no vax rep=216
+Finished scenario=no vax rep=226
+Finished scenario=no vax rep=224
+Finished scenario=no vax rep=231
+Finished scenario=no vax rep=232
+Finished scenario=no vax rep=236
+Finished scenario=no vax rep=223
+Finished scenario=no vax rep=228
+Finished scenario=no vax rep=229
+Finished scenario=no vax rep=225
+Finished scenario=no vax rep=237
+Finished scenario=no vax rep=230
+Finished scenario=no vax rep=234
+Finished scenario=no vax rep=238
+Finished scenario=no vax rep=235
+Finished scenario=no vax rep=233
+Finished scenario=no vax rep=239
+Finished scenario=no vax rep=227
+  no vax: wrote 240/726 replicate(s)
+Finished scenario=no vax rep=251
+Finished scenario=no vax rep=246
+Finished scenario=no vax rep=244
+Finished scenario=no vax rep=249
+Finished scenario=no vax rep=240
+Finished scenario=no vax rep=247
+Finished scenario=no vax rep=252
+Finished scenario=no vax rep=243
+Finished scenario=no vax rep=241
+Finished scenario=no vax rep=245
+Finished scenario=no vax rep=253
+Finished scenario=no vax rep=248
+Finished scenario=no vax rep=255
+Finished scenario=no vax rep=254
+Finished scenario=no vax rep=250
+Finished scenario=no vax rep=242
+Finished scenario=no vax rep=265
+Finished scenario=no vax rep=266
+Finished scenario=no vax rep=260
+Finished scenario=no vax rep=258
+  no vax: wrote 260/726 replicate(s)
+Finished scenario=no vax rep=261
+Finished scenario=no vax rep=257
+Finished scenario=no vax rep=262
+Finished scenario=no vax rep=259
+Finished scenario=no vax rep=263
+Finished scenario=no vax rep=268
+Finished scenario=no vax rep=271
+Finished scenario=no vax rep=256
+Finished scenario=no vax rep=269
+Finished scenario=no vax rep=270
+Finished scenario=no vax rep=272
+Finished scenario=no vax rep=267
+Finished scenario=no vax rep=264
+Finished scenario=no vax rep=275
+Finished scenario=no vax rep=276
+Finished scenario=no vax rep=283
+Finished scenario=no vax rep=284
+Finished scenario=no vax rep=278
+Finished scenario=no vax rep=282
+Finished scenario=no vax rep=288
+  no vax: wrote 280/726 replicate(s)
+Finished scenario=no vax rep=277
+Finished scenario=no vax rep=273
+Finished scenario=no vax rep=274
+Finished scenario=no vax rep=281
+Finished scenario=no vax rep=285
+Finished scenario=no vax rep=286
+Finished scenario=no vax rep=287
+Finished scenario=no vax rep=279
+Finished scenario=no vax rep=280
+Finished scenario=no vax rep=289
+Finished scenario=no vax rep=292
+Finished scenario=no vax rep=298
+Finished scenario=no vax rep=302
+Finished scenario=no vax rep=290
+Finished scenario=no vax rep=299
+Finished scenario=no vax rep=297
+Finished scenario=no vax rep=300
+Finished scenario=no vax rep=303
+Finished scenario=no vax rep=291
+Finished scenario=no vax rep=301
+  no vax: wrote 300/726 replicate(s)
+Finished scenario=no vax rep=293
+Finished scenario=no vax rep=294
+Finished scenario=no vax rep=295
+Finished scenario=no vax rep=296
+Finished scenario=no vax rep=304
+Finished scenario=no vax rep=305
+Finished scenario=no vax rep=317
+Finished scenario=no vax rep=315
+Finished scenario=no vax rep=313
+Finished scenario=no vax rep=314
+Finished scenario=no vax rep=307
+Finished scenario=no vax rep=308
+Finished scenario=no vax rep=316
+Finished scenario=no vax rep=311
+Finished scenario=no vax rep=320
+Finished scenario=no vax rep=321
+Finished scenario=no vax rep=312
+Finished scenario=no vax rep=306
+Finished scenario=no vax rep=310
+Finished scenario=no vax rep=318
+  no vax: wrote 320/726 replicate(s)
+Finished scenario=no vax rep=319
+Finished scenario=no vax rep=309
+Finished scenario=no vax rep=324
+Finished scenario=no vax rep=333
+Finished scenario=no vax rep=325
+Finished scenario=no vax rep=322
+Finished scenario=no vax rep=327
+Finished scenario=no vax rep=336
+Finished scenario=no vax rep=335
+Finished scenario=no vax rep=326
+Finished scenario=no vax rep=334
+Finished scenario=no vax rep=332
+Finished scenario=no vax rep=323
+Finished scenario=no vax rep=338
+Finished scenario=no vax rep=328
+Finished scenario=no vax rep=329
+Finished scenario=no vax rep=331
+Finished scenario=no vax rep=330
+Finished scenario=no vax rep=346
+Finished scenario=no vax rep=349
+  no vax: wrote 340/726 replicate(s)
+Finished scenario=no vax rep=345
+Finished scenario=no vax rep=341
+Finished scenario=no vax rep=339
+Finished scenario=no vax rep=340
+Finished scenario=no vax rep=351
+Finished scenario=no vax rep=337
+Finished scenario=no vax rep=348
+Finished scenario=no vax rep=354
+Finished scenario=no vax rep=343
+Finished scenario=no vax rep=350
+Finished scenario=no vax rep=342
+Finished scenario=no vax rep=344
+Finished scenario=no vax rep=353
+Finished scenario=no vax rep=352
+Finished scenario=no vax rep=347
+Finished scenario=no vax rep=368
+Finished scenario=no vax rep=367
+Finished scenario=no vax rep=355
+Finished scenario=no vax rep=356
+Finished scenario=no vax rep=363
+  no vax: wrote 360/726 replicate(s)
+Finished scenario=no vax rep=365
+Finished scenario=no vax rep=370
+Finished scenario=no vax rep=357
+Finished scenario=no vax rep=366
+Finished scenario=no vax rep=362
+Finished scenario=no vax rep=364
+Finished scenario=no vax rep=369
+Finished scenario=no vax rep=360
+Finished scenario=no vax rep=361
+Finished scenario=no vax rep=358
+Finished scenario=no vax rep=359
+Finished scenario=no vax rep=375
+Finished scenario=no vax rep=371
+Finished scenario=no vax rep=381
+Finished scenario=no vax rep=374
+Finished scenario=no vax rep=376
+Finished scenario=no vax rep=378
+Finished scenario=no vax rep=377
+Finished scenario=no vax rep=380
+Finished scenario=no vax rep=373
+  no vax: wrote 380/726 replicate(s)
+Finished scenario=no vax rep=379
+Finished scenario=no vax rep=372
+Finished scenario=no vax rep=383
+Finished scenario=no vax rep=396
+Finished scenario=no vax rep=394
+Finished scenario=no vax rep=387
+Finished scenario=no vax rep=390
+Finished scenario=no vax rep=398
+Finished scenario=no vax rep=392
+Finished scenario=no vax rep=391
+Finished scenario=no vax rep=397
+Finished scenario=no vax rep=389
+Finished scenario=no vax rep=382
+Finished scenario=no vax rep=385
+Finished scenario=no vax rep=393
+Finished scenario=no vax rep=386
+Finished scenario=no vax rep=384
+Finished scenario=no vax rep=403
+Finished scenario=no vax rep=399
+Finished scenario=no vax rep=411
+  no vax: wrote 400/726 replicate(s)
+Finished scenario=no vax rep=388
+Finished scenario=no vax rep=408
+Finished scenario=no vax rep=409
+Finished scenario=no vax rep=413
+Finished scenario=no vax rep=406
+Finished scenario=no vax rep=402
+Finished scenario=no vax rep=414
+Finished scenario=no vax rep=410
+Finished scenario=no vax rep=407
+Finished scenario=no vax rep=395
+Finished scenario=no vax rep=412
+Finished scenario=no vax rep=404
+Finished scenario=no vax rep=400
+Finished scenario=no vax rep=401
+Finished scenario=no vax rep=405
+Finished scenario=no vax rep=425
+Finished scenario=no vax rep=424
+Finished scenario=no vax rep=421
+Finished scenario=no vax rep=416
+Finished scenario=no vax rep=418
+  no vax: wrote 420/726 replicate(s)
+Finished scenario=no vax rep=422
+Finished scenario=no vax rep=427
+Finished scenario=no vax rep=415
+Finished scenario=no vax rep=423
+Finished scenario=no vax rep=429
+Finished scenario=no vax rep=419
+Finished scenario=no vax rep=426
+Finished scenario=no vax rep=420
+Finished scenario=no vax rep=417
+Finished scenario=no vax rep=428
+Finished scenario=no vax rep=434
+Finished scenario=no vax rep=436
+Finished scenario=no vax rep=439
+Finished scenario=no vax rep=432
+Finished scenario=no vax rep=433
+Finished scenario=no vax rep=437
+Finished scenario=no vax rep=431
+Finished scenario=no vax rep=430
+Finished scenario=no vax rep=446
+Finished scenario=no vax rep=435
+  no vax: wrote 440/726 replicate(s)
+Finished scenario=no vax rep=440
+Finished scenario=no vax rep=438
+Finished scenario=no vax rep=450
+Finished scenario=no vax rep=452
+Finished scenario=no vax rep=451
+Finished scenario=no vax rep=443
+Finished scenario=no vax rep=448
+Finished scenario=no vax rep=455
+Finished scenario=no vax rep=444
+Finished scenario=no vax rep=447
+Finished scenario=no vax rep=453
+Finished scenario=no vax rep=449
+Finished scenario=no vax rep=442
+Finished scenario=no vax rep=454
+Finished scenario=no vax rep=457
+Finished scenario=no vax rep=445
+Finished scenario=no vax rep=441
+Finished scenario=no vax rep=463
+Finished scenario=no vax rep=458
+Finished scenario=no vax rep=466
+  no vax: wrote 460/726 replicate(s)
+Finished scenario=no vax rep=468
+Finished scenario=no vax rep=470
+Finished scenario=no vax rep=460
+Finished scenario=no vax rep=462
+Finished scenario=no vax rep=464
+Finished scenario=no vax rep=471
+Finished scenario=no vax rep=467
+Finished scenario=no vax rep=459
+Finished scenario=no vax rep=456
+Finished scenario=no vax rep=474
+Finished scenario=no vax rep=472
+Finished scenario=no vax rep=473
+Finished scenario=no vax rep=469
+Finished scenario=no vax rep=461
+Finished scenario=no vax rep=465
+Finished scenario=no vax rep=489
+Finished scenario=no vax rep=477
+Finished scenario=no vax rep=488
+Finished scenario=no vax rep=484
+Finished scenario=no vax rep=485
+  no vax: wrote 480/726 replicate(s)
+Finished scenario=no vax rep=479
+Finished scenario=no vax rep=476
+Finished scenario=no vax rep=480
+Finished scenario=no vax rep=486
+Finished scenario=no vax rep=483
+Finished scenario=no vax rep=481
+Finished scenario=no vax rep=482
+Finished scenario=no vax rep=487
+Finished scenario=no vax rep=475
+Finished scenario=no vax rep=478
+Finished scenario=no vax rep=498
+Finished scenario=no vax rep=503
+Finished scenario=no vax rep=496
+Finished scenario=no vax rep=490
+Finished scenario=no vax rep=492
+Finished scenario=no vax rep=500
+Finished scenario=no vax rep=502
+Finished scenario=no vax rep=499
+Finished scenario=no vax rep=493
+Finished scenario=no vax rep=491
+  no vax: wrote 500/726 replicate(s)
+Finished scenario=no vax rep=494
+Finished scenario=no vax rep=495
+Finished scenario=no vax rep=505
+Finished scenario=no vax rep=497
+Finished scenario=no vax rep=508
+Finished scenario=no vax rep=515
+Finished scenario=no vax rep=517
+Finished scenario=no vax rep=514
+Finished scenario=no vax rep=516
+Finished scenario=no vax rep=520
+Finished scenario=no vax rep=511
+Finished scenario=no vax rep=521
+Finished scenario=no vax rep=518
+Finished scenario=no vax rep=506
+Finished scenario=no vax rep=509
+Finished scenario=no vax rep=512
+Finished scenario=no vax rep=507
+Finished scenario=no vax rep=519
+Finished scenario=no vax rep=501
+Finished scenario=no vax rep=504
+  no vax: wrote 520/726 replicate(s)
+Finished scenario=no vax rep=510
+Finished scenario=no vax rep=522
+Finished scenario=no vax rep=513
+Finished scenario=no vax rep=529
+Finished scenario=no vax rep=528
+Finished scenario=no vax rep=535
+Finished scenario=no vax rep=524
+Finished scenario=no vax rep=536
+Finished scenario=no vax rep=525
+Finished scenario=no vax rep=527
+Finished scenario=no vax rep=523
+Finished scenario=no vax rep=526
+Finished scenario=no vax rep=530
+Finished scenario=no vax rep=534
+Finished scenario=no vax rep=532
+Finished scenario=no vax rep=533
+Finished scenario=no vax rep=531
+Finished scenario=no vax rep=537
+Finished scenario=no vax rep=548
+Finished scenario=no vax rep=543
+  no vax: wrote 540/726 replicate(s)
+Finished scenario=no vax rep=547
+Finished scenario=no vax rep=545
+Finished scenario=no vax rep=538
+Finished scenario=no vax rep=544
+Finished scenario=no vax rep=546
+Finished scenario=no vax rep=542
+Finished scenario=no vax rep=541
+Finished scenario=no vax rep=540
+Finished scenario=no vax rep=539
+Finished scenario=no vax rep=564
+Finished scenario=no vax rep=560
+Finished scenario=no vax rep=556
+Finished scenario=no vax rep=559
+Finished scenario=no vax rep=563
+Finished scenario=no vax rep=561
+Finished scenario=no vax rep=566
+Finished scenario=no vax rep=555
+Finished scenario=no vax rep=554
+Finished scenario=no vax rep=553
+Finished scenario=no vax rep=551
+  no vax: wrote 560/726 replicate(s)
+Finished scenario=no vax rep=552
+Finished scenario=no vax rep=557
+Finished scenario=no vax rep=558
+Finished scenario=no vax rep=562
+Finished scenario=no vax rep=565
+Finished scenario=no vax rep=549
+Finished scenario=no vax rep=550
+Finished scenario=no vax rep=568
+Finished scenario=no vax rep=579
+Finished scenario=no vax rep=580
+Finished scenario=no vax rep=567
+Finished scenario=no vax rep=569
+Finished scenario=no vax rep=574
+Finished scenario=no vax rep=578
+Finished scenario=no vax rep=576
+Finished scenario=no vax rep=571
+Finished scenario=no vax rep=577
+Finished scenario=no vax rep=572
+Finished scenario=no vax rep=581
+Finished scenario=no vax rep=570
+  no vax: wrote 580/726 replicate(s)
+Finished scenario=no vax rep=575
+Finished scenario=no vax rep=573
+Finished scenario=no vax rep=587
+Finished scenario=no vax rep=593
+Finished scenario=no vax rep=598
+Finished scenario=no vax rep=597
+Finished scenario=no vax rep=594
+Finished scenario=no vax rep=591
+Finished scenario=no vax rep=586
+Finished scenario=no vax rep=584
+Finished scenario=no vax rep=582
+Finished scenario=no vax rep=583
+Finished scenario=no vax rep=588
+Finished scenario=no vax rep=590
+Finished scenario=no vax rep=589
+Finished scenario=no vax rep=592
+Finished scenario=no vax rep=585
+Finished scenario=no vax rep=600
+Finished scenario=no vax rep=599
+Finished scenario=no vax rep=611
+  no vax: wrote 600/726 replicate(s)
+Finished scenario=no vax rep=610
+Finished scenario=no vax rep=604
+Finished scenario=no vax rep=605
+Finished scenario=no vax rep=606
+Finished scenario=no vax rep=602
+Finished scenario=no vax rep=607
+Finished scenario=no vax rep=612
+Finished scenario=no vax rep=596
+Finished scenario=no vax rep=603
+Finished scenario=no vax rep=614
+Finished scenario=no vax rep=609
+Finished scenario=no vax rep=608
+Finished scenario=no vax rep=601
+Finished scenario=no vax rep=595
+Finished scenario=no vax rep=613
+Finished scenario=no vax rep=621
+Finished scenario=no vax rep=627
+Finished scenario=no vax rep=624
+Finished scenario=no vax rep=618
+Finished scenario=no vax rep=623
+  no vax: wrote 620/726 replicate(s)
+Finished scenario=no vax rep=626
+Finished scenario=no vax rep=629
+Finished scenario=no vax rep=622
+Finished scenario=no vax rep=615
+Finished scenario=no vax rep=617
+Finished scenario=no vax rep=616
+Finished scenario=no vax rep=628
+Finished scenario=no vax rep=625
+Finished scenario=no vax rep=620
+Finished scenario=no vax rep=619
+Finished scenario=no vax rep=630
+Finished scenario=no vax rep=642
+Finished scenario=no vax rep=644
+Finished scenario=no vax rep=641
+Finished scenario=no vax rep=634
+Finished scenario=no vax rep=640
+Finished scenario=no vax rep=637
+Finished scenario=no vax rep=639
+Finished scenario=no vax rep=636
+Finished scenario=no vax rep=645
+  no vax: wrote 640/726 replicate(s)
+Finished scenario=no vax rep=631
+Finished scenario=no vax rep=647
+Finished scenario=no vax rep=632
+Finished scenario=no vax rep=646
+Finished scenario=no vax rep=635
+Finished scenario=no vax rep=638
+Finished scenario=no vax rep=633
+Finished scenario=no vax rep=643
+Finished scenario=no vax rep=661
+Finished scenario=no vax rep=657
+Finished scenario=no vax rep=650
+Finished scenario=no vax rep=654
+Finished scenario=no vax rep=655
+Finished scenario=no vax rep=648
+Finished scenario=no vax rep=653
+Finished scenario=no vax rep=659
+Finished scenario=no vax rep=649
+Finished scenario=no vax rep=660
+Finished scenario=no vax rep=651
+Finished scenario=no vax rep=652
+  no vax: wrote 660/726 replicate(s)
+Finished scenario=no vax rep=662
+Finished scenario=no vax rep=658
+Finished scenario=no vax rep=656
+Finished scenario=no vax rep=665
+Finished scenario=no vax rep=664
+Finished scenario=no vax rep=678
+Finished scenario=no vax rep=666
+Finished scenario=no vax rep=669
+Finished scenario=no vax rep=676
+Finished scenario=no vax rep=673
+Finished scenario=no vax rep=667
+Finished scenario=no vax rep=670
+Finished scenario=no vax rep=663
+Finished scenario=no vax rep=671
+Finished scenario=no vax rep=679
+Finished scenario=no vax rep=672
+Finished scenario=no vax rep=675
+Finished scenario=no vax rep=668
+Finished scenario=no vax rep=674
+Finished scenario=no vax rep=680
+  no vax: wrote 680/726 replicate(s)
+Finished scenario=no vax rep=693
+Finished scenario=no vax rep=677
+Finished scenario=no vax rep=689
+Finished scenario=no vax rep=688
+Finished scenario=no vax rep=694
+Finished scenario=no vax rep=690
+Finished scenario=no vax rep=683
+Finished scenario=no vax rep=695
+Finished scenario=no vax rep=685
+Finished scenario=no vax rep=687
+Finished scenario=no vax rep=691
+Finished scenario=no vax rep=681
+Finished scenario=no vax rep=692
+Finished scenario=no vax rep=682
+Finished scenario=no vax rep=684
+Finished scenario=no vax rep=686
+Finished scenario=no vax rep=696
+Finished scenario=no vax rep=702
+Finished scenario=no vax rep=706
+Finished scenario=no vax rep=705
+  no vax: wrote 700/726 replicate(s)
+Finished scenario=no vax rep=707
+Finished scenario=no vax rep=698
+Finished scenario=no vax rep=704
+Finished scenario=no vax rep=697
+Finished scenario=no vax rep=709
+Finished scenario=no vax rep=710
+Finished scenario=no vax rep=699
+Finished scenario=no vax rep=711
+Finished scenario=no vax rep=700
+Finished scenario=no vax rep=708
+Finished scenario=no vax rep=703
+Finished scenario=no vax rep=701
+Finished scenario=no vax rep=719
+Finished scenario=50% coverage (all ages) rep=2
+Finished scenario=50% coverage (all ages) rep=0
+Finished scenario=no vax rep=715
+Finished scenario=50% coverage (all ages) rep=1
+Finished scenario=no vax rep=721
+Finished scenario=no vax rep=722
+Finished scenario=no vax rep=720
+Finished scenario=no vax rep=725
+Finished scenario=no vax rep=712
+Finished scenario=no vax rep=723
+  no vax: wrote 720/726 replicate(s)
+Finished scenario=no vax rep=716
+Finished scenario=no vax rep=718
+Finished scenario=no vax rep=713
+Finished scenario=no vax rep=714
+Finished scenario=no vax rep=717
+Finished scenario=50% coverage (all ages) rep=3
+Finished scenario=50% coverage (all ages) rep=4
+Finished scenario=50% coverage (all ages) rep=12
+Finished scenario=50% coverage (all ages) rep=7
+Finished scenario=50% coverage (all ages) rep=9
+Finished scenario=50% coverage (all ages) rep=17
+Finished scenario=50% coverage (all ages) rep=10
+Finished scenario=50% coverage (all ages) rep=18
+Finished scenario=50% coverage (all ages) rep=11
+Finished scenario=50% coverage (all ages) rep=5
+Finished scenario=50% coverage (all ages) rep=13
+Finished scenario=50% coverage (all ages) rep=6
+Finished scenario=50% coverage (all ages) rep=15
+Finished scenario=50% coverage (all ages) rep=16
+Finished scenario=50% coverage (all ages) rep=8
+Finished scenario=50% coverage (all ages) rep=14
+Finished scenario=no vax rep=724
+Finished scenario=50% coverage (all ages) rep=19
+  50% coverage (all ages): wrote 20/726 replicate(s)
+Finished scenario=50% coverage (all ages) rep=28
+Finished scenario=50% coverage (all ages) rep=33
+Finished scenario=50% coverage (all ages) rep=23
+Finished scenario=50% coverage (all ages) rep=21
+Finished scenario=50% coverage (all ages) rep=31
+Finished scenario=50% coverage (all ages) rep=20
+Finished scenario=50% coverage (all ages) rep=22
+Finished scenario=50% coverage (all ages) rep=24
+Finished scenario=50% coverage (all ages) rep=27
+Finished scenario=50% coverage (all ages) rep=25
+Finished scenario=50% coverage (all ages) rep=29
+Finished scenario=50% coverage (all ages) rep=26
+Finished scenario=50% coverage (all ages) rep=32
+Finished scenario=50% coverage (all ages) rep=30
+Finished scenario=50% coverage (all ages) rep=34
+Finished scenario=50% coverage (all ages) rep=50
+Finished scenario=50% coverage (all ages) rep=40
+Finished scenario=50% coverage (all ages) rep=44
+Finished scenario=50% coverage (all ages) rep=46
+Finished scenario=50% coverage (all ages) rep=45
+  50% coverage (all ages): wrote 40/726 replicate(s)
+Finished scenario=50% coverage (all ages) rep=48
+Finished scenario=50% coverage (all ages) rep=35
+Finished scenario=50% coverage (all ages) rep=37
+Finished scenario=50% coverage (all ages) rep=43
+Finished scenario=50% coverage (all ages) rep=42
+Finished scenario=50% coverage (all ages) rep=36
+Finished scenario=50% coverage (all ages) rep=41
+Finished scenario=50% coverage (all ages) rep=49
+Finished scenario=50% coverage (all ages) rep=38
+Finished scenario=50% coverage (all ages) rep=47
+Finished scenario=50% coverage (all ages) rep=39
+Finished scenario=50% coverage (all ages) rep=51
+Finished scenario=50% coverage (all ages) rep=61
+Finished scenario=50% coverage (all ages) rep=54
+Finished scenario=50% coverage (all ages) rep=53
+Finished scenario=50% coverage (all ages) rep=59
+Finished scenario=50% coverage (all ages) rep=63
+Finished scenario=50% coverage (all ages) rep=64
+Finished scenario=50% coverage (all ages) rep=60
+Finished scenario=50% coverage (all ages) rep=52
+  50% coverage (all ages): wrote 60/726 replicate(s)
+Finished scenario=50% coverage (all ages) rep=56
+Finished scenario=50% coverage (all ages) rep=67
+Finished scenario=50% coverage (all ages) rep=55
+Finished scenario=50% coverage (all ages) rep=58
+Finished scenario=50% coverage (all ages) rep=62
+Finished scenario=50% coverage (all ages) rep=65
+Finished scenario=50% coverage (all ages) rep=57
+Finished scenario=50% coverage (all ages) rep=66
+Finished scenario=50% coverage (all ages) rep=83
+Finished scenario=50% coverage (all ages) rep=71
+Finished scenario=50% coverage (all ages) rep=82
+Finished scenario=50% coverage (all ages) rep=74
+Finished scenario=50% coverage (all ages) rep=70
+Finished scenario=50% coverage (all ages) rep=84
+Finished scenario=50% coverage (all ages) rep=68
+Finished scenario=50% coverage (all ages) rep=77
+Finished scenario=50% coverage (all ages) rep=75
+Finished scenario=50% coverage (all ages) rep=79
+Finished scenario=50% coverage (all ages) rep=72
+Finished scenario=50% coverage (all ages) rep=78
+  50% coverage (all ages): wrote 80/726 replicate(s)
+Finished scenario=50% coverage (all ages) rep=76
+Finished scenario=50% coverage (all ages) rep=73
+Finished scenario=50% coverage (all ages) rep=69
+Finished scenario=50% coverage (all ages) rep=80
+Finished scenario=50% coverage (all ages) rep=85
+Finished scenario=50% coverage (all ages) rep=86
+Finished scenario=50% coverage (all ages) rep=93
+Finished scenario=50% coverage (all ages) rep=91
+Finished scenario=50% coverage (all ages) rep=88
+Finished scenario=50% coverage (all ages) rep=89
+Finished scenario=50% coverage (all ages) rep=90
+Finished scenario=50% coverage (all ages) rep=94
+Finished scenario=50% coverage (all ages) rep=81
+Finished scenario=50% coverage (all ages) rep=87
+Finished scenario=50% coverage (all ages) rep=96
+Finished scenario=50% coverage (all ages) rep=92
+Finished scenario=50% coverage (all ages) rep=95
+Finished scenario=50% coverage (all ages) rep=109
+Finished scenario=50% coverage (all ages) rep=107
+Finished scenario=50% coverage (all ages) rep=102
+  50% coverage (all ages): wrote 100/726 replicate(s)
+Finished scenario=50% coverage (all ages) rep=108
+Finished scenario=50% coverage (all ages) rep=106
+Finished scenario=50% coverage (all ages) rep=100
+Finished scenario=50% coverage (all ages) rep=99
+Finished scenario=50% coverage (all ages) rep=97
+Finished scenario=50% coverage (all ages) rep=111
+Finished scenario=50% coverage (all ages) rep=104
+Finished scenario=50% coverage (all ages) rep=105
+Finished scenario=50% coverage (all ages) rep=103
+Finished scenario=50% coverage (all ages) rep=98
+Finished scenario=50% coverage (all ages) rep=110
+Finished scenario=50% coverage (all ages) rep=101
+Finished scenario=50% coverage (all ages) rep=117
+Finished scenario=50% coverage (all ages) rep=119
+Finished scenario=50% coverage (all ages) rep=121
+Finished scenario=50% coverage (all ages) rep=124
+Finished scenario=50% coverage (all ages) rep=129
+Finished scenario=50% coverage (all ages) rep=118
+Finished scenario=50% coverage (all ages) rep=115
+Finished scenario=50% coverage (all ages) rep=113
+  50% coverage (all ages): wrote 120/726 replicate(s)
+Finished scenario=50% coverage (all ages) rep=125
+Finished scenario=50% coverage (all ages) rep=112
+Finished scenario=50% coverage (all ages) rep=127
+Finished scenario=50% coverage (all ages) rep=128
+Finished scenario=50% coverage (all ages) rep=123
+Finished scenario=50% coverage (all ages) rep=116
+Finished scenario=50% coverage (all ages) rep=122
+Finished scenario=50% coverage (all ages) rep=120
+Finished scenario=50% coverage (all ages) rep=114
+Finished scenario=50% coverage (all ages) rep=126
+Finished scenario=50% coverage (all ages) rep=131
+Finished scenario=50% coverage (all ages) rep=133
+Finished scenario=50% coverage (all ages) rep=143
+Finished scenario=50% coverage (all ages) rep=132
+Finished scenario=50% coverage (all ages) rep=135
+Finished scenario=50% coverage (all ages) rep=136
+Finished scenario=50% coverage (all ages) rep=139
+Finished scenario=50% coverage (all ages) rep=130
+Finished scenario=50% coverage (all ages) rep=142
+Finished scenario=50% coverage (all ages) rep=138
+  50% coverage (all ages): wrote 140/726 replicate(s)
+Finished scenario=50% coverage (all ages) rep=134
+Finished scenario=50% coverage (all ages) rep=137
+Finished scenario=50% coverage (all ages) rep=144
+Finished scenario=50% coverage (all ages) rep=140
+Finished scenario=50% coverage (all ages) rep=141
+Finished scenario=50% coverage (all ages) rep=149
+Finished scenario=50% coverage (all ages) rep=146
+Finished scenario=50% coverage (all ages) rep=148
+Finished scenario=50% coverage (all ages) rep=147
+Finished scenario=50% coverage (all ages) rep=145
+Finished scenario=50% coverage (all ages) rep=151
+Finished scenario=50% coverage (all ages) rep=154
+Finished scenario=50% coverage (all ages) rep=150
+Finished scenario=50% coverage (all ages) rep=152
+Finished scenario=50% coverage (all ages) rep=155
+Finished scenario=50% coverage (all ages) rep=153
+Finished scenario=50% coverage (all ages) rep=163
+Finished scenario=50% coverage (all ages) rep=159
+Finished scenario=50% coverage (all ages) rep=156
+Finished scenario=50% coverage (all ages) rep=161
+  50% coverage (all ages): wrote 160/726 replicate(s)
+Finished scenario=50% coverage (all ages) rep=164
+Finished scenario=50% coverage (all ages) rep=166
+Finished scenario=50% coverage (all ages) rep=158
+Finished scenario=50% coverage (all ages) rep=168
+Finished scenario=50% coverage (all ages) rep=160
+Finished scenario=50% coverage (all ages) rep=162
+Finished scenario=50% coverage (all ages) rep=157
+Finished scenario=50% coverage (all ages) rep=165
+Finished scenario=50% coverage (all ages) rep=171
+Finished scenario=50% coverage (all ages) rep=172
+Finished scenario=50% coverage (all ages) rep=175
+Finished scenario=50% coverage (all ages) rep=183
+Finished scenario=50% coverage (all ages) rep=167
+Finished scenario=50% coverage (all ages) rep=174
+Finished scenario=50% coverage (all ages) rep=169
+Finished scenario=50% coverage (all ages) rep=170
+Finished scenario=50% coverage (all ages) rep=180
+Finished scenario=50% coverage (all ages) rep=179
+Finished scenario=50% coverage (all ages) rep=182
+Finished scenario=50% coverage (all ages) rep=181
+  50% coverage (all ages): wrote 180/726 replicate(s)
+Finished scenario=50% coverage (all ages) rep=184
+Finished scenario=50% coverage (all ages) rep=178
+Finished scenario=50% coverage (all ages) rep=176
+Finished scenario=50% coverage (all ages) rep=173
+Finished scenario=50% coverage (all ages) rep=177
+Finished scenario=50% coverage (all ages) rep=194
+Finished scenario=50% coverage (all ages) rep=192
+Finished scenario=50% coverage (all ages) rep=190
+Finished scenario=50% coverage (all ages) rep=198
+Finished scenario=50% coverage (all ages) rep=196
+Finished scenario=50% coverage (all ages) rep=200
+Finished scenario=50% coverage (all ages) rep=197
+Finished scenario=50% coverage (all ages) rep=187
+Finished scenario=50% coverage (all ages) rep=193
+Finished scenario=50% coverage (all ages) rep=185
+Finished scenario=50% coverage (all ages) rep=199
+Finished scenario=50% coverage (all ages) rep=186
+Finished scenario=50% coverage (all ages) rep=189
+Finished scenario=50% coverage (all ages) rep=188
+Finished scenario=50% coverage (all ages) rep=191
+  50% coverage (all ages): wrote 200/726 replicate(s)
+Finished scenario=50% coverage (all ages) rep=195
+Finished scenario=50% coverage (all ages) rep=201
+Finished scenario=50% coverage (all ages) rep=206
+Finished scenario=50% coverage (all ages) rep=209
+Finished scenario=50% coverage (all ages) rep=205
+Finished scenario=50% coverage (all ages) rep=215
+Finished scenario=50% coverage (all ages) rep=211
+Finished scenario=50% coverage (all ages) rep=203
+Finished scenario=50% coverage (all ages) rep=214
+Finished scenario=50% coverage (all ages) rep=208
+Finished scenario=50% coverage (all ages) rep=213
+Finished scenario=50% coverage (all ages) rep=212
+Finished scenario=50% coverage (all ages) rep=204
+Finished scenario=50% coverage (all ages) rep=207
+Finished scenario=50% coverage (all ages) rep=216
+Finished scenario=50% coverage (all ages) rep=210
+Finished scenario=50% coverage (all ages) rep=202
+Finished scenario=50% coverage (all ages) rep=217
+Finished scenario=50% coverage (all ages) rep=221
+Finished scenario=50% coverage (all ages) rep=223
+  50% coverage (all ages): wrote 220/726 replicate(s)
+Finished scenario=50% coverage (all ages) rep=220
+Finished scenario=50% coverage (all ages) rep=228
+Finished scenario=50% coverage (all ages) rep=219
+Finished scenario=50% coverage (all ages) rep=224
+Finished scenario=50% coverage (all ages) rep=226
+Finished scenario=50% coverage (all ages) rep=222
+Finished scenario=50% coverage (all ages) rep=230
+Finished scenario=50% coverage (all ages) rep=225
+Finished scenario=50% coverage (all ages) rep=231
+Finished scenario=50% coverage (all ages) rep=229
+Finished scenario=50% coverage (all ages) rep=227
+Finished scenario=50% coverage (all ages) rep=233
+Finished scenario=50% coverage (all ages) rep=218
+Finished scenario=50% coverage (all ages) rep=235
+Finished scenario=50% coverage (all ages) rep=238
+Finished scenario=50% coverage (all ages) rep=246
+Finished scenario=50% coverage (all ages) rep=247
+Finished scenario=50% coverage (all ages) rep=245
+Finished scenario=50% coverage (all ages) rep=237
+Finished scenario=50% coverage (all ages) rep=244
+  50% coverage (all ages): wrote 240/726 replicate(s)
+Finished scenario=50% coverage (all ages) rep=243
+Finished scenario=50% coverage (all ages) rep=242
+Finished scenario=50% coverage (all ages) rep=248
+Finished scenario=50% coverage (all ages) rep=239
+Finished scenario=50% coverage (all ages) rep=249
+Finished scenario=50% coverage (all ages) rep=232
+Finished scenario=50% coverage (all ages) rep=236
+Finished scenario=50% coverage (all ages) rep=240
+Finished scenario=50% coverage (all ages) rep=234
+Finished scenario=50% coverage (all ages) rep=241
+Finished scenario=50% coverage (all ages) rep=253
+Finished scenario=50% coverage (all ages) rep=263
+Finished scenario=50% coverage (all ages) rep=251
+Finished scenario=50% coverage (all ages) rep=262
+Finished scenario=50% coverage (all ages) rep=255
+Finished scenario=50% coverage (all ages) rep=252
+Finished scenario=50% coverage (all ages) rep=257
+Finished scenario=50% coverage (all ages) rep=250
+Finished scenario=50% coverage (all ages) rep=264
+Finished scenario=50% coverage (all ages) rep=254
+  50% coverage (all ages): wrote 260/726 replicate(s)
+Finished scenario=50% coverage (all ages) rep=258
+Finished scenario=50% coverage (all ages) rep=256
+Finished scenario=50% coverage (all ages) rep=259
+Finished scenario=50% coverage (all ages) rep=265
+Finished scenario=50% coverage (all ages) rep=260
+Finished scenario=50% coverage (all ages) rep=261
+Finished scenario=50% coverage (all ages) rep=267
+Finished scenario=50% coverage (all ages) rep=280
+Finished scenario=50% coverage (all ages) rep=278
+Finished scenario=50% coverage (all ages) rep=272
+Finished scenario=50% coverage (all ages) rep=271
+Finished scenario=50% coverage (all ages) rep=281
+Finished scenario=50% coverage (all ages) rep=269
+Finished scenario=50% coverage (all ages) rep=282
+Finished scenario=50% coverage (all ages) rep=273
+Finished scenario=50% coverage (all ages) rep=279
+Finished scenario=50% coverage (all ages) rep=268
+Finished scenario=50% coverage (all ages) rep=270
+Finished scenario=50% coverage (all ages) rep=274
+Finished scenario=50% coverage (all ages) rep=276
+  50% coverage (all ages): wrote 280/726 replicate(s)
+Finished scenario=50% coverage (all ages) rep=266
+Finished scenario=50% coverage (all ages) rep=275
+Finished scenario=50% coverage (all ages) rep=277
+Finished scenario=50% coverage (all ages) rep=284
+Finished scenario=50% coverage (all ages) rep=290
+Finished scenario=50% coverage (all ages) rep=292
+Finished scenario=50% coverage (all ages) rep=291
+Finished scenario=50% coverage (all ages) rep=286
+Finished scenario=50% coverage (all ages) rep=294
+Finished scenario=50% coverage (all ages) rep=289
+Finished scenario=50% coverage (all ages) rep=283
+Finished scenario=50% coverage (all ages) rep=287
+Finished scenario=50% coverage (all ages) rep=288
+Finished scenario=50% coverage (all ages) rep=295
+Finished scenario=50% coverage (all ages) rep=298
+Finished scenario=50% coverage (all ages) rep=293
+Finished scenario=50% coverage (all ages) rep=296
+Finished scenario=50% coverage (all ages) rep=297
+Finished scenario=50% coverage (all ages) rep=285
+Finished scenario=50% coverage (all ages) rep=303
+  50% coverage (all ages): wrote 300/726 replicate(s)
+Finished scenario=50% coverage (all ages) rep=304
+Finished scenario=50% coverage (all ages) rep=307
+Finished scenario=50% coverage (all ages) rep=308
+Finished scenario=50% coverage (all ages) rep=301
+Finished scenario=50% coverage (all ages) rep=305
+Finished scenario=50% coverage (all ages) rep=302
+Finished scenario=50% coverage (all ages) rep=309
+Finished scenario=50% coverage (all ages) rep=306
+Finished scenario=50% coverage (all ages) rep=300
+Finished scenario=50% coverage (all ages) rep=310
+Finished scenario=50% coverage (all ages) rep=299
+Finished scenario=50% coverage (all ages) rep=316
+Finished scenario=50% coverage (all ages) rep=314
+Finished scenario=50% coverage (all ages) rep=319
+Finished scenario=50% coverage (all ages) rep=321
+Finished scenario=50% coverage (all ages) rep=312
+Finished scenario=50% coverage (all ages) rep=318
+Finished scenario=50% coverage (all ages) rep=313
+Finished scenario=50% coverage (all ages) rep=327
+Finished scenario=50% coverage (all ages) rep=324
+  50% coverage (all ages): wrote 320/726 replicate(s)
+Finished scenario=50% coverage (all ages) rep=311
+Finished scenario=50% coverage (all ages) rep=315
+Finished scenario=50% coverage (all ages) rep=317
+Finished scenario=50% coverage (all ages) rep=325
+Finished scenario=50% coverage (all ages) rep=320
+Finished scenario=50% coverage (all ages) rep=326
+Finished scenario=50% coverage (all ages) rep=323
+Finished scenario=50% coverage (all ages) rep=322
+Finished scenario=50% coverage (all ages) rep=328
+Finished scenario=50% coverage (all ages) rep=338
+Finished scenario=50% coverage (all ages) rep=335
+Finished scenario=50% coverage (all ages) rep=343
+Finished scenario=50% coverage (all ages) rep=339
+Finished scenario=50% coverage (all ages) rep=334
+Finished scenario=50% coverage (all ages) rep=332
+Finished scenario=50% coverage (all ages) rep=336
+Finished scenario=50% coverage (all ages) rep=341
+Finished scenario=50% coverage (all ages) rep=337
+Finished scenario=50% coverage (all ages) rep=330
+Finished scenario=50% coverage (all ages) rep=331
+  50% coverage (all ages): wrote 340/726 replicate(s)
+Finished scenario=50% coverage (all ages) rep=333
+Finished scenario=50% coverage (all ages) rep=340
+Finished scenario=50% coverage (all ages) rep=342
+Finished scenario=50% coverage (all ages) rep=329
+Finished scenario=50% coverage (all ages) rep=348
+Finished scenario=50% coverage (all ages) rep=349
+Finished scenario=50% coverage (all ages) rep=353
+Finished scenario=50% coverage (all ages) rep=346
+Finished scenario=50% coverage (all ages) rep=347
+Finished scenario=50% coverage (all ages) rep=352
+Finished scenario=50% coverage (all ages) rep=351
+Finished scenario=50% coverage (all ages) rep=344
+Finished scenario=50% coverage (all ages) rep=355
+Finished scenario=50% coverage (all ages) rep=350
+Finished scenario=50% coverage (all ages) rep=345
+Finished scenario=50% coverage (all ages) rep=356
+Finished scenario=50% coverage (all ages) rep=354
+Finished scenario=50% coverage (all ages) rep=358
+Finished scenario=50% coverage (all ages) rep=361
+Finished scenario=50% coverage (all ages) rep=369
+  50% coverage (all ages): wrote 360/726 replicate(s)
+Finished scenario=50% coverage (all ages) rep=363
+Finished scenario=50% coverage (all ages) rep=371
+Finished scenario=50% coverage (all ages) rep=360
+Finished scenario=50% coverage (all ages) rep=364
+Finished scenario=50% coverage (all ages) rep=365
+Finished scenario=50% coverage (all ages) rep=372
+Finished scenario=50% coverage (all ages) rep=367
+Finished scenario=50% coverage (all ages) rep=370
+Finished scenario=50% coverage (all ages) rep=362
+Finished scenario=50% coverage (all ages) rep=366
+Finished scenario=50% coverage (all ages) rep=359
+Finished scenario=50% coverage (all ages) rep=357
+Finished scenario=50% coverage (all ages) rep=368
+Finished scenario=50% coverage (all ages) rep=379
+Finished scenario=50% coverage (all ages) rep=381
+Finished scenario=50% coverage (all ages) rep=380
+Finished scenario=50% coverage (all ages) rep=374
+Finished scenario=50% coverage (all ages) rep=378
+Finished scenario=50% coverage (all ages) rep=375
+Finished scenario=50% coverage (all ages) rep=377
+  50% coverage (all ages): wrote 380/726 replicate(s)
+Finished scenario=50% coverage (all ages) rep=373
+Finished scenario=50% coverage (all ages) rep=385
+Finished scenario=50% coverage (all ages) rep=376
+Finished scenario=50% coverage (all ages) rep=383
+Finished scenario=50% coverage (all ages) rep=384
+Finished scenario=50% coverage (all ages) rep=382
+Finished scenario=50% coverage (all ages) rep=391
+Finished scenario=50% coverage (all ages) rep=399
+Finished scenario=50% coverage (all ages) rep=389
+Finished scenario=50% coverage (all ages) rep=388
+Finished scenario=50% coverage (all ages) rep=401
+Finished scenario=50% coverage (all ages) rep=390
+Finished scenario=50% coverage (all ages) rep=394
+Finished scenario=50% coverage (all ages) rep=402
+Finished scenario=50% coverage (all ages) rep=393
+Finished scenario=50% coverage (all ages) rep=396
+Finished scenario=50% coverage (all ages) rep=395
+Finished scenario=50% coverage (all ages) rep=387
+Finished scenario=50% coverage (all ages) rep=398
+Finished scenario=50% coverage (all ages) rep=392
+  50% coverage (all ages): wrote 400/726 replicate(s)
+Finished scenario=50% coverage (all ages) rep=397
+Finished scenario=50% coverage (all ages) rep=386
+Finished scenario=50% coverage (all ages) rep=400
+Finished scenario=50% coverage (all ages) rep=409
+Finished scenario=50% coverage (all ages) rep=412
+Finished scenario=50% coverage (all ages) rep=407
+Finished scenario=50% coverage (all ages) rep=411
+Finished scenario=50% coverage (all ages) rep=416
+Finished scenario=50% coverage (all ages) rep=404
+Finished scenario=50% coverage (all ages) rep=403
+Finished scenario=50% coverage (all ages) rep=406
+Finished scenario=50% coverage (all ages) rep=410
+Finished scenario=50% coverage (all ages) rep=414
+Finished scenario=50% coverage (all ages) rep=418
+Finished scenario=50% coverage (all ages) rep=415
+Finished scenario=50% coverage (all ages) rep=408
+Finished scenario=50% coverage (all ages) rep=413
+Finished scenario=50% coverage (all ages) rep=405
+Finished scenario=50% coverage (all ages) rep=417
+Finished scenario=50% coverage (all ages) rep=424
+  50% coverage (all ages): wrote 420/726 replicate(s)
+Finished scenario=50% coverage (all ages) rep=419
+Finished scenario=50% coverage (all ages) rep=426
+Finished scenario=50% coverage (all ages) rep=420
+Finished scenario=50% coverage (all ages) rep=428
+Finished scenario=50% coverage (all ages) rep=430
+Finished scenario=50% coverage (all ages) rep=423
+Finished scenario=50% coverage (all ages) rep=431
+Finished scenario=50% coverage (all ages) rep=425
+Finished scenario=50% coverage (all ages) rep=422
+Finished scenario=50% coverage (all ages) rep=429
+Finished scenario=50% coverage (all ages) rep=421
+Finished scenario=50% coverage (all ages) rep=427
+Finished scenario=50% coverage (all ages) rep=445
+Finished scenario=50% coverage (all ages) rep=444
+Finished scenario=50% coverage (all ages) rep=432
+Finished scenario=50% coverage (all ages) rep=435
+Finished scenario=50% coverage (all ages) rep=438
+Finished scenario=50% coverage (all ages) rep=437
+Finished scenario=50% coverage (all ages) rep=436
+Finished scenario=50% coverage (all ages) rep=441
+  50% coverage (all ages): wrote 440/726 replicate(s)
+Finished scenario=50% coverage (all ages) rep=443
+Finished scenario=50% coverage (all ages) rep=447
+Finished scenario=50% coverage (all ages) rep=440
+Finished scenario=50% coverage (all ages) rep=442
+Finished scenario=50% coverage (all ages) rep=439
+Finished scenario=50% coverage (all ages) rep=434
+Finished scenario=50% coverage (all ages) rep=433
+Finished scenario=50% coverage (all ages) rep=446
+Finished scenario=50% coverage (all ages) rep=460
+Finished scenario=50% coverage (all ages) rep=457
+Finished scenario=50% coverage (all ages) rep=456
+Finished scenario=50% coverage (all ages) rep=453
+Finished scenario=50% coverage (all ages) rep=464
+Finished scenario=50% coverage (all ages) rep=458
+Finished scenario=50% coverage (all ages) rep=454
+Finished scenario=50% coverage (all ages) rep=459
+Finished scenario=50% coverage (all ages) rep=455
+Finished scenario=50% coverage (all ages) rep=452
+Finished scenario=50% coverage (all ages) rep=448
+Finished scenario=50% coverage (all ages) rep=450
+  50% coverage (all ages): wrote 460/726 replicate(s)
+Finished scenario=50% coverage (all ages) rep=449
+Finished scenario=50% coverage (all ages) rep=461
+Finished scenario=50% coverage (all ages) rep=462
+Finished scenario=50% coverage (all ages) rep=451
+Finished scenario=50% coverage (all ages) rep=463
+Finished scenario=50% coverage (all ages) rep=465
+Finished scenario=50% coverage (all ages) rep=473
+Finished scenario=50% coverage (all ages) rep=471
+Finished scenario=50% coverage (all ages) rep=468
+Finished scenario=50% coverage (all ages) rep=476
+Finished scenario=50% coverage (all ages) rep=469
+Finished scenario=50% coverage (all ages) rep=475
+Finished scenario=50% coverage (all ages) rep=478
+Finished scenario=50% coverage (all ages) rep=477
+Finished scenario=50% coverage (all ages) rep=480
+Finished scenario=50% coverage (all ages) rep=467
+Finished scenario=50% coverage (all ages) rep=474
+Finished scenario=50% coverage (all ages) rep=472
+Finished scenario=50% coverage (all ages) rep=466
+Finished scenario=50% coverage (all ages) rep=470
+  50% coverage (all ages): wrote 480/726 replicate(s)
+Finished scenario=50% coverage (all ages) rep=479
+Finished scenario=50% coverage (all ages) rep=494
+Finished scenario=50% coverage (all ages) rep=483
+Finished scenario=50% coverage (all ages) rep=493
+Finished scenario=50% coverage (all ages) rep=487
+Finished scenario=50% coverage (all ages) rep=488
+Finished scenario=50% coverage (all ages) rep=481
+Finished scenario=50% coverage (all ages) rep=491
+Finished scenario=50% coverage (all ages) rep=485
+Finished scenario=50% coverage (all ages) rep=484
+Finished scenario=50% coverage (all ages) rep=490
+Finished scenario=50% coverage (all ages) rep=486
+Finished scenario=50% coverage (all ages) rep=492
+Finished scenario=50% coverage (all ages) rep=482
+Finished scenario=50% coverage (all ages) rep=489
+Finished scenario=50% coverage (all ages) rep=497
+Finished scenario=50% coverage (all ages) rep=496
+Finished scenario=50% coverage (all ages) rep=498
+Finished scenario=50% coverage (all ages) rep=502
+Finished scenario=50% coverage (all ages) rep=506
+  50% coverage (all ages): wrote 500/726 replicate(s)
+Finished scenario=50% coverage (all ages) rep=499
+Finished scenario=50% coverage (all ages) rep=501
+Finished scenario=50% coverage (all ages) rep=495
+Finished scenario=50% coverage (all ages) rep=507
+Finished scenario=50% coverage (all ages) rep=504
+Finished scenario=50% coverage (all ages) rep=505
+Finished scenario=50% coverage (all ages) rep=503
+Finished scenario=50% coverage (all ages) rep=508
+Finished scenario=50% coverage (all ages) rep=500
+Finished scenario=50% coverage (all ages) rep=520
+Finished scenario=50% coverage (all ages) rep=512
+Finished scenario=50% coverage (all ages) rep=517
+Finished scenario=50% coverage (all ages) rep=509
+Finished scenario=50% coverage (all ages) rep=513
+Finished scenario=50% coverage (all ages) rep=522
+Finished scenario=50% coverage (all ages) rep=518
+Finished scenario=50% coverage (all ages) rep=511
+Finished scenario=50% coverage (all ages) rep=510
+Finished scenario=50% coverage (all ages) rep=516
+Finished scenario=50% coverage (all ages) rep=523
+  50% coverage (all ages): wrote 520/726 replicate(s)
+Finished scenario=50% coverage (all ages) rep=524
+Finished scenario=50% coverage (all ages) rep=519
+Finished scenario=50% coverage (all ages) rep=514
+Finished scenario=50% coverage (all ages) rep=515
+Finished scenario=50% coverage (all ages) rep=521
+Finished scenario=50% coverage (all ages) rep=534
+Finished scenario=50% coverage (all ages) rep=539
+Finished scenario=50% coverage (all ages) rep=525
+Finished scenario=50% coverage (all ages) rep=535
+Finished scenario=50% coverage (all ages) rep=529
+Finished scenario=50% coverage (all ages) rep=530
+Finished scenario=50% coverage (all ages) rep=526
+Finished scenario=50% coverage (all ages) rep=537
+Finished scenario=50% coverage (all ages) rep=531
+Finished scenario=50% coverage (all ages) rep=527
+Finished scenario=50% coverage (all ages) rep=528
+Finished scenario=50% coverage (all ages) rep=541
+Finished scenario=50% coverage (all ages) rep=540
+Finished scenario=50% coverage (all ages) rep=533
+Finished scenario=50% coverage (all ages) rep=532
+  50% coverage (all ages): wrote 540/726 replicate(s)
+Finished scenario=50% coverage (all ages) rep=538
+Finished scenario=50% coverage (all ages) rep=536
+Finished scenario=50% coverage (all ages) rep=556
+Finished scenario=50% coverage (all ages) rep=549
+Finished scenario=50% coverage (all ages) rep=554
+Finished scenario=50% coverage (all ages) rep=543
+Finished scenario=50% coverage (all ages) rep=553
+Finished scenario=50% coverage (all ages) rep=546
+Finished scenario=50% coverage (all ages) rep=555
+Finished scenario=50% coverage (all ages) rep=545
+Finished scenario=50% coverage (all ages) rep=551
+Finished scenario=50% coverage (all ages) rep=548
+Finished scenario=50% coverage (all ages) rep=552
+Finished scenario=50% coverage (all ages) rep=550
+Finished scenario=50% coverage (all ages) rep=542
+Finished scenario=50% coverage (all ages) rep=544
+Finished scenario=50% coverage (all ages) rep=547
+Finished scenario=50% coverage (all ages) rep=557
+Finished scenario=50% coverage (all ages) rep=563
+Finished scenario=50% coverage (all ages) rep=558
+  50% coverage (all ages): wrote 560/726 replicate(s)
+Finished scenario=50% coverage (all ages) rep=565
+Finished scenario=50% coverage (all ages) rep=566
+Finished scenario=50% coverage (all ages) rep=561
+Finished scenario=50% coverage (all ages) rep=568
+Finished scenario=50% coverage (all ages) rep=564
+Finished scenario=50% coverage (all ages) rep=560
+Finished scenario=50% coverage (all ages) rep=567
+Finished scenario=50% coverage (all ages) rep=562
+Finished scenario=50% coverage (all ages) rep=570
+Finished scenario=50% coverage (all ages) rep=569
+Finished scenario=50% coverage (all ages) rep=559
+Finished scenario=50% coverage (all ages) rep=575
+Finished scenario=50% coverage (all ages) rep=585
+Finished scenario=50% coverage (all ages) rep=572
+Finished scenario=50% coverage (all ages) rep=574
+Finished scenario=50% coverage (all ages) rep=584
+Finished scenario=50% coverage (all ages) rep=580
+Finished scenario=50% coverage (all ages) rep=577
+Finished scenario=50% coverage (all ages) rep=571
+Finished scenario=50% coverage (all ages) rep=581
+  50% coverage (all ages): wrote 580/726 replicate(s)
+Finished scenario=50% coverage (all ages) rep=579
+Finished scenario=50% coverage (all ages) rep=573
+Finished scenario=50% coverage (all ages) rep=578
+Finished scenario=50% coverage (all ages) rep=583
+Finished scenario=50% coverage (all ages) rep=576
+Finished scenario=50% coverage (all ages) rep=582
+Finished scenario=50% coverage (all ages) rep=595
+Finished scenario=50% coverage (all ages) rep=599
+Finished scenario=50% coverage (all ages) rep=601
+Finished scenario=50% coverage (all ages) rep=588
+Finished scenario=50% coverage (all ages) rep=593
+Finished scenario=50% coverage (all ages) rep=596
+Finished scenario=50% coverage (all ages) rep=598
+Finished scenario=50% coverage (all ages) rep=589
+Finished scenario=50% coverage (all ages) rep=586
+Finished scenario=50% coverage (all ages) rep=590
+Finished scenario=50% coverage (all ages) rep=587
+Finished scenario=50% coverage (all ages) rep=597
+Finished scenario=50% coverage (all ages) rep=594
+Finished scenario=50% coverage (all ages) rep=592
+  50% coverage (all ages): wrote 600/726 replicate(s)
+Finished scenario=50% coverage (all ages) rep=591
+Finished scenario=50% coverage (all ages) rep=603
+Finished scenario=50% coverage (all ages) rep=602
+Finished scenario=50% coverage (all ages) rep=600
+Finished scenario=50% coverage (all ages) rep=618
+Finished scenario=50% coverage (all ages) rep=607
+Finished scenario=50% coverage (all ages) rep=615
+Finished scenario=50% coverage (all ages) rep=611
+Finished scenario=50% coverage (all ages) rep=616
+Finished scenario=50% coverage (all ages) rep=614
+Finished scenario=50% coverage (all ages) rep=608
+Finished scenario=50% coverage (all ages) rep=612
+Finished scenario=50% coverage (all ages) rep=617
+Finished scenario=50% coverage (all ages) rep=610
+Finished scenario=50% coverage (all ages) rep=604
+Finished scenario=50% coverage (all ages) rep=609
+Finished scenario=50% coverage (all ages) rep=606
+Finished scenario=50% coverage (all ages) rep=605
+Finished scenario=50% coverage (all ages) rep=613
+Finished scenario=50% coverage (all ages) rep=619
+  50% coverage (all ages): wrote 620/726 replicate(s)
+Finished scenario=50% coverage (all ages) rep=624
+Finished scenario=50% coverage (all ages) rep=622
+Finished scenario=50% coverage (all ages) rep=629
+Finished scenario=50% coverage (all ages) rep=623
+Finished scenario=50% coverage (all ages) rep=626
+Finished scenario=50% coverage (all ages) rep=625
+Finished scenario=50% coverage (all ages) rep=620
+Finished scenario=50% coverage (all ages) rep=627
+Finished scenario=50% coverage (all ages) rep=628
+Finished scenario=50% coverage (all ages) rep=621
+Finished scenario=50% coverage (all ages) rep=646
+Finished scenario=50% coverage (all ages) rep=631
+Finished scenario=50% coverage (all ages) rep=647
+Finished scenario=50% coverage (all ages) rep=644
+Finished scenario=50% coverage (all ages) rep=645
+Finished scenario=50% coverage (all ages) rep=635
+Finished scenario=50% coverage (all ages) rep=643
+Finished scenario=50% coverage (all ages) rep=639
+Finished scenario=50% coverage (all ages) rep=633
+Finished scenario=50% coverage (all ages) rep=641
+  50% coverage (all ages): wrote 640/726 replicate(s)
+Finished scenario=50% coverage (all ages) rep=630
+Finished scenario=50% coverage (all ages) rep=638
+Finished scenario=50% coverage (all ages) rep=642
+Finished scenario=50% coverage (all ages) rep=632
+Finished scenario=50% coverage (all ages) rep=637
+Finished scenario=50% coverage (all ages) rep=636
+Finished scenario=50% coverage (all ages) rep=640
+Finished scenario=50% coverage (all ages) rep=634
+Finished scenario=50% coverage (all ages) rep=652
+Finished scenario=50% coverage (all ages) rep=651
+Finished scenario=50% coverage (all ages) rep=650
+Finished scenario=50% coverage (all ages) rep=654
+Finished scenario=50% coverage (all ages) rep=649
+Finished scenario=50% coverage (all ages) rep=661
+Finished scenario=50% coverage (all ages) rep=653
+Finished scenario=50% coverage (all ages) rep=657
+Finished scenario=50% coverage (all ages) rep=648
+Finished scenario=50% coverage (all ages) rep=655
+Finished scenario=50% coverage (all ages) rep=658
+Finished scenario=50% coverage (all ages) rep=659
+  50% coverage (all ages): wrote 660/726 replicate(s)
+Finished scenario=50% coverage (all ages) rep=656
+Finished scenario=50% coverage (all ages) rep=660
+Finished scenario=50% coverage (all ages) rep=662
+Finished scenario=50% coverage (all ages) rep=674
+Finished scenario=50% coverage (all ages) rep=666
+Finished scenario=50% coverage (all ages) rep=664
+Finished scenario=50% coverage (all ages) rep=668
+Finished scenario=50% coverage (all ages) rep=672
+Finished scenario=50% coverage (all ages) rep=667
+Finished scenario=50% coverage (all ages) rep=665
+Finished scenario=50% coverage (all ages) rep=669
+Finished scenario=50% coverage (all ages) rep=670
+Finished scenario=50% coverage (all ages) rep=673
+Finished scenario=50% coverage (all ages) rep=671
+Finished scenario=50% coverage (all ages) rep=663
+Finished scenario=50% coverage (all ages) rep=681
+Finished scenario=50% coverage (all ages) rep=689
+Finished scenario=50% coverage (all ages) rep=690
+Finished scenario=50% coverage (all ages) rep=686
+Finished scenario=50% coverage (all ages) rep=683
+  50% coverage (all ages): wrote 680/726 replicate(s)
+Finished scenario=50% coverage (all ages) rep=675
+Finished scenario=50% coverage (all ages) rep=682
+Finished scenario=50% coverage (all ages) rep=692
+Finished scenario=50% coverage (all ages) rep=677
+Finished scenario=50% coverage (all ages) rep=680
+Finished scenario=50% coverage (all ages) rep=684
+Finished scenario=50% coverage (all ages) rep=691
+Finished scenario=50% coverage (all ages) rep=678
+Finished scenario=50% coverage (all ages) rep=679
+Finished scenario=50% coverage (all ages) rep=688
+Finished scenario=50% coverage (all ages) rep=676
+Finished scenario=50% coverage (all ages) rep=685
+Finished scenario=50% coverage (all ages) rep=687
+Finished scenario=50% coverage (all ages) rep=701
+Finished scenario=50% coverage (all ages) rep=694
+Finished scenario=50% coverage (all ages) rep=705
+Finished scenario=50% coverage (all ages) rep=703
+Finished scenario=50% coverage (all ages) rep=702
+Finished scenario=50% coverage (all ages) rep=706
+Finished scenario=50% coverage (all ages) rep=707
+  50% coverage (all ages): wrote 700/726 replicate(s)
+Finished scenario=50% coverage (all ages) rep=696
+Finished scenario=50% coverage (all ages) rep=698
+Finished scenario=50% coverage (all ages) rep=695
+Finished scenario=50% coverage (all ages) rep=700
+Finished scenario=50% coverage (all ages) rep=704
+Finished scenario=50% coverage (all ages) rep=693
+Finished scenario=50% coverage (all ages) rep=699
+Finished scenario=50% coverage (all ages) rep=697
+Finished scenario=50% coverage (all ages) rep=721
+Finished scenario=50% coverage (all ages) rep=713
+Finished scenario=50% coverage (all ages) rep=714
+Finished scenario=50% coverage (all ages) rep=715
+Finished scenario=50% coverage (all ages) rep=716
+Finished scenario=50% coverage (all ages) rep=718
+Finished scenario=50% coverage (all ages) rep=712
+Finished scenario=50% coverage (all ages) rep=710
+Finished scenario=50% coverage (all ages) rep=711
+Finished scenario=50% coverage (all ages) rep=722
+Finished scenario=50% coverage (all ages) rep=709
+Finished scenario=50% coverage (all ages) rep=717
+  50% coverage (all ages): wrote 720/726 replicate(s)
+Finished scenario=50% coverage (all ages) rep=708
+Finished scenario=50% coverage (all ages) rep=723
+Finished scenario=60% coverage (all ages) rep=0
+Finished scenario=60% coverage (all ages) rep=8
+Finished scenario=60% coverage (all ages) rep=11
+Finished scenario=50% coverage (all ages) rep=724
+Finished scenario=60% coverage (all ages) rep=12
+Finished scenario=60% coverage (all ages) rep=1
+Finished scenario=60% coverage (all ages) rep=5
+Finished scenario=50% coverage (all ages) rep=725
+Finished scenario=60% coverage (all ages) rep=10
+Finished scenario=60% coverage (all ages) rep=2
+Finished scenario=50% coverage (all ages) rep=720
+Finished scenario=60% coverage (all ages) rep=14
+Finished scenario=60% coverage (all ages) rep=7
+Finished scenario=60% coverage (all ages) rep=6
+Finished scenario=60% coverage (all ages) rep=9
+Finished scenario=60% coverage (all ages) rep=4
+Finished scenario=50% coverage (all ages) rep=719
+Finished scenario=60% coverage (all ages) rep=3
+Finished scenario=60% coverage (all ages) rep=18
+Finished scenario=60% coverage (all ages) rep=25
+Finished scenario=60% coverage (all ages) rep=27
+Finished scenario=60% coverage (all ages) rep=16
+Finished scenario=60% coverage (all ages) rep=19
+Finished scenario=60% coverage (all ages) rep=15
+  60% coverage (all ages): wrote 20/726 replicate(s)
+Finished scenario=60% coverage (all ages) rep=22
+Finished scenario=60% coverage (all ages) rep=20
+Finished scenario=60% coverage (all ages) rep=21
+Finished scenario=60% coverage (all ages) rep=26
+Finished scenario=60% coverage (all ages) rep=24
+Finished scenario=60% coverage (all ages) rep=13
+Finished scenario=60% coverage (all ages) rep=17
+Finished scenario=60% coverage (all ages) rep=23
+Finished scenario=60% coverage (all ages) rep=28
+Finished scenario=60% coverage (all ages) rep=33
+Finished scenario=60% coverage (all ages) rep=41
+Finished scenario=60% coverage (all ages) rep=35
+Finished scenario=60% coverage (all ages) rep=39
+Finished scenario=60% coverage (all ages) rep=30
+Finished scenario=60% coverage (all ages) rep=37
+Finished scenario=60% coverage (all ages) rep=32
+Finished scenario=60% coverage (all ages) rep=42
+Finished scenario=60% coverage (all ages) rep=34
+Finished scenario=60% coverage (all ages) rep=38
+Finished scenario=60% coverage (all ages) rep=29
+  60% coverage (all ages): wrote 40/726 replicate(s)
+Finished scenario=60% coverage (all ages) rep=31
+Finished scenario=60% coverage (all ages) rep=36
+Finished scenario=60% coverage (all ages) rep=43
+Finished scenario=60% coverage (all ages) rep=54
+Finished scenario=60% coverage (all ages) rep=50
+Finished scenario=60% coverage (all ages) rep=51
+Finished scenario=60% coverage (all ages) rep=52
+Finished scenario=60% coverage (all ages) rep=44
+Finished scenario=60% coverage (all ages) rep=45
+Finished scenario=60% coverage (all ages) rep=40
+Finished scenario=60% coverage (all ages) rep=57
+Finished scenario=60% coverage (all ages) rep=48
+Finished scenario=60% coverage (all ages) rep=49
+Finished scenario=60% coverage (all ages) rep=53
+Finished scenario=60% coverage (all ages) rep=56
+Finished scenario=60% coverage (all ages) rep=55
+Finished scenario=60% coverage (all ages) rep=47
+Finished scenario=60% coverage (all ages) rep=46
+Finished scenario=60% coverage (all ages) rep=68
+Finished scenario=60% coverage (all ages) rep=70
+  60% coverage (all ages): wrote 60/726 replicate(s)
+Finished scenario=60% coverage (all ages) rep=73
+Finished scenario=60% coverage (all ages) rep=58
+Finished scenario=60% coverage (all ages) rep=63
+Finished scenario=60% coverage (all ages) rep=65
+Finished scenario=60% coverage (all ages) rep=62
+Finished scenario=60% coverage (all ages) rep=67
+Finished scenario=60% coverage (all ages) rep=69
+Finished scenario=60% coverage (all ages) rep=66
+Finished scenario=60% coverage (all ages) rep=72
+Finished scenario=60% coverage (all ages) rep=74
+Finished scenario=60% coverage (all ages) rep=61
+Finished scenario=60% coverage (all ages) rep=59
+Finished scenario=60% coverage (all ages) rep=64
+Finished scenario=60% coverage (all ages) rep=71
+Finished scenario=60% coverage (all ages) rep=60
+Finished scenario=60% coverage (all ages) rep=75
+Finished scenario=60% coverage (all ages) rep=84
+Finished scenario=60% coverage (all ages) rep=78
+Finished scenario=60% coverage (all ages) rep=76
+Finished scenario=60% coverage (all ages) rep=87
+  60% coverage (all ages): wrote 80/726 replicate(s)
+Finished scenario=60% coverage (all ages) rep=83
+Finished scenario=60% coverage (all ages) rep=79
+Finished scenario=60% coverage (all ages) rep=77
+Finished scenario=60% coverage (all ages) rep=80
+Finished scenario=60% coverage (all ages) rep=82
+Finished scenario=60% coverage (all ages) rep=81
+Finished scenario=60% coverage (all ages) rep=90
+Finished scenario=60% coverage (all ages) rep=88
+Finished scenario=60% coverage (all ages) rep=86
+Finished scenario=60% coverage (all ages) rep=89
+Finished scenario=60% coverage (all ages) rep=85
+Finished scenario=60% coverage (all ages) rep=103
+Finished scenario=60% coverage (all ages) rep=106
+Finished scenario=60% coverage (all ages) rep=94
+Finished scenario=60% coverage (all ages) rep=99
+Finished scenario=60% coverage (all ages) rep=101
+Finished scenario=60% coverage (all ages) rep=91
+Finished scenario=60% coverage (all ages) rep=95
+Finished scenario=60% coverage (all ages) rep=93
+Finished scenario=60% coverage (all ages) rep=96
+  60% coverage (all ages): wrote 100/726 replicate(s)
+Finished scenario=60% coverage (all ages) rep=107
+Finished scenario=60% coverage (all ages) rep=92
+Finished scenario=60% coverage (all ages) rep=97
+Finished scenario=60% coverage (all ages) rep=98
+Finished scenario=60% coverage (all ages) rep=105
+Finished scenario=60% coverage (all ages) rep=100
+Finished scenario=60% coverage (all ages) rep=104
+Finished scenario=60% coverage (all ages) rep=102
+Finished scenario=60% coverage (all ages) rep=108
+Finished scenario=60% coverage (all ages) rep=123
+Finished scenario=60% coverage (all ages) rep=116
+Finished scenario=60% coverage (all ages) rep=120
+Finished scenario=60% coverage (all ages) rep=109
+Finished scenario=60% coverage (all ages) rep=113
+Finished scenario=60% coverage (all ages) rep=115
+Finished scenario=60% coverage (all ages) rep=110
+Finished scenario=60% coverage (all ages) rep=112
+Finished scenario=60% coverage (all ages) rep=117
+Finished scenario=60% coverage (all ages) rep=122
+Finished scenario=60% coverage (all ages) rep=114
+  60% coverage (all ages): wrote 120/726 replicate(s)
+Finished scenario=60% coverage (all ages) rep=118
+Finished scenario=60% coverage (all ages) rep=121
+Finished scenario=60% coverage (all ages) rep=119
+Finished scenario=60% coverage (all ages) rep=111
+Finished scenario=60% coverage (all ages) rep=128
+Finished scenario=60% coverage (all ages) rep=135
+Finished scenario=60% coverage (all ages) rep=136
+Finished scenario=60% coverage (all ages) rep=134
+Finished scenario=60% coverage (all ages) rep=125
+Finished scenario=60% coverage (all ages) rep=130
+Finished scenario=60% coverage (all ages) rep=126
+Finished scenario=60% coverage (all ages) rep=129
+Finished scenario=60% coverage (all ages) rep=124
+Finished scenario=60% coverage (all ages) rep=133
+Finished scenario=60% coverage (all ages) rep=132
+Finished scenario=60% coverage (all ages) rep=127
+Finished scenario=60% coverage (all ages) rep=131
+Finished scenario=60% coverage (all ages) rep=149
+Finished scenario=60% coverage (all ages) rep=142
+Finished scenario=60% coverage (all ages) rep=144
+  60% coverage (all ages): wrote 140/726 replicate(s)
+Finished scenario=60% coverage (all ages) rep=146
+Finished scenario=60% coverage (all ages) rep=151
+Finished scenario=60% coverage (all ages) rep=148
+Finished scenario=60% coverage (all ages) rep=141
+Finished scenario=60% coverage (all ages) rep=150
+Finished scenario=60% coverage (all ages) rep=138
+Finished scenario=60% coverage (all ages) rep=147
+Finished scenario=60% coverage (all ages) rep=140
+Finished scenario=60% coverage (all ages) rep=137
+Finished scenario=60% coverage (all ages) rep=143
+Finished scenario=60% coverage (all ages) rep=145
+Finished scenario=60% coverage (all ages) rep=139
+Finished scenario=60% coverage (all ages) rep=156
+Finished scenario=60% coverage (all ages) rep=169
+Finished scenario=60% coverage (all ages) rep=165
+Finished scenario=60% coverage (all ages) rep=164
+Finished scenario=60% coverage (all ages) rep=157
+Finished scenario=60% coverage (all ages) rep=155
+Finished scenario=60% coverage (all ages) rep=153
+Finished scenario=60% coverage (all ages) rep=168
+  60% coverage (all ages): wrote 160/726 replicate(s)
+Finished scenario=60% coverage (all ages) rep=160
+Finished scenario=60% coverage (all ages) rep=159
+Finished scenario=60% coverage (all ages) rep=162
+Finished scenario=60% coverage (all ages) rep=167
+Finished scenario=60% coverage (all ages) rep=161
+Finished scenario=60% coverage (all ages) rep=163
+Finished scenario=60% coverage (all ages) rep=152
+Finished scenario=60% coverage (all ages) rep=166
+Finished scenario=60% coverage (all ages) rep=158
+Finished scenario=60% coverage (all ages) rep=154
+Finished scenario=60% coverage (all ages) rep=171
+Finished scenario=60% coverage (all ages) rep=181
+Finished scenario=60% coverage (all ages) rep=174
+Finished scenario=60% coverage (all ages) rep=170
+Finished scenario=60% coverage (all ages) rep=172
+Finished scenario=60% coverage (all ages) rep=182
+Finished scenario=60% coverage (all ages) rep=173
+Finished scenario=60% coverage (all ages) rep=183
+Finished scenario=60% coverage (all ages) rep=177
+Finished scenario=60% coverage (all ages) rep=178
+  60% coverage (all ages): wrote 180/726 replicate(s)
+Finished scenario=60% coverage (all ages) rep=179
+Finished scenario=60% coverage (all ages) rep=184
+Finished scenario=60% coverage (all ages) rep=175
+Finished scenario=60% coverage (all ages) rep=176
+Finished scenario=60% coverage (all ages) rep=180
+Finished scenario=60% coverage (all ages) rep=195
+Finished scenario=60% coverage (all ages) rep=194
+Finished scenario=60% coverage (all ages) rep=185
+Finished scenario=60% coverage (all ages) rep=196
+Finished scenario=60% coverage (all ages) rep=192
+Finished scenario=60% coverage (all ages) rep=187
+Finished scenario=60% coverage (all ages) rep=186
+Finished scenario=60% coverage (all ages) rep=198
+Finished scenario=60% coverage (all ages) rep=189
+Finished scenario=60% coverage (all ages) rep=188
+Finished scenario=60% coverage (all ages) rep=193
+Finished scenario=60% coverage (all ages) rep=201
+Finished scenario=60% coverage (all ages) rep=191
+Finished scenario=60% coverage (all ages) rep=190
+Finished scenario=60% coverage (all ages) rep=209
+  60% coverage (all ages): wrote 200/726 replicate(s)
+Finished scenario=60% coverage (all ages) rep=197
+Finished scenario=60% coverage (all ages) rep=204
+Finished scenario=60% coverage (all ages) rep=205
+Finished scenario=60% coverage (all ages) rep=211
+Finished scenario=60% coverage (all ages) rep=212
+Finished scenario=60% coverage (all ages) rep=208
+Finished scenario=60% coverage (all ages) rep=207
+Finished scenario=60% coverage (all ages) rep=206
+Finished scenario=60% coverage (all ages) rep=203
+Finished scenario=60% coverage (all ages) rep=214
+Finished scenario=60% coverage (all ages) rep=200
+Finished scenario=60% coverage (all ages) rep=213
+Finished scenario=60% coverage (all ages) rep=199
+Finished scenario=60% coverage (all ages) rep=202
+Finished scenario=60% coverage (all ages) rep=210
+Finished scenario=60% coverage (all ages) rep=221
+Finished scenario=60% coverage (all ages) rep=227
+Finished scenario=60% coverage (all ages) rep=228
+Finished scenario=60% coverage (all ages) rep=226
+Finished scenario=60% coverage (all ages) rep=216
+  60% coverage (all ages): wrote 220/726 replicate(s)
+Finished scenario=60% coverage (all ages) rep=224
+Finished scenario=60% coverage (all ages) rep=229
+Finished scenario=60% coverage (all ages) rep=217
+Finished scenario=60% coverage (all ages) rep=218
+Finished scenario=60% coverage (all ages) rep=222
+Finished scenario=60% coverage (all ages) rep=225
+Finished scenario=60% coverage (all ages) rep=230
+Finished scenario=60% coverage (all ages) rep=231
+Finished scenario=60% coverage (all ages) rep=220
+Finished scenario=60% coverage (all ages) rep=219
+Finished scenario=60% coverage (all ages) rep=215
+Finished scenario=60% coverage (all ages) rep=223
+Finished scenario=60% coverage (all ages) rep=239
+Finished scenario=60% coverage (all ages) rep=236
+Finished scenario=60% coverage (all ages) rep=237
+Finished scenario=60% coverage (all ages) rep=245
+Finished scenario=60% coverage (all ages) rep=233
+Finished scenario=60% coverage (all ages) rep=240
+Finished scenario=60% coverage (all ages) rep=232
+Finished scenario=60% coverage (all ages) rep=244
+  60% coverage (all ages): wrote 240/726 replicate(s)
+Finished scenario=60% coverage (all ages) rep=243
+Finished scenario=60% coverage (all ages) rep=238
+Finished scenario=60% coverage (all ages) rep=235
+Finished scenario=60% coverage (all ages) rep=241
+Finished scenario=60% coverage (all ages) rep=246
+Finished scenario=60% coverage (all ages) rep=242
+Finished scenario=60% coverage (all ages) rep=234
+Finished scenario=60% coverage (all ages) rep=256
+Finished scenario=60% coverage (all ages) rep=247
+Finished scenario=60% coverage (all ages) rep=248
+Finished scenario=60% coverage (all ages) rep=255
+Finished scenario=60% coverage (all ages) rep=253
+Finished scenario=60% coverage (all ages) rep=257
+Finished scenario=60% coverage (all ages) rep=251
+Finished scenario=60% coverage (all ages) rep=250
+Finished scenario=60% coverage (all ages) rep=254
+Finished scenario=60% coverage (all ages) rep=258
+Finished scenario=60% coverage (all ages) rep=252
+Finished scenario=60% coverage (all ages) rep=249
+Finished scenario=60% coverage (all ages) rep=265
+  60% coverage (all ages): wrote 260/726 replicate(s)
+Finished scenario=60% coverage (all ages) rep=268
+Finished scenario=60% coverage (all ages) rep=266
+Finished scenario=60% coverage (all ages) rep=264
+Finished scenario=60% coverage (all ages) rep=272
+Finished scenario=60% coverage (all ages) rep=269
+Finished scenario=60% coverage (all ages) rep=273
+Finished scenario=60% coverage (all ages) rep=262
+Finished scenario=60% coverage (all ages) rep=261
+Finished scenario=60% coverage (all ages) rep=259
+Finished scenario=60% coverage (all ages) rep=260
+Finished scenario=60% coverage (all ages) rep=271
+Finished scenario=60% coverage (all ages) rep=270
+Finished scenario=60% coverage (all ages) rep=263
+Finished scenario=60% coverage (all ages) rep=267
+Finished scenario=60% coverage (all ages) rep=274
+Finished scenario=60% coverage (all ages) rep=290
+Finished scenario=60% coverage (all ages) rep=282
+Finished scenario=60% coverage (all ages) rep=285
+Finished scenario=60% coverage (all ages) rep=288
+Finished scenario=60% coverage (all ages) rep=277
+  60% coverage (all ages): wrote 280/726 replicate(s)
+Finished scenario=60% coverage (all ages) rep=278
+Finished scenario=60% coverage (all ages) rep=279
+Finished scenario=60% coverage (all ages) rep=276
+Finished scenario=60% coverage (all ages) rep=291
+Finished scenario=60% coverage (all ages) rep=284
+Finished scenario=60% coverage (all ages) rep=280
+Finished scenario=60% coverage (all ages) rep=283
+Finished scenario=60% coverage (all ages) rep=286
+Finished scenario=60% coverage (all ages) rep=289
+Finished scenario=60% coverage (all ages) rep=287
+Finished scenario=60% coverage (all ages) rep=281
+Finished scenario=60% coverage (all ages) rep=275
+Finished scenario=60% coverage (all ages) rep=303
+Finished scenario=60% coverage (all ages) rep=299
+Finished scenario=60% coverage (all ages) rep=295
+Finished scenario=60% coverage (all ages) rep=292
+Finished scenario=60% coverage (all ages) rep=296
+Finished scenario=60% coverage (all ages) rep=294
+Finished scenario=60% coverage (all ages) rep=304
+Finished scenario=60% coverage (all ages) rep=305
+  60% coverage (all ages): wrote 300/726 replicate(s)
+Finished scenario=60% coverage (all ages) rep=306
+Finished scenario=60% coverage (all ages) rep=297
+Finished scenario=60% coverage (all ages) rep=301
+Finished scenario=60% coverage (all ages) rep=307
+Finished scenario=60% coverage (all ages) rep=298
+Finished scenario=60% coverage (all ages) rep=302
+Finished scenario=60% coverage (all ages) rep=300
+Finished scenario=60% coverage (all ages) rep=293
+Finished scenario=60% coverage (all ages) rep=308
+Finished scenario=60% coverage (all ages) rep=313
+Finished scenario=60% coverage (all ages) rep=315
+Finished scenario=60% coverage (all ages) rep=324
+Finished scenario=60% coverage (all ages) rep=314
+Finished scenario=60% coverage (all ages) rep=318
+Finished scenario=60% coverage (all ages) rep=317
+Finished scenario=60% coverage (all ages) rep=312
+Finished scenario=60% coverage (all ages) rep=320
+Finished scenario=60% coverage (all ages) rep=322
+Finished scenario=60% coverage (all ages) rep=310
+Finished scenario=60% coverage (all ages) rep=319
+  60% coverage (all ages): wrote 320/726 replicate(s)
+Finished scenario=60% coverage (all ages) rep=323
+Finished scenario=60% coverage (all ages) rep=316
+Finished scenario=60% coverage (all ages) rep=311
+Finished scenario=60% coverage (all ages) rep=309
+Finished scenario=60% coverage (all ages) rep=331
+Finished scenario=60% coverage (all ages) rep=321
+Finished scenario=60% coverage (all ages) rep=328
+Finished scenario=60% coverage (all ages) rep=334
+Finished scenario=60% coverage (all ages) rep=338
+Finished scenario=60% coverage (all ages) rep=325
+Finished scenario=60% coverage (all ages) rep=329
+Finished scenario=60% coverage (all ages) rep=333
+Finished scenario=60% coverage (all ages) rep=327
+Finished scenario=60% coverage (all ages) rep=337
+Finished scenario=60% coverage (all ages) rep=336
+Finished scenario=60% coverage (all ages) rep=330
+Finished scenario=60% coverage (all ages) rep=332
+Finished scenario=60% coverage (all ages) rep=335
+Finished scenario=60% coverage (all ages) rep=326
+Finished scenario=60% coverage (all ages) rep=341
+  60% coverage (all ages): wrote 340/726 replicate(s)
+Finished scenario=60% coverage (all ages) rep=350
+Finished scenario=60% coverage (all ages) rep=349
+Finished scenario=60% coverage (all ages) rep=351
+Finished scenario=60% coverage (all ages) rep=347
+Finished scenario=60% coverage (all ages) rep=340
+Finished scenario=60% coverage (all ages) rep=353
+Finished scenario=60% coverage (all ages) rep=342
+Finished scenario=60% coverage (all ages) rep=339
+Finished scenario=60% coverage (all ages) rep=345
+Finished scenario=60% coverage (all ages) rep=346
+Finished scenario=60% coverage (all ages) rep=344
+Finished scenario=60% coverage (all ages) rep=343
+Finished scenario=60% coverage (all ages) rep=348
+Finished scenario=60% coverage (all ages) rep=356
+Finished scenario=60% coverage (all ages) rep=358
+Finished scenario=60% coverage (all ages) rep=362
+Finished scenario=60% coverage (all ages) rep=363
+Finished scenario=60% coverage (all ages) rep=366
+Finished scenario=60% coverage (all ages) rep=364
+Finished scenario=60% coverage (all ages) rep=357
+  60% coverage (all ages): wrote 360/726 replicate(s)
+Finished scenario=60% coverage (all ages) rep=359
+Finished scenario=60% coverage (all ages) rep=361
+Finished scenario=60% coverage (all ages) rep=367
+Finished scenario=60% coverage (all ages) rep=368
+Finished scenario=60% coverage (all ages) rep=354
+Finished scenario=60% coverage (all ages) rep=355
+Finished scenario=60% coverage (all ages) rep=370
+Finished scenario=60% coverage (all ages) rep=365
+Finished scenario=60% coverage (all ages) rep=360
+Finished scenario=60% coverage (all ages) rep=352
+Finished scenario=60% coverage (all ages) rep=377
+Finished scenario=60% coverage (all ages) rep=376
+Finished scenario=60% coverage (all ages) rep=379
+Finished scenario=60% coverage (all ages) rep=378
+Finished scenario=60% coverage (all ages) rep=374
+Finished scenario=60% coverage (all ages) rep=381
+Finished scenario=60% coverage (all ages) rep=375
+Finished scenario=60% coverage (all ages) rep=384
+Finished scenario=60% coverage (all ages) rep=369
+Finished scenario=60% coverage (all ages) rep=372
+  60% coverage (all ages): wrote 380/726 replicate(s)
+Finished scenario=60% coverage (all ages) rep=371
+Finished scenario=60% coverage (all ages) rep=383
+Finished scenario=60% coverage (all ages) rep=382
+Finished scenario=60% coverage (all ages) rep=380
+Finished scenario=60% coverage (all ages) rep=373
+Finished scenario=60% coverage (all ages) rep=385
+Finished scenario=60% coverage (all ages) rep=393
+Finished scenario=60% coverage (all ages) rep=398
+Finished scenario=60% coverage (all ages) rep=386
+Finished scenario=60% coverage (all ages) rep=390
+Finished scenario=60% coverage (all ages) rep=387
+Finished scenario=60% coverage (all ages) rep=402
+Finished scenario=60% coverage (all ages) rep=395
+Finished scenario=60% coverage (all ages) rep=401
+Finished scenario=60% coverage (all ages) rep=389
+Finished scenario=60% coverage (all ages) rep=388
+Finished scenario=60% coverage (all ages) rep=400
+Finished scenario=60% coverage (all ages) rep=396
+Finished scenario=60% coverage (all ages) rep=391
+Finished scenario=60% coverage (all ages) rep=399
+  60% coverage (all ages): wrote 400/726 replicate(s)
+Finished scenario=60% coverage (all ages) rep=397
+Finished scenario=60% coverage (all ages) rep=394
+Finished scenario=60% coverage (all ages) rep=392
+Finished scenario=60% coverage (all ages) rep=415
+Finished scenario=60% coverage (all ages) rep=406
+Finished scenario=60% coverage (all ages) rep=404
+Finished scenario=60% coverage (all ages) rep=409
+Finished scenario=60% coverage (all ages) rep=418
+Finished scenario=60% coverage (all ages) rep=408
+Finished scenario=60% coverage (all ages) rep=410
+Finished scenario=60% coverage (all ages) rep=412
+Finished scenario=60% coverage (all ages) rep=413
+Finished scenario=60% coverage (all ages) rep=417
+Finished scenario=60% coverage (all ages) rep=416
+Finished scenario=60% coverage (all ages) rep=403
+Finished scenario=60% coverage (all ages) rep=407
+Finished scenario=60% coverage (all ages) rep=414
+Finished scenario=60% coverage (all ages) rep=405
+Finished scenario=60% coverage (all ages) rep=411
+Finished scenario=60% coverage (all ages) rep=422
+  60% coverage (all ages): wrote 420/726 replicate(s)
+Finished scenario=60% coverage (all ages) rep=419
+Finished scenario=60% coverage (all ages) rep=430
+Finished scenario=60% coverage (all ages) rep=426
+Finished scenario=60% coverage (all ages) rep=431
+Finished scenario=60% coverage (all ages) rep=434
+Finished scenario=60% coverage (all ages) rep=435
+Finished scenario=60% coverage (all ages) rep=423
+Finished scenario=60% coverage (all ages) rep=424
+Finished scenario=60% coverage (all ages) rep=421
+Finished scenario=60% coverage (all ages) rep=425
+Finished scenario=60% coverage (all ages) rep=432
+Finished scenario=60% coverage (all ages) rep=429
+Finished scenario=60% coverage (all ages) rep=433
+Finished scenario=60% coverage (all ages) rep=427
+Finished scenario=60% coverage (all ages) rep=420
+Finished scenario=60% coverage (all ages) rep=428
+Finished scenario=60% coverage (all ages) rep=451
+Finished scenario=60% coverage (all ages) rep=450
+Finished scenario=60% coverage (all ages) rep=438
+Finished scenario=60% coverage (all ages) rep=448
+  60% coverage (all ages): wrote 440/726 replicate(s)
+Finished scenario=60% coverage (all ages) rep=449
+Finished scenario=60% coverage (all ages) rep=436
+Finished scenario=60% coverage (all ages) rep=447
+Finished scenario=60% coverage (all ages) rep=441
+Finished scenario=60% coverage (all ages) rep=442
+Finished scenario=60% coverage (all ages) rep=443
+Finished scenario=60% coverage (all ages) rep=446
+Finished scenario=60% coverage (all ages) rep=439
+Finished scenario=60% coverage (all ages) rep=440
+Finished scenario=60% coverage (all ages) rep=444
+Finished scenario=60% coverage (all ages) rep=445
+Finished scenario=60% coverage (all ages) rep=437
+Finished scenario=60% coverage (all ages) rep=452
+Finished scenario=60% coverage (all ages) rep=456
+Finished scenario=60% coverage (all ages) rep=460
+Finished scenario=60% coverage (all ages) rep=463
+Finished scenario=60% coverage (all ages) rep=465
+Finished scenario=60% coverage (all ages) rep=458
+Finished scenario=60% coverage (all ages) rep=454
+Finished scenario=60% coverage (all ages) rep=467
+  60% coverage (all ages): wrote 460/726 replicate(s)
+Finished scenario=60% coverage (all ages) rep=453
+Finished scenario=60% coverage (all ages) rep=461
+Finished scenario=60% coverage (all ages) rep=457
+Finished scenario=60% coverage (all ages) rep=468
+Finished scenario=60% coverage (all ages) rep=459
+Finished scenario=60% coverage (all ages) rep=466
+Finished scenario=60% coverage (all ages) rep=462
+Finished scenario=60% coverage (all ages) rep=455
+Finished scenario=60% coverage (all ages) rep=464
+Finished scenario=60% coverage (all ages) rep=469
+Finished scenario=60% coverage (all ages) rep=474
+Finished scenario=60% coverage (all ages) rep=483
+Finished scenario=60% coverage (all ages) rep=477
+Finished scenario=60% coverage (all ages) rep=470
+Finished scenario=60% coverage (all ages) rep=476
+Finished scenario=60% coverage (all ages) rep=475
+Finished scenario=60% coverage (all ages) rep=481
+Finished scenario=60% coverage (all ages) rep=471
+Finished scenario=60% coverage (all ages) rep=473
+Finished scenario=60% coverage (all ages) rep=479
+  60% coverage (all ages): wrote 480/726 replicate(s)
+Finished scenario=60% coverage (all ages) rep=484
+Finished scenario=60% coverage (all ages) rep=480
+Finished scenario=60% coverage (all ages) rep=472
+Finished scenario=60% coverage (all ages) rep=482
+Finished scenario=60% coverage (all ages) rep=478
+Finished scenario=60% coverage (all ages) rep=492
+Finished scenario=60% coverage (all ages) rep=490
+Finished scenario=60% coverage (all ages) rep=499
+Finished scenario=60% coverage (all ages) rep=488
+Finished scenario=60% coverage (all ages) rep=497
+Finished scenario=60% coverage (all ages) rep=495
+Finished scenario=60% coverage (all ages) rep=496
+Finished scenario=60% coverage (all ages) rep=498
+Finished scenario=60% coverage (all ages) rep=501
+Finished scenario=60% coverage (all ages) rep=487
+Finished scenario=60% coverage (all ages) rep=485
+Finished scenario=60% coverage (all ages) rep=489
+Finished scenario=60% coverage (all ages) rep=486
+Finished scenario=60% coverage (all ages) rep=493
+Finished scenario=60% coverage (all ages) rep=494
+  60% coverage (all ages): wrote 500/726 replicate(s)
+Finished scenario=60% coverage (all ages) rep=491
+Finished scenario=60% coverage (all ages) rep=500
+Finished scenario=60% coverage (all ages) rep=505
+Finished scenario=60% coverage (all ages) rep=509
+Finished scenario=60% coverage (all ages) rep=506
+Finished scenario=60% coverage (all ages) rep=517
+Finished scenario=60% coverage (all ages) rep=503
+Finished scenario=60% coverage (all ages) rep=504
+Finished scenario=60% coverage (all ages) rep=511
+Finished scenario=60% coverage (all ages) rep=514
+Finished scenario=60% coverage (all ages) rep=507
+Finished scenario=60% coverage (all ages) rep=502
+Finished scenario=60% coverage (all ages) rep=510
+Finished scenario=60% coverage (all ages) rep=512
+Finished scenario=60% coverage (all ages) rep=515
+Finished scenario=60% coverage (all ages) rep=516
+Finished scenario=60% coverage (all ages) rep=508
+Finished scenario=60% coverage (all ages) rep=518
+Finished scenario=60% coverage (all ages) rep=520
+Finished scenario=60% coverage (all ages) rep=519
+  60% coverage (all ages): wrote 520/726 replicate(s)
+Finished scenario=60% coverage (all ages) rep=524
+Finished scenario=60% coverage (all ages) rep=528
+Finished scenario=60% coverage (all ages) rep=530
+Finished scenario=60% coverage (all ages) rep=526
+Finished scenario=60% coverage (all ages) rep=531
+Finished scenario=60% coverage (all ages) rep=522
+Finished scenario=60% coverage (all ages) rep=513
+Finished scenario=60% coverage (all ages) rep=532
+Finished scenario=60% coverage (all ages) rep=521
+Finished scenario=60% coverage (all ages) rep=529
+Finished scenario=60% coverage (all ages) rep=525
+Finished scenario=60% coverage (all ages) rep=533
+Finished scenario=60% coverage (all ages) rep=523
+Finished scenario=60% coverage (all ages) rep=527
+Finished scenario=60% coverage (all ages) rep=535
+Finished scenario=60% coverage (all ages) rep=545
+Finished scenario=60% coverage (all ages) rep=548
+Finished scenario=60% coverage (all ages) rep=534
+Finished scenario=60% coverage (all ages) rep=538
+Finished scenario=60% coverage (all ages) rep=544
+  60% coverage (all ages): wrote 540/726 replicate(s)
+Finished scenario=60% coverage (all ages) rep=547
+Finished scenario=60% coverage (all ages) rep=536
+Finished scenario=60% coverage (all ages) rep=537
+Finished scenario=60% coverage (all ages) rep=546
+Finished scenario=60% coverage (all ages) rep=543
+Finished scenario=60% coverage (all ages) rep=540
+Finished scenario=60% coverage (all ages) rep=549
+Finished scenario=60% coverage (all ages) rep=542
+Finished scenario=60% coverage (all ages) rep=539
+Finished scenario=60% coverage (all ages) rep=541
+Finished scenario=60% coverage (all ages) rep=566
+Finished scenario=60% coverage (all ages) rep=562
+Finished scenario=60% coverage (all ages) rep=550
+Finished scenario=60% coverage (all ages) rep=551
+Finished scenario=60% coverage (all ages) rep=554
+Finished scenario=60% coverage (all ages) rep=555
+Finished scenario=60% coverage (all ages) rep=558
+Finished scenario=60% coverage (all ages) rep=556
+Finished scenario=60% coverage (all ages) rep=564
+Finished scenario=60% coverage (all ages) rep=552
+  60% coverage (all ages): wrote 560/726 replicate(s)
+Finished scenario=60% coverage (all ages) rep=563
+Finished scenario=60% coverage (all ages) rep=559
+Finished scenario=60% coverage (all ages) rep=565
+Finished scenario=60% coverage (all ages) rep=553
+Finished scenario=60% coverage (all ages) rep=557
+Finished scenario=60% coverage (all ages) rep=560
+Finished scenario=60% coverage (all ages) rep=573
+Finished scenario=60% coverage (all ages) rep=574
+Finished scenario=60% coverage (all ages) rep=567
+Finished scenario=60% coverage (all ages) rep=568
+Finished scenario=60% coverage (all ages) rep=580
+Finished scenario=60% coverage (all ages) rep=570
+Finished scenario=60% coverage (all ages) rep=577
+Finished scenario=60% coverage (all ages) rep=575
+Finished scenario=60% coverage (all ages) rep=578
+Finished scenario=60% coverage (all ages) rep=582
+Finished scenario=60% coverage (all ages) rep=581
+Finished scenario=60% coverage (all ages) rep=571
+Finished scenario=60% coverage (all ages) rep=561
+Finished scenario=60% coverage (all ages) rep=569
+  60% coverage (all ages): wrote 580/726 replicate(s)
+Finished scenario=60% coverage (all ages) rep=579
+Finished scenario=60% coverage (all ages) rep=576
+Finished scenario=60% coverage (all ages) rep=572
+Finished scenario=60% coverage (all ages) rep=583
+Finished scenario=60% coverage (all ages) rep=593
+Finished scenario=60% coverage (all ages) rep=596
+Finished scenario=60% coverage (all ages) rep=590
+Finished scenario=60% coverage (all ages) rep=597
+Finished scenario=60% coverage (all ages) rep=588
+Finished scenario=60% coverage (all ages) rep=594
+Finished scenario=60% coverage (all ages) rep=586
+Finished scenario=60% coverage (all ages) rep=589
+Finished scenario=60% coverage (all ages) rep=591
+Finished scenario=60% coverage (all ages) rep=584
+Finished scenario=60% coverage (all ages) rep=587
+Finished scenario=60% coverage (all ages) rep=585
+Finished scenario=60% coverage (all ages) rep=595
+Finished scenario=60% coverage (all ages) rep=592
+Finished scenario=60% coverage (all ages) rep=599
+Finished scenario=60% coverage (all ages) rep=604
+  60% coverage (all ages): wrote 600/726 replicate(s)
+Finished scenario=60% coverage (all ages) rep=611
+Finished scenario=60% coverage (all ages) rep=612
+Finished scenario=60% coverage (all ages) rep=603
+Finished scenario=60% coverage (all ages) rep=606
+Finished scenario=60% coverage (all ages) rep=608
+Finished scenario=60% coverage (all ages) rep=600
+Finished scenario=60% coverage (all ages) rep=605
+Finished scenario=60% coverage (all ages) rep=614
+Finished scenario=60% coverage (all ages) rep=615
+Finished scenario=60% coverage (all ages) rep=607
+Finished scenario=60% coverage (all ages) rep=598
+Finished scenario=60% coverage (all ages) rep=602
+Finished scenario=60% coverage (all ages) rep=610
+Finished scenario=60% coverage (all ages) rep=613
+Finished scenario=60% coverage (all ages) rep=601
+Finished scenario=60% coverage (all ages) rep=609
+Finished scenario=60% coverage (all ages) rep=619
+Finished scenario=60% coverage (all ages) rep=628
+Finished scenario=60% coverage (all ages) rep=630
+Finished scenario=60% coverage (all ages) rep=618
+  60% coverage (all ages): wrote 620/726 replicate(s)
+Finished scenario=60% coverage (all ages) rep=624
+Finished scenario=60% coverage (all ages) rep=627
+Finished scenario=60% coverage (all ages) rep=620
+Finished scenario=60% coverage (all ages) rep=625
+Finished scenario=60% coverage (all ages) rep=622
+Finished scenario=60% coverage (all ages) rep=629
+Finished scenario=60% coverage (all ages) rep=616
+Finished scenario=60% coverage (all ages) rep=626
+Finished scenario=60% coverage (all ages) rep=623
+Finished scenario=60% coverage (all ages) rep=617
+Finished scenario=60% coverage (all ages) rep=621
+Finished scenario=60% coverage (all ages) rep=636
+Finished scenario=60% coverage (all ages) rep=633
+Finished scenario=60% coverage (all ages) rep=641
+Finished scenario=60% coverage (all ages) rep=639
+Finished scenario=60% coverage (all ages) rep=632
+Finished scenario=60% coverage (all ages) rep=634
+Finished scenario=60% coverage (all ages) rep=635
+Finished scenario=60% coverage (all ages) rep=637
+Finished scenario=60% coverage (all ages) rep=631
+  60% coverage (all ages): wrote 640/726 replicate(s)
+Finished scenario=60% coverage (all ages) rep=638
+Finished scenario=60% coverage (all ages) rep=640
+Finished scenario=60% coverage (all ages) rep=649
+Finished scenario=60% coverage (all ages) rep=653
+Finished scenario=60% coverage (all ages) rep=657
+Finished scenario=60% coverage (all ages) rep=645
+Finished scenario=60% coverage (all ages) rep=644
+Finished scenario=60% coverage (all ages) rep=642
+Finished scenario=60% coverage (all ages) rep=656
+Finished scenario=60% coverage (all ages) rep=655
+Finished scenario=60% coverage (all ages) rep=646
+Finished scenario=60% coverage (all ages) rep=650
+Finished scenario=60% coverage (all ages) rep=651
+Finished scenario=60% coverage (all ages) rep=652
+Finished scenario=60% coverage (all ages) rep=648
+Finished scenario=60% coverage (all ages) rep=643
+Finished scenario=60% coverage (all ages) rep=647
+Finished scenario=60% coverage (all ages) rep=663
+Finished scenario=60% coverage (all ages) rep=671
+Finished scenario=60% coverage (all ages) rep=666
+  60% coverage (all ages): wrote 660/726 replicate(s)
+Finished scenario=60% coverage (all ages) rep=659
+Finished scenario=60% coverage (all ages) rep=662
+Finished scenario=60% coverage (all ages) rep=673
+Finished scenario=60% coverage (all ages) rep=669
+Finished scenario=60% coverage (all ages) rep=654
+Finished scenario=60% coverage (all ages) rep=658
+Finished scenario=60% coverage (all ages) rep=668
+Finished scenario=60% coverage (all ages) rep=672
+Finished scenario=60% coverage (all ages) rep=674
+Finished scenario=60% coverage (all ages) rep=664
+Finished scenario=60% coverage (all ages) rep=660
+Finished scenario=60% coverage (all ages) rep=661
+Finished scenario=60% coverage (all ages) rep=670
+Finished scenario=60% coverage (all ages) rep=667
+Finished scenario=60% coverage (all ages) rep=665
+Finished scenario=60% coverage (all ages) rep=675
+Finished scenario=60% coverage (all ages) rep=680
+Finished scenario=60% coverage (all ages) rep=682
+Finished scenario=60% coverage (all ages) rep=676
+Finished scenario=60% coverage (all ages) rep=678
+  60% coverage (all ages): wrote 680/726 replicate(s)
+Finished scenario=60% coverage (all ages) rep=684
+Finished scenario=60% coverage (all ages) rep=685
+Finished scenario=60% coverage (all ages) rep=679
+Finished scenario=60% coverage (all ages) rep=683
+Finished scenario=60% coverage (all ages) rep=677
+Finished scenario=60% coverage (all ages) rep=681
+Finished scenario=60% coverage (all ages) rep=686
+Finished scenario=60% coverage (all ages) rep=689
+Finished scenario=60% coverage (all ages) rep=688
+Finished scenario=60% coverage (all ages) rep=687
+Finished scenario=60% coverage (all ages) rep=694
+Finished scenario=60% coverage (all ages) rep=699
+Finished scenario=60% coverage (all ages) rep=693
+Finished scenario=60% coverage (all ages) rep=696
+Finished scenario=60% coverage (all ages) rep=700
+Finished scenario=60% coverage (all ages) rep=707
+Finished scenario=60% coverage (all ages) rep=695
+Finished scenario=60% coverage (all ages) rep=701
+Finished scenario=60% coverage (all ages) rep=698
+Finished scenario=60% coverage (all ages) rep=691
+  60% coverage (all ages): wrote 700/726 replicate(s)
+Finished scenario=60% coverage (all ages) rep=705
+Finished scenario=60% coverage (all ages) rep=690
+Finished scenario=60% coverage (all ages) rep=692
+Finished scenario=60% coverage (all ages) rep=703
+Finished scenario=60% coverage (all ages) rep=704
+Finished scenario=60% coverage (all ages) rep=706
+Finished scenario=60% coverage (all ages) rep=702
+Finished scenario=60% coverage (all ages) rep=697
+Finished scenario=60% coverage (all ages) rep=712
+Finished scenario=60% coverage (all ages) rep=721
+Finished scenario=60% coverage (all ages) rep=714
+Finished scenario=60% coverage (all ages) rep=722
+Finished scenario=60% coverage (all ages) rep=713
+Finished scenario=60% coverage (all ages) rep=718
+Finished scenario=60% coverage (all ages) rep=720
+Finished scenario=60% coverage (all ages) rep=710
+Finished scenario=60% coverage (all ages) rep=717
+Finished scenario=60% coverage (all ages) rep=715
+Finished scenario=60% coverage (all ages) rep=709
+Finished scenario=60% coverage (all ages) rep=708
+  60% coverage (all ages): wrote 720/726 replicate(s)
+Finished scenario=60% coverage (all ages) rep=716
+Finished scenario=60% coverage (all ages) rep=711
+Finished scenario=60% coverage (all ages) rep=719
+Finished scenario=70% coverage (all ages) rep=9
+Finished scenario=70% coverage (all ages) rep=3
+Finished scenario=70% coverage (all ages) rep=1
+Finished scenario=70% coverage (all ages) rep=2
+Finished scenario=60% coverage (all ages) rep=725
+Finished scenario=70% coverage (all ages) rep=14
+Finished scenario=70% coverage (all ages) rep=11
+Finished scenario=70% coverage (all ages) rep=13
+Finished scenario=70% coverage (all ages) rep=6
+Finished scenario=60% coverage (all ages) rep=724
+Finished scenario=60% coverage (all ages) rep=723
+Finished scenario=70% coverage (all ages) rep=0
+Finished scenario=70% coverage (all ages) rep=5
+Finished scenario=70% coverage (all ages) rep=7
+Finished scenario=70% coverage (all ages) rep=4
+Finished scenario=70% coverage (all ages) rep=10
+Finished scenario=70% coverage (all ages) rep=12
+Finished scenario=70% coverage (all ages) rep=8
+Finished scenario=70% coverage (all ages) rep=24
+Finished scenario=70% coverage (all ages) rep=26
+Finished scenario=70% coverage (all ages) rep=16
+Finished scenario=70% coverage (all ages) rep=27
+Finished scenario=70% coverage (all ages) rep=22
+  70% coverage (all ages): wrote 20/726 replicate(s)
+Finished scenario=70% coverage (all ages) rep=18
+Finished scenario=70% coverage (all ages) rep=28
+Finished scenario=70% coverage (all ages) rep=15
+Finished scenario=70% coverage (all ages) rep=17
+Finished scenario=70% coverage (all ages) rep=23
+Finished scenario=70% coverage (all ages) rep=29
+Finished scenario=70% coverage (all ages) rep=21
+Finished scenario=70% coverage (all ages) rep=19
+Finished scenario=70% coverage (all ages) rep=20
+Finished scenario=70% coverage (all ages) rep=25
+Finished scenario=70% coverage (all ages) rep=41
+Finished scenario=70% coverage (all ages) rep=30
+Finished scenario=70% coverage (all ages) rep=39
+Finished scenario=70% coverage (all ages) rep=47
+Finished scenario=70% coverage (all ages) rep=33
+Finished scenario=70% coverage (all ages) rep=43
+Finished scenario=70% coverage (all ages) rep=35
+Finished scenario=70% coverage (all ages) rep=38
+Finished scenario=70% coverage (all ages) rep=34
+Finished scenario=70% coverage (all ages) rep=36
+  70% coverage (all ages): wrote 40/726 replicate(s)
+Finished scenario=70% coverage (all ages) rep=40
+Finished scenario=70% coverage (all ages) rep=31
+Finished scenario=70% coverage (all ages) rep=37
+Finished scenario=70% coverage (all ages) rep=32
+Finished scenario=70% coverage (all ages) rep=55
+Finished scenario=70% coverage (all ages) rep=42
+Finished scenario=70% coverage (all ages) rep=54
+Finished scenario=70% coverage (all ages) rep=53
+Finished scenario=70% coverage (all ages) rep=50
+Finished scenario=70% coverage (all ages) rep=44
+Finished scenario=70% coverage (all ages) rep=57
+Finished scenario=70% coverage (all ages) rep=56
+Finished scenario=70% coverage (all ages) rep=45
+Finished scenario=70% coverage (all ages) rep=48
+Finished scenario=70% coverage (all ages) rep=46
+Finished scenario=70% coverage (all ages) rep=52
+Finished scenario=70% coverage (all ages) rep=58
+Finished scenario=70% coverage (all ages) rep=51
+Finished scenario=70% coverage (all ages) rep=49
+Finished scenario=70% coverage (all ages) rep=64
+  70% coverage (all ages): wrote 60/726 replicate(s)
+Finished scenario=70% coverage (all ages) rep=68
+Finished scenario=70% coverage (all ages) rep=62
+Finished scenario=70% coverage (all ages) rep=59
+Finished scenario=70% coverage (all ages) rep=65
+Finished scenario=70% coverage (all ages) rep=72
+Finished scenario=70% coverage (all ages) rep=73
+Finished scenario=70% coverage (all ages) rep=69
+Finished scenario=70% coverage (all ages) rep=61
+Finished scenario=70% coverage (all ages) rep=70
+Finished scenario=70% coverage (all ages) rep=76
+Finished scenario=70% coverage (all ages) rep=67
+Finished scenario=70% coverage (all ages) rep=74
+Finished scenario=70% coverage (all ages) rep=71
+Finished scenario=70% coverage (all ages) rep=60
+Finished scenario=70% coverage (all ages) rep=66
+Finished scenario=70% coverage (all ages) rep=63
+Finished scenario=70% coverage (all ages) rep=75
+Finished scenario=70% coverage (all ages) rep=85
+Finished scenario=70% coverage (all ages) rep=82
+Finished scenario=70% coverage (all ages) rep=91
+  70% coverage (all ages): wrote 80/726 replicate(s)
+Finished scenario=70% coverage (all ages) rep=77
+Finished scenario=70% coverage (all ages) rep=78
+Finished scenario=70% coverage (all ages) rep=80
+Finished scenario=70% coverage (all ages) rep=83
+Finished scenario=70% coverage (all ages) rep=87
+Finished scenario=70% coverage (all ages) rep=86
+Finished scenario=70% coverage (all ages) rep=81
+Finished scenario=70% coverage (all ages) rep=84
+Finished scenario=70% coverage (all ages) rep=90
+Finished scenario=70% coverage (all ages) rep=79
+Finished scenario=70% coverage (all ages) rep=89
+Finished scenario=70% coverage (all ages) rep=88
+Finished scenario=70% coverage (all ages) rep=109
+Finished scenario=70% coverage (all ages) rep=92
+Finished scenario=70% coverage (all ages) rep=103
+Finished scenario=70% coverage (all ages) rep=95
+Finished scenario=70% coverage (all ages) rep=107
+Finished scenario=70% coverage (all ages) rep=93
+Finished scenario=70% coverage (all ages) rep=97
+Finished scenario=70% coverage (all ages) rep=98
+  70% coverage (all ages): wrote 100/726 replicate(s)
+Finished scenario=70% coverage (all ages) rep=101
+Finished scenario=70% coverage (all ages) rep=96
+Finished scenario=70% coverage (all ages) rep=100
+Finished scenario=70% coverage (all ages) rep=102
+Finished scenario=70% coverage (all ages) rep=94
+Finished scenario=70% coverage (all ages) rep=106
+Finished scenario=70% coverage (all ages) rep=108
+Finished scenario=70% coverage (all ages) rep=104
+Finished scenario=70% coverage (all ages) rep=105
+Finished scenario=70% coverage (all ages) rep=99
+Finished scenario=70% coverage (all ages) rep=110
+Finished scenario=70% coverage (all ages) rep=122
+Finished scenario=70% coverage (all ages) rep=124
+Finished scenario=70% coverage (all ages) rep=121
+Finished scenario=70% coverage (all ages) rep=119
+Finished scenario=70% coverage (all ages) rep=113
+Finished scenario=70% coverage (all ages) rep=123
+Finished scenario=70% coverage (all ages) rep=111
+Finished scenario=70% coverage (all ages) rep=116
+Finished scenario=70% coverage (all ages) rep=114
+  70% coverage (all ages): wrote 120/726 replicate(s)
+Finished scenario=70% coverage (all ages) rep=120
+Finished scenario=70% coverage (all ages) rep=117
+Finished scenario=70% coverage (all ages) rep=115
+Finished scenario=70% coverage (all ages) rep=112
+Finished scenario=70% coverage (all ages) rep=118
+Finished scenario=70% coverage (all ages) rep=127
+Finished scenario=70% coverage (all ages) rep=135
+Finished scenario=70% coverage (all ages) rep=125
+Finished scenario=70% coverage (all ages) rep=128
+Finished scenario=70% coverage (all ages) rep=133
+Finished scenario=70% coverage (all ages) rep=126
+Finished scenario=70% coverage (all ages) rep=131
+Finished scenario=70% coverage (all ages) rep=134
+Finished scenario=70% coverage (all ages) rep=129
+Finished scenario=70% coverage (all ages) rep=137
+Finished scenario=70% coverage (all ages) rep=132
+Finished scenario=70% coverage (all ages) rep=130
+Finished scenario=70% coverage (all ages) rep=150
+Finished scenario=70% coverage (all ages) rep=153
+Finished scenario=70% coverage (all ages) rep=144
+  70% coverage (all ages): wrote 140/726 replicate(s)
+Finished scenario=70% coverage (all ages) rep=142
+Finished scenario=70% coverage (all ages) rep=152
+Finished scenario=70% coverage (all ages) rep=141
+Finished scenario=70% coverage (all ages) rep=145
+Finished scenario=70% coverage (all ages) rep=147
+Finished scenario=70% coverage (all ages) rep=140
+Finished scenario=70% coverage (all ages) rep=143
+Finished scenario=70% coverage (all ages) rep=146
+Finished scenario=70% coverage (all ages) rep=149
+Finished scenario=70% coverage (all ages) rep=151
+Finished scenario=70% coverage (all ages) rep=148
+Finished scenario=70% coverage (all ages) rep=136
+Finished scenario=70% coverage (all ages) rep=139
+Finished scenario=70% coverage (all ages) rep=138
+Finished scenario=70% coverage (all ages) rep=156
+Finished scenario=70% coverage (all ages) rep=158
+Finished scenario=70% coverage (all ages) rep=163
+Finished scenario=70% coverage (all ages) rep=159
+Finished scenario=70% coverage (all ages) rep=165
+Finished scenario=70% coverage (all ages) rep=155
+  70% coverage (all ages): wrote 160/726 replicate(s)
+Finished scenario=70% coverage (all ages) rep=167
+Finished scenario=70% coverage (all ages) rep=157
+Finished scenario=70% coverage (all ages) rep=164
+Finished scenario=70% coverage (all ages) rep=169
+Finished scenario=70% coverage (all ages) rep=154
+Finished scenario=70% coverage (all ages) rep=161
+Finished scenario=70% coverage (all ages) rep=168
+Finished scenario=70% coverage (all ages) rep=162
+Finished scenario=70% coverage (all ages) rep=160
+Finished scenario=70% coverage (all ages) rep=166
+Finished scenario=70% coverage (all ages) rep=170
+Finished scenario=70% coverage (all ages) rep=174
+Finished scenario=70% coverage (all ages) rep=182
+Finished scenario=70% coverage (all ages) rep=172
+Finished scenario=70% coverage (all ages) rep=175
+Finished scenario=70% coverage (all ages) rep=176
+Finished scenario=70% coverage (all ages) rep=180
+Finished scenario=70% coverage (all ages) rep=173
+Finished scenario=70% coverage (all ages) rep=177
+Finished scenario=70% coverage (all ages) rep=184
+  70% coverage (all ages): wrote 180/726 replicate(s)
+Finished scenario=70% coverage (all ages) rep=181
+Finished scenario=70% coverage (all ages) rep=171
+Finished scenario=70% coverage (all ages) rep=185
+Finished scenario=70% coverage (all ages) rep=178
+Finished scenario=70% coverage (all ages) rep=186
+Finished scenario=70% coverage (all ages) rep=179
+Finished scenario=70% coverage (all ages) rep=192
+Finished scenario=70% coverage (all ages) rep=189
+Finished scenario=70% coverage (all ages) rep=194
+Finished scenario=70% coverage (all ages) rep=202
+Finished scenario=70% coverage (all ages) rep=196
+Finished scenario=70% coverage (all ages) rep=187
+Finished scenario=70% coverage (all ages) rep=183
+Finished scenario=70% coverage (all ages) rep=201
+Finished scenario=70% coverage (all ages) rep=190
+Finished scenario=70% coverage (all ages) rep=193
+Finished scenario=70% coverage (all ages) rep=198
+Finished scenario=70% coverage (all ages) rep=199
+Finished scenario=70% coverage (all ages) rep=200
+Finished scenario=70% coverage (all ages) rep=191
+  70% coverage (all ages): wrote 200/726 replicate(s)
+Finished scenario=70% coverage (all ages) rep=188
+Finished scenario=70% coverage (all ages) rep=195
+Finished scenario=70% coverage (all ages) rep=197
+Finished scenario=70% coverage (all ages) rep=207
+Finished scenario=70% coverage (all ages) rep=208
+Finished scenario=70% coverage (all ages) rep=211
+Finished scenario=70% coverage (all ages) rep=218
+Finished scenario=70% coverage (all ages) rep=203
+Finished scenario=70% coverage (all ages) rep=215
+Finished scenario=70% coverage (all ages) rep=209
+Finished scenario=70% coverage (all ages) rep=204
+Finished scenario=70% coverage (all ages) rep=206
+Finished scenario=70% coverage (all ages) rep=216
+Finished scenario=70% coverage (all ages) rep=210
+Finished scenario=70% coverage (all ages) rep=205
+Finished scenario=70% coverage (all ages) rep=217
+Finished scenario=70% coverage (all ages) rep=213
+Finished scenario=70% coverage (all ages) rep=214
+Finished scenario=70% coverage (all ages) rep=212
+Finished scenario=70% coverage (all ages) rep=227
+  70% coverage (all ages): wrote 220/726 replicate(s)
+Finished scenario=70% coverage (all ages) rep=221
+Finished scenario=70% coverage (all ages) rep=228
+Finished scenario=70% coverage (all ages) rep=220
+Finished scenario=70% coverage (all ages) rep=232
+Finished scenario=70% coverage (all ages) rep=222
+Finished scenario=70% coverage (all ages) rep=223
+Finished scenario=70% coverage (all ages) rep=219
+Finished scenario=70% coverage (all ages) rep=225
+Finished scenario=70% coverage (all ages) rep=235
+Finished scenario=70% coverage (all ages) rep=224
+Finished scenario=70% coverage (all ages) rep=233
+Finished scenario=70% coverage (all ages) rep=229
+Finished scenario=70% coverage (all ages) rep=230
+Finished scenario=70% coverage (all ages) rep=226
+Finished scenario=70% coverage (all ages) rep=231
+Finished scenario=70% coverage (all ages) rep=236
+Finished scenario=70% coverage (all ages) rep=245
+Finished scenario=70% coverage (all ages) rep=234
+Finished scenario=70% coverage (all ages) rep=240
+Finished scenario=70% coverage (all ages) rep=237
+  70% coverage (all ages): wrote 240/726 replicate(s)
+Finished scenario=70% coverage (all ages) rep=249
+Finished scenario=70% coverage (all ages) rep=244
+Finished scenario=70% coverage (all ages) rep=241
+Finished scenario=70% coverage (all ages) rep=247
+Finished scenario=70% coverage (all ages) rep=239
+Finished scenario=70% coverage (all ages) rep=246
+Finished scenario=70% coverage (all ages) rep=242
+Finished scenario=70% coverage (all ages) rep=238
+Finished scenario=70% coverage (all ages) rep=243
+Finished scenario=70% coverage (all ages) rep=261
+Finished scenario=70% coverage (all ages) rep=257
+Finished scenario=70% coverage (all ages) rep=256
+Finished scenario=70% coverage (all ages) rep=259
+Finished scenario=70% coverage (all ages) rep=255
+Finished scenario=70% coverage (all ages) rep=262
+Finished scenario=70% coverage (all ages) rep=252
+Finished scenario=70% coverage (all ages) rep=254
+Finished scenario=70% coverage (all ages) rep=251
+Finished scenario=70% coverage (all ages) rep=250
+Finished scenario=70% coverage (all ages) rep=248
+  70% coverage (all ages): wrote 260/726 replicate(s)
+Finished scenario=70% coverage (all ages) rep=260
+Finished scenario=70% coverage (all ages) rep=253
+Finished scenario=70% coverage (all ages) rep=258
+Finished scenario=70% coverage (all ages) rep=272
+Finished scenario=70% coverage (all ages) rep=266
+Finished scenario=70% coverage (all ages) rep=276
+Finished scenario=70% coverage (all ages) rep=279
+Finished scenario=70% coverage (all ages) rep=274
+Finished scenario=70% coverage (all ages) rep=275
+Finished scenario=70% coverage (all ages) rep=264
+Finished scenario=70% coverage (all ages) rep=273
+Finished scenario=70% coverage (all ages) rep=281
+Finished scenario=70% coverage (all ages) rep=269
+Finished scenario=70% coverage (all ages) rep=270
+Finished scenario=70% coverage (all ages) rep=277
+Finished scenario=70% coverage (all ages) rep=267
+Finished scenario=70% coverage (all ages) rep=280
+Finished scenario=70% coverage (all ages) rep=268
+Finished scenario=70% coverage (all ages) rep=263
+Finished scenario=70% coverage (all ages) rep=271
+  70% coverage (all ages): wrote 280/726 replicate(s)
+Finished scenario=70% coverage (all ages) rep=278
+Finished scenario=70% coverage (all ages) rep=265
+Finished scenario=70% coverage (all ages) rep=282
+Finished scenario=70% coverage (all ages) rep=295
+Finished scenario=70% coverage (all ages) rep=289
+Finished scenario=70% coverage (all ages) rep=290
+Finished scenario=70% coverage (all ages) rep=287
+Finished scenario=70% coverage (all ages) rep=288
+Finished scenario=70% coverage (all ages) rep=291
+Finished scenario=70% coverage (all ages) rep=286
+Finished scenario=70% coverage (all ages) rep=283
+Finished scenario=70% coverage (all ages) rep=293
+Finished scenario=70% coverage (all ages) rep=285
+Finished scenario=70% coverage (all ages) rep=292
+Finished scenario=70% coverage (all ages) rep=284
+Finished scenario=70% coverage (all ages) rep=294
+Finished scenario=70% coverage (all ages) rep=301
+Finished scenario=70% coverage (all ages) rep=303
+Finished scenario=70% coverage (all ages) rep=299
+Finished scenario=70% coverage (all ages) rep=298
+  70% coverage (all ages): wrote 300/726 replicate(s)
+Finished scenario=70% coverage (all ages) rep=297
+Finished scenario=70% coverage (all ages) rep=305
+Finished scenario=70% coverage (all ages) rep=306
+Finished scenario=70% coverage (all ages) rep=300
+Finished scenario=70% coverage (all ages) rep=296
+Finished scenario=70% coverage (all ages) rep=304
+Finished scenario=70% coverage (all ages) rep=302
+Finished scenario=70% coverage (all ages) rep=310
+Finished scenario=70% coverage (all ages) rep=320
+Finished scenario=70% coverage (all ages) rep=311
+Finished scenario=70% coverage (all ages) rep=321
+Finished scenario=70% coverage (all ages) rep=319
+Finished scenario=70% coverage (all ages) rep=317
+Finished scenario=70% coverage (all ages) rep=324
+Finished scenario=70% coverage (all ages) rep=314
+Finished scenario=70% coverage (all ages) rep=313
+Finished scenario=70% coverage (all ages) rep=315
+Finished scenario=70% coverage (all ages) rep=312
+Finished scenario=70% coverage (all ages) rep=323
+Finished scenario=70% coverage (all ages) rep=316
+  70% coverage (all ages): wrote 320/726 replicate(s)
+Finished scenario=70% coverage (all ages) rep=308
+Finished scenario=70% coverage (all ages) rep=309
+Finished scenario=70% coverage (all ages) rep=307
+Finished scenario=70% coverage (all ages) rep=318
+Finished scenario=70% coverage (all ages) rep=322
+Finished scenario=70% coverage (all ages) rep=338
+Finished scenario=70% coverage (all ages) rep=332
+Finished scenario=70% coverage (all ages) rep=339
+Finished scenario=70% coverage (all ages) rep=328
+Finished scenario=70% coverage (all ages) rep=334
+Finished scenario=70% coverage (all ages) rep=333
+Finished scenario=70% coverage (all ages) rep=326
+Finished scenario=70% coverage (all ages) rep=329
+Finished scenario=70% coverage (all ages) rep=337
+Finished scenario=70% coverage (all ages) rep=325
+Finished scenario=70% coverage (all ages) rep=327
+Finished scenario=70% coverage (all ages) rep=336
+Finished scenario=70% coverage (all ages) rep=335
+Finished scenario=70% coverage (all ages) rep=331
+Finished scenario=70% coverage (all ages) rep=330
+  70% coverage (all ages): wrote 340/726 replicate(s)
+Finished scenario=70% coverage (all ages) rep=347
+Finished scenario=70% coverage (all ages) rep=344
+Finished scenario=70% coverage (all ages) rep=345
+Finished scenario=70% coverage (all ages) rep=341
+Finished scenario=70% coverage (all ages) rep=343
+Finished scenario=70% coverage (all ages) rep=340
+Finished scenario=70% coverage (all ages) rep=350
+Finished scenario=70% coverage (all ages) rep=349
+Finished scenario=70% coverage (all ages) rep=353
+Finished scenario=70% coverage (all ages) rep=348
+Finished scenario=70% coverage (all ages) rep=346
+Finished scenario=70% coverage (all ages) rep=342
+Finished scenario=70% coverage (all ages) rep=354
+Finished scenario=70% coverage (all ages) rep=367
+Finished scenario=70% coverage (all ages) rep=356
+Finished scenario=70% coverage (all ages) rep=363
+Finished scenario=70% coverage (all ages) rep=352
+Finished scenario=70% coverage (all ages) rep=351
+Finished scenario=70% coverage (all ages) rep=366
+Finished scenario=70% coverage (all ages) rep=355
+  70% coverage (all ages): wrote 360/726 replicate(s)
+Finished scenario=70% coverage (all ages) rep=369
+Finished scenario=70% coverage (all ages) rep=359
+Finished scenario=70% coverage (all ages) rep=361
+Finished scenario=70% coverage (all ages) rep=368
+Finished scenario=70% coverage (all ages) rep=360
+Finished scenario=70% coverage (all ages) rep=358
+Finished scenario=70% coverage (all ages) rep=364
+Finished scenario=70% coverage (all ages) rep=365
+Finished scenario=70% coverage (all ages) rep=357
+Finished scenario=70% coverage (all ages) rep=362
+Finished scenario=70% coverage (all ages) rep=373
+Finished scenario=70% coverage (all ages) rep=374
+Finished scenario=70% coverage (all ages) rep=372
+Finished scenario=70% coverage (all ages) rep=384
+Finished scenario=70% coverage (all ages) rep=375
+Finished scenario=70% coverage (all ages) rep=377
+Finished scenario=70% coverage (all ages) rep=371
+Finished scenario=70% coverage (all ages) rep=379
+Finished scenario=70% coverage (all ages) rep=383
+Finished scenario=70% coverage (all ages) rep=370
+  70% coverage (all ages): wrote 380/726 replicate(s)
+Finished scenario=70% coverage (all ages) rep=382
+Finished scenario=70% coverage (all ages) rep=376
+Finished scenario=70% coverage (all ages) rep=378
+Finished scenario=70% coverage (all ages) rep=380
+Finished scenario=70% coverage (all ages) rep=381
+Finished scenario=70% coverage (all ages) rep=390
+Finished scenario=70% coverage (all ages) rep=387
+Finished scenario=70% coverage (all ages) rep=394
+Finished scenario=70% coverage (all ages) rep=386
+Finished scenario=70% coverage (all ages) rep=389
+Finished scenario=70% coverage (all ages) rep=391
+Finished scenario=70% coverage (all ages) rep=395
+Finished scenario=70% coverage (all ages) rep=385
+Finished scenario=70% coverage (all ages) rep=388
+Finished scenario=70% coverage (all ages) rep=393
+Finished scenario=70% coverage (all ages) rep=392
+Finished scenario=70% coverage (all ages) rep=397
+Finished scenario=70% coverage (all ages) rep=398
+Finished scenario=70% coverage (all ages) rep=401
+Finished scenario=70% coverage (all ages) rep=404
+  70% coverage (all ages): wrote 400/726 replicate(s)
+Finished scenario=70% coverage (all ages) rep=405
+Finished scenario=70% coverage (all ages) rep=403
+Finished scenario=70% coverage (all ages) rep=396
+Finished scenario=70% coverage (all ages) rep=400
+Finished scenario=70% coverage (all ages) rep=409
+Finished scenario=70% coverage (all ages) rep=412
+Finished scenario=70% coverage (all ages) rep=410
+Finished scenario=70% coverage (all ages) rep=407
+Finished scenario=70% coverage (all ages) rep=408
+Finished scenario=70% coverage (all ages) rep=411
+Finished scenario=70% coverage (all ages) rep=402
+Finished scenario=70% coverage (all ages) rep=399
+Finished scenario=70% coverage (all ages) rep=413
+Finished scenario=70% coverage (all ages) rep=406
+Finished scenario=70% coverage (all ages) rep=415
+Finished scenario=70% coverage (all ages) rep=420
+Finished scenario=70% coverage (all ages) rep=424
+Finished scenario=70% coverage (all ages) rep=421
+Finished scenario=70% coverage (all ages) rep=419
+Finished scenario=70% coverage (all ages) rep=426
+  70% coverage (all ages): wrote 420/726 replicate(s)
+Finished scenario=70% coverage (all ages) rep=417
+Finished scenario=70% coverage (all ages) rep=418
+Finished scenario=70% coverage (all ages) rep=416
+Finished scenario=70% coverage (all ages) rep=425
+Finished scenario=70% coverage (all ages) rep=427
+Finished scenario=70% coverage (all ages) rep=428
+Finished scenario=70% coverage (all ages) rep=422
+Finished scenario=70% coverage (all ages) rep=423
+Finished scenario=70% coverage (all ages) rep=414
+Finished scenario=70% coverage (all ages) rep=439
+Finished scenario=70% coverage (all ages) rep=434
+Finished scenario=70% coverage (all ages) rep=430
+Finished scenario=70% coverage (all ages) rep=435
+Finished scenario=70% coverage (all ages) rep=440
+Finished scenario=70% coverage (all ages) rep=436
+Finished scenario=70% coverage (all ages) rep=438
+Finished scenario=70% coverage (all ages) rep=433
+Finished scenario=70% coverage (all ages) rep=431
+Finished scenario=70% coverage (all ages) rep=432
+Finished scenario=70% coverage (all ages) rep=429
+  70% coverage (all ages): wrote 440/726 replicate(s)
+Finished scenario=70% coverage (all ages) rep=437
+Finished scenario=70% coverage (all ages) rep=443
+Finished scenario=70% coverage (all ages) rep=452
+Finished scenario=70% coverage (all ages) rep=447
+Finished scenario=70% coverage (all ages) rep=457
+Finished scenario=70% coverage (all ages) rep=451
+Finished scenario=70% coverage (all ages) rep=442
+Finished scenario=70% coverage (all ages) rep=445
+Finished scenario=70% coverage (all ages) rep=444
+Finished scenario=70% coverage (all ages) rep=450
+Finished scenario=70% coverage (all ages) rep=446
+Finished scenario=70% coverage (all ages) rep=456
+Finished scenario=70% coverage (all ages) rep=448
+Finished scenario=70% coverage (all ages) rep=449
+Finished scenario=70% coverage (all ages) rep=453
+Finished scenario=70% coverage (all ages) rep=454
+Finished scenario=70% coverage (all ages) rep=458
+Finished scenario=70% coverage (all ages) rep=441
+Finished scenario=70% coverage (all ages) rep=455
+Finished scenario=70% coverage (all ages) rep=463
+  70% coverage (all ages): wrote 460/726 replicate(s)
+Finished scenario=70% coverage (all ages) rep=464
+Finished scenario=70% coverage (all ages) rep=473
+Finished scenario=70% coverage (all ages) rep=471
+Finished scenario=70% coverage (all ages) rep=468
+Finished scenario=70% coverage (all ages) rep=461
+Finished scenario=70% coverage (all ages) rep=465
+Finished scenario=70% coverage (all ages) rep=466
+Finished scenario=70% coverage (all ages) rep=460
+Finished scenario=70% coverage (all ages) rep=459
+Finished scenario=70% coverage (all ages) rep=470
+Finished scenario=70% coverage (all ages) rep=469
+Finished scenario=70% coverage (all ages) rep=472
+Finished scenario=70% coverage (all ages) rep=462
+Finished scenario=70% coverage (all ages) rep=467
+Finished scenario=70% coverage (all ages) rep=478
+Finished scenario=70% coverage (all ages) rep=479
+Finished scenario=70% coverage (all ages) rep=476
+Finished scenario=70% coverage (all ages) rep=480
+Finished scenario=70% coverage (all ages) rep=486
+Finished scenario=70% coverage (all ages) rep=485
+  70% coverage (all ages): wrote 480/726 replicate(s)
+Finished scenario=70% coverage (all ages) rep=475
+Finished scenario=70% coverage (all ages) rep=487
+Finished scenario=70% coverage (all ages) rep=491
+Finished scenario=70% coverage (all ages) rep=484
+Finished scenario=70% coverage (all ages) rep=481
+Finished scenario=70% coverage (all ages) rep=490
+Finished scenario=70% coverage (all ages) rep=474
+Finished scenario=70% coverage (all ages) rep=489
+Finished scenario=70% coverage (all ages) rep=482
+Finished scenario=70% coverage (all ages) rep=477
+Finished scenario=70% coverage (all ages) rep=483
+Finished scenario=70% coverage (all ages) rep=488
+Finished scenario=70% coverage (all ages) rep=492
+Finished scenario=70% coverage (all ages) rep=501
+Finished scenario=70% coverage (all ages) rep=503
+Finished scenario=70% coverage (all ages) rep=499
+Finished scenario=70% coverage (all ages) rep=504
+Finished scenario=70% coverage (all ages) rep=505
+Finished scenario=70% coverage (all ages) rep=506
+Finished scenario=70% coverage (all ages) rep=494
+  70% coverage (all ages): wrote 500/726 replicate(s)
+Finished scenario=70% coverage (all ages) rep=500
+Finished scenario=70% coverage (all ages) rep=502
+Finished scenario=70% coverage (all ages) rep=495
+Finished scenario=70% coverage (all ages) rep=498
+Finished scenario=70% coverage (all ages) rep=496
+Finished scenario=70% coverage (all ages) rep=497
+Finished scenario=70% coverage (all ages) rep=493
+Finished scenario=70% coverage (all ages) rep=514
+Finished scenario=70% coverage (all ages) rep=521
+Finished scenario=70% coverage (all ages) rep=517
+Finished scenario=70% coverage (all ages) rep=518
+Finished scenario=70% coverage (all ages) rep=509
+Finished scenario=70% coverage (all ages) rep=511
+Finished scenario=70% coverage (all ages) rep=516
+Finished scenario=70% coverage (all ages) rep=520
+Finished scenario=70% coverage (all ages) rep=512
+Finished scenario=70% coverage (all ages) rep=519
+Finished scenario=70% coverage (all ages) rep=510
+Finished scenario=70% coverage (all ages) rep=515
+Finished scenario=70% coverage (all ages) rep=513
+  70% coverage (all ages): wrote 520/726 replicate(s)
+Finished scenario=70% coverage (all ages) rep=508
+Finished scenario=70% coverage (all ages) rep=507
+Finished scenario=70% coverage (all ages) rep=523
+Finished scenario=70% coverage (all ages) rep=524
+Finished scenario=70% coverage (all ages) rep=522
+Finished scenario=70% coverage (all ages) rep=537
+Finished scenario=70% coverage (all ages) rep=526
+Finished scenario=70% coverage (all ages) rep=533
+Finished scenario=70% coverage (all ages) rep=534
+Finished scenario=70% coverage (all ages) rep=535
+Finished scenario=70% coverage (all ages) rep=528
+Finished scenario=70% coverage (all ages) rep=531
+Finished scenario=70% coverage (all ages) rep=525
+Finished scenario=70% coverage (all ages) rep=532
+Finished scenario=70% coverage (all ages) rep=539
+Finished scenario=70% coverage (all ages) rep=538
+Finished scenario=70% coverage (all ages) rep=529
+Finished scenario=70% coverage (all ages) rep=527
+Finished scenario=70% coverage (all ages) rep=530
+Finished scenario=70% coverage (all ages) rep=550
+  70% coverage (all ages): wrote 540/726 replicate(s)
+Finished scenario=70% coverage (all ages) rep=540
+Finished scenario=70% coverage (all ages) rep=547
+Finished scenario=70% coverage (all ages) rep=552
+Finished scenario=70% coverage (all ages) rep=546
+Finished scenario=70% coverage (all ages) rep=549
+Finished scenario=70% coverage (all ages) rep=545
+Finished scenario=70% coverage (all ages) rep=554
+Finished scenario=70% coverage (all ages) rep=542
+Finished scenario=70% coverage (all ages) rep=548
+Finished scenario=70% coverage (all ages) rep=553
+Finished scenario=70% coverage (all ages) rep=536
+Finished scenario=70% coverage (all ages) rep=544
+Finished scenario=70% coverage (all ages) rep=543
+Finished scenario=70% coverage (all ages) rep=541
+Finished scenario=70% coverage (all ages) rep=561
+Finished scenario=70% coverage (all ages) rep=558
+Finished scenario=70% coverage (all ages) rep=555
+Finished scenario=70% coverage (all ages) rep=564
+Finished scenario=70% coverage (all ages) rep=567
+Finished scenario=70% coverage (all ages) rep=556
+  70% coverage (all ages): wrote 560/726 replicate(s)
+Finished scenario=70% coverage (all ages) rep=568
+Finished scenario=70% coverage (all ages) rep=563
+Finished scenario=70% coverage (all ages) rep=562
+Finished scenario=70% coverage (all ages) rep=551
+Finished scenario=70% coverage (all ages) rep=565
+Finished scenario=70% coverage (all ages) rep=560
+Finished scenario=70% coverage (all ages) rep=557
+Finished scenario=70% coverage (all ages) rep=559
+Finished scenario=70% coverage (all ages) rep=566
+Finished scenario=70% coverage (all ages) rep=579
+Finished scenario=70% coverage (all ages) rep=577
+Finished scenario=70% coverage (all ages) rep=581
+Finished scenario=70% coverage (all ages) rep=570
+Finished scenario=70% coverage (all ages) rep=571
+Finished scenario=70% coverage (all ages) rep=580
+Finished scenario=70% coverage (all ages) rep=578
+Finished scenario=70% coverage (all ages) rep=574
+Finished scenario=70% coverage (all ages) rep=585
+Finished scenario=70% coverage (all ages) rep=584
+Finished scenario=70% coverage (all ages) rep=582
+  70% coverage (all ages): wrote 580/726 replicate(s)
+Finished scenario=70% coverage (all ages) rep=576
+Finished scenario=70% coverage (all ages) rep=575
+Finished scenario=70% coverage (all ages) rep=586
+Finished scenario=70% coverage (all ages) rep=569
+Finished scenario=70% coverage (all ages) rep=572
+Finished scenario=70% coverage (all ages) rep=573
+Finished scenario=70% coverage (all ages) rep=583
+Finished scenario=70% coverage (all ages) rep=592
+Finished scenario=70% coverage (all ages) rep=601
+Finished scenario=70% coverage (all ages) rep=597
+Finished scenario=70% coverage (all ages) rep=595
+Finished scenario=70% coverage (all ages) rep=590
+Finished scenario=70% coverage (all ages) rep=596
+Finished scenario=70% coverage (all ages) rep=599
+Finished scenario=70% coverage (all ages) rep=589
+Finished scenario=70% coverage (all ages) rep=587
+Finished scenario=70% coverage (all ages) rep=591
+Finished scenario=70% coverage (all ages) rep=594
+Finished scenario=70% coverage (all ages) rep=600
+Finished scenario=70% coverage (all ages) rep=593
+  70% coverage (all ages): wrote 600/726 replicate(s)
+Finished scenario=70% coverage (all ages) rep=588
+Finished scenario=70% coverage (all ages) rep=598
+Finished scenario=70% coverage (all ages) rep=611
+Finished scenario=70% coverage (all ages) rep=618
+Finished scenario=70% coverage (all ages) rep=610
+Finished scenario=70% coverage (all ages) rep=612
+Finished scenario=70% coverage (all ages) rep=615
+Finished scenario=70% coverage (all ages) rep=605
+Finished scenario=70% coverage (all ages) rep=613
+Finished scenario=70% coverage (all ages) rep=607
+Finished scenario=70% coverage (all ages) rep=616
+Finished scenario=70% coverage (all ages) rep=606
+Finished scenario=70% coverage (all ages) rep=608
+Finished scenario=70% coverage (all ages) rep=603
+Finished scenario=70% coverage (all ages) rep=609
+Finished scenario=70% coverage (all ages) rep=604
+Finished scenario=70% coverage (all ages) rep=614
+Finished scenario=70% coverage (all ages) rep=602
+Finished scenario=70% coverage (all ages) rep=617
+Finished scenario=70% coverage (all ages) rep=619
+  70% coverage (all ages): wrote 620/726 replicate(s)
+Finished scenario=70% coverage (all ages) rep=624
+Finished scenario=70% coverage (all ages) rep=629
+Finished scenario=70% coverage (all ages) rep=633
+Finished scenario=70% coverage (all ages) rep=622
+Finished scenario=70% coverage (all ages) rep=632
+Finished scenario=70% coverage (all ages) rep=621
+Finished scenario=70% coverage (all ages) rep=623
+Finished scenario=70% coverage (all ages) rep=626
+Finished scenario=70% coverage (all ages) rep=631
+Finished scenario=70% coverage (all ages) rep=630
+Finished scenario=70% coverage (all ages) rep=625
+Finished scenario=70% coverage (all ages) rep=634
+Finished scenario=70% coverage (all ages) rep=628
+Finished scenario=70% coverage (all ages) rep=620
+Finished scenario=70% coverage (all ages) rep=627
+Finished scenario=70% coverage (all ages) rep=643
+Finished scenario=70% coverage (all ages) rep=640
+Finished scenario=70% coverage (all ages) rep=635
+Finished scenario=70% coverage (all ages) rep=645
+Finished scenario=70% coverage (all ages) rep=649
+  70% coverage (all ages): wrote 640/726 replicate(s)
+Finished scenario=70% coverage (all ages) rep=650
+Finished scenario=70% coverage (all ages) rep=637
+Finished scenario=70% coverage (all ages) rep=638
+Finished scenario=70% coverage (all ages) rep=639
+Finished scenario=70% coverage (all ages) rep=641
+Finished scenario=70% coverage (all ages) rep=642
+Finished scenario=70% coverage (all ages) rep=647
+Finished scenario=70% coverage (all ages) rep=648
+Finished scenario=70% coverage (all ages) rep=636
+Finished scenario=70% coverage (all ages) rep=644
+Finished scenario=70% coverage (all ages) rep=658
+Finished scenario=70% coverage (all ages) rep=665
+Finished scenario=70% coverage (all ages) rep=655
+Finished scenario=70% coverage (all ages) rep=652
+Finished scenario=70% coverage (all ages) rep=651
+Finished scenario=70% coverage (all ages) rep=659
+Finished scenario=70% coverage (all ages) rep=667
+Finished scenario=70% coverage (all ages) rep=654
+Finished scenario=70% coverage (all ages) rep=661
+Finished scenario=70% coverage (all ages) rep=653
+  70% coverage (all ages): wrote 660/726 replicate(s)
+Finished scenario=70% coverage (all ages) rep=657
+Finished scenario=70% coverage (all ages) rep=656
+Finished scenario=70% coverage (all ages) rep=646
+Finished scenario=70% coverage (all ages) rep=662
+Finished scenario=70% coverage (all ages) rep=660
+Finished scenario=70% coverage (all ages) rep=663
+Finished scenario=70% coverage (all ages) rep=681
+Finished scenario=70% coverage (all ages) rep=666
+Finished scenario=70% coverage (all ages) rep=679
+Finished scenario=70% coverage (all ages) rep=674
+Finished scenario=70% coverage (all ages) rep=680
+Finished scenario=70% coverage (all ages) rep=669
+Finished scenario=70% coverage (all ages) rep=672
+Finished scenario=70% coverage (all ages) rep=678
+Finished scenario=70% coverage (all ages) rep=670
+Finished scenario=70% coverage (all ages) rep=676
+Finished scenario=70% coverage (all ages) rep=668
+Finished scenario=70% coverage (all ages) rep=673
+Finished scenario=70% coverage (all ages) rep=671
+Finished scenario=70% coverage (all ages) rep=664
+  70% coverage (all ages): wrote 680/726 replicate(s)
+Finished scenario=70% coverage (all ages) rep=682
+Finished scenario=70% coverage (all ages) rep=675
+Finished scenario=70% coverage (all ages) rep=677
+Finished scenario=70% coverage (all ages) rep=696
+Finished scenario=70% coverage (all ages) rep=697
+Finished scenario=70% coverage (all ages) rep=698
+Finished scenario=70% coverage (all ages) rep=690
+Finished scenario=70% coverage (all ages) rep=689
+Finished scenario=70% coverage (all ages) rep=688
+Finished scenario=70% coverage (all ages) rep=695Applying fitted seed scaling to: ['E']
+Reconstructing m(t) from 22 fitted log-increment(s) (fit period 307 days, knots every 14 days)
+Applying fitted seed scaling to: ['E']
+Reconstructing m(t) from 22 fitted log-increment(s) (fit period 307 days, knots every 14 days)
+Applying fitted seed scaling to: ['E']
+Reconstructing m(t) from 22 fitted log-increment(s) (fit period 307 days, knots every 14 days)
+Applying fitted seed scaling to: ['E']
+Reconstructing m(t) from 22 fitted log-increment(s) (fit period 307 days, knots every 14 days)
+Applying fitted seed scaling to: ['E']
+Reconstructing m(t) from 22 fitted log-increment(s) (fit period 307 days, knots every 14 days)
+Applying fitted seed scaling to: ['E']
+Reconstructing m(t) from 22 fitted log-increment(s) (fit period 307 days, knots every 14 days)
+Applying fitted seed scaling to: ['E']
+Reconstructing m(t) from 22 fitted log-increment(s) (fit period 307 days, knots every 14 days)
+Applying fitted seed scaling to: ['E']
+Reconstructing m(t) from 22 fitted log-increment(s) (fit period 307 days, knots every 14 days)
+Applying fitted seed scaling to: ['E']
+Reconstructing m(t) from 22 fitted log-increment(s) (fit period 307 days, knots every 14 days)
+Applying fitted seed scaling to: ['E']
+Reconstructing m(t) from 22 fitted log-increment(s) (fit period 307 days, knots every 14 days)
+Applying fitted seed scaling to: ['E']
+Reconstructing m(t) from 22 fitted log-increment(s) (fit period 307 days, knots every 14 days)
+
+Finished scenario=70% coverage (all ages) rep=683
+Finished scenario=70% coverage (all ages) rep=685
+Finished scenario=70% coverage (all ages) rep=694
+Finished scenario=70% coverage (all ages) rep=691
+Finished scenario=70% coverage (all ages) rep=686
+Finished scenario=70% coverage (all ages) rep=684
+Finished scenario=70% coverage (all ages) rep=692
+Finished scenario=70% coverage (all ages) rep=693
+Finished scenario=70% coverage (all ages) rep=687
+Finished scenario=70% coverage (all ages) rep=707
+  70% coverage (all ages): wrote 700/726 replicate(s)
+Finished scenario=70% coverage (all ages) rep=709
+Finished scenario=70% coverage (all ages) rep=704
+Finished scenario=70% coverage (all ages) rep=705
+Finished scenario=70% coverage (all ages) rep=711
+Finished scenario=70% coverage (all ages) rep=701
+Finished scenario=70% coverage (all ages) rep=706
+Finished scenario=70% coverage (all ages) rep=703
+Finished scenario=70% coverage (all ages) rep=700
+Finished scenario=70% coverage (all ages) rep=708
+Finished scenario=70% coverage (all ages) rep=712
+Finished scenario=70% coverage (all ages) rep=715
+Finished scenario=70% coverage (all ages) rep=713
+Finished scenario=70% coverage (all ages) rep=710
+Finished scenario=70% coverage (all ages) rep=699
+Finished scenario=70% coverage (all ages) rep=702
+Finished scenario=70% coverage (all ages) rep=716
+Finished scenario=70% coverage (all ages) rep=725
+Finished scenario=70% coverage (all ages) rep=714
+Finished scenario=70% coverage (all ages) rep=723
+Finished scenario=70% coverage (all ages) rep=720
+  70% coverage (all ages): wrote 720/726 replicate(s)
+Finished scenario=70% coverage (all ages) rep=719
+Finished scenario=70% coverage (all ages) rep=724
+Finished scenario=70% coverage (all ages) rep=717
+Finished scenario=70% coverage (all ages) rep=722
+Finished scenario=70% coverage (all ages) rep=721
+Finished scenario=70% coverage (all ages) rep=718
+baseline: wrote 726 replicate(s)
+no vax: wrote 726 replicate(s)
+50% coverage (all ages): wrote 726 replicate(s)
+60% coverage (all ages): wrote 726 replicate(s)
+70% coverage (all ages): wrote 726 replicate(s)
+Writing Parquet to /Users/rfp437/Work/CityLevelTransmission/CLT_BaseModel/generic_core/examples/MA_vax/simulation_output_MA_vax_asymp/results_parquet
+Results saved to /Users/rfp437/Work/CityLevelTransmission/CLT_BaseModel/generic_core/examples/MA_vax/simulation_output_MA_vax_asymp/results_parquet
+Timing: simulate+stage 262.3s (staging appends 257.5s of that), Parquet export 11.6s
