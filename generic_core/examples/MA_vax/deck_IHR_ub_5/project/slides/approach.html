@@ -1,0 +1,18 @@
+<section id="approach" data-transition="fade" style="background:#F7F6F2;color:#14213D;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px;display:flex;flex-direction:column;gap:56px">
+<h2 style="font-family:'Source Serif 4', Georgia, serif;font-size:72px;font-weight:600;line-height:1.1">Approach</h2>
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:32px">
+<div style="background:#FFFFFF;border:1px solid #DDE2E8;border-radius:16px;padding:40px;display:flex;flex-direction:column;gap:16px">
+<h3 style="font-size:36px;font-weight:600;color:#14213D">Model</h3>
+<p style="font-size:30px;line-height:1.4;color:#4A5568">Age-structured SEIR model with a vaccinated arm (SEIR-V), 7 age groups, built and run through a web interface (Python)</p>
+</div>
+<div style="background:#FFFFFF;border:1px solid #DDE2E8;border-radius:16px;padding:40px;display:flex;flex-direction:column;gap:16px">
+<h3 style="font-size:36px;font-weight:600;color:#14213D">Data</h3>
+<p style="font-size:30px;line-height:1.4;color:#4A5568">MA DPH weekly admissions, first doses and population, by county and age group, aggregated to the state</p>
+</div>
+<div style="background:#FFFFFF;border:1px solid #DDE2E8;border-radius:16px;padding:40px;display:flex;flex-direction:column;gap:16px">
+<h3 style="font-size:36px;font-weight:600;color:#14213D">Uncertainty</h3>
+<p style="font-size:30px;line-height:1.4;color:#4A5568">Bayesian MCMC fit; every scenario re-run once per posterior draw, so results carry 95% intervals</p>
+</div>
+</div>
+<aside>The data-preparation scripts can also aggregate counties into groups through a mapping file; this analysis uses the state level. The admissions column in the new data is ed_admits_count.</aside>
+</section>

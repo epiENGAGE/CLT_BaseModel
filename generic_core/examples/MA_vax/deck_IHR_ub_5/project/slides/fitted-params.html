@@ -1,0 +1,19 @@
+<section id="fitted-params" data-transition="fade" style="background:#F7F6F2;color:#14213D;font-family:'IBM Plex Sans', Arial, sans-serif;padding:96px 128px;display:flex;flex-direction:column;gap:32px">
+<h2 style="font-family:'Source Serif 4', Georgia, serif;font-size:64px;font-weight:600;line-height:1.1">Fit of model to data: parameters</h2>
+<table style="font-size:26px;color:#14213D;width:1400px">
+<tr><th style="width:46%;text-align:left">Parameter</th><th style="width:15%;text-align:right">Posterior mean</th><th style="width:12%;text-align:right">5%</th><th style="width:12%;text-align:right">95%</th><th style="width:15%;text-align:right">“Best” point</th></tr>
+<tr><td>β (baseline transmission)</td><td>0.0317</td><td>0.0273</td><td>0.0357</td><td>0.0330</td></tr>
+<tr style="background:#EEF1F4"><td>Humidity impact</td><td>0.313</td><td>0.051</td><td>0.609</td><td>0.457</td></tr>
+<tr><td>Initial-seed multiplier</td><td>1.76</td><td>0.63</td><td>3.45</td><td>2.12</td></tr>
+<tr style="background:#EEF1F4"><td>Hospitalization-risk multiplier: 0</td><td>4.31</td><td>3.35</td><td>4.94</td><td>4.46</td></tr>
+<tr><td>Hospitalization-risk multiplier: 1-4</td><td>3.26</td><td>2.08</td><td>4.61</td><td>2.75</td></tr>
+<tr style="background:#EEF1F4"><td>Hospitalization-risk multiplier: 5-12</td><td>2.85</td><td>1.87</td><td>4.19</td><td>2.26</td></tr>
+<tr><td>Hospitalization-risk multiplier: 13-17</td><td>1.41</td><td>0.85</td><td>2.03</td><td>1.30</td></tr>
+<tr style="background:#EEF1F4"><td>Hospitalization-risk multiplier: 18-49</td><td>0.82</td><td>0.53</td><td>1.15</td><td>0.55</td></tr>
+<tr><td>Hospitalization-risk multiplier: 50-64</td><td>1.36</td><td>0.88</td><td>1.94</td><td>1.08</td></tr>
+<tr style="background:#EEF1F4"><td>Hospitalization-risk multiplier: 65+</td><td>1.32</td><td>0.90</td><td>1.79</td><td>1.08</td></tr>
+<tr><td>φ (negative binomial dispersion)</td><td>112</td><td>29</td><td>324</td><td>106</td></tr>
+</table>
+<p style="font-size:24px;color:#4A5568">726 posterior draws. “Best” = the draw with the highest log-posterior.</p>
+<aside>The age-0 multiplier still sits near its upper prior bound, now 5.0 (95th percentile 4.94). Every multiplier is about twice its value in the fit capped at 2.0, and 65+ is now above 1 (1.32): with the same admissions, higher hospitalization risks mean fewer infections.</aside>
+</section>

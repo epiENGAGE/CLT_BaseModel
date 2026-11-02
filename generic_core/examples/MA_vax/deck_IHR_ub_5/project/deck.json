@@ -1,0 +1,20 @@
+{
+  "v": 4,
+  "createdOnFiles": {"v": 1, "at": "2026-10-31T23:30:00Z"},
+  "lists": "css",
+  "title": "MA Vaccination Burden Analysis (IHR multiplier max 5)",
+  "order": ["cover", "objectives", "approach", "model", "demo", "vax-coverage", "vax-timeseries", "fit-params", "fit-daily", "fit-cumulative", "averted", "averted-ve", "indirect", "sec-coverage", "cov-targets", "cov-response", "cov-heatmap", "per-dose", "fewer-doses", "fewer-per-dose", "takeaways", "discussion", "appendix", "mt", "fitted-params", "age-params", "ihr", "attack-rates", "contact-matrix"],
+  "sections": {
+    "s1": {"description": "Context, objectives and the model used", "start": "cover"},
+    "s2": {"description": "Vaccination input and the fit to the 2025–26 season", "start": "vax-coverage"},
+    "s3": {"description": "Hospitalizations averted by the 2025–26 vaccination programme", "start": "averted"},
+    "s4": {"description": "Raising coverage to 50–70% or cutting doses by 5–20%", "start": "sec-coverage"},
+    "s5": {"description": "Takeaways and next steps", "start": "takeaways"},
+    "s6": {"description": "Appendix: transmission multiplier and parameter tables", "start": "appendix"}
+  },
+  "faces": {
+    "source-serif-4": {"family": "Source Serif 4", "href": "https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@400;600;700&display=swap"},
+    "ibm-plex-sans": {"family": "IBM Plex Sans", "href": "https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap"}
+  },
+  "designSystems": []
+}

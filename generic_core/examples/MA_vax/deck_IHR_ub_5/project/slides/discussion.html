@@ -1,0 +1,22 @@
+<section id="discussion" data-transition="fade" style="display:flex; flex-direction:column; gap:56px; padding:128px; background:#f7f6f2">
+  <h2 style="font-family:'Source Serif 4', Georgia, serif; font-size:72px; font-weight:600; line-height:1.1; color:#14213d">Discussion and next steps</h2>
+  <div style="display:grid; gap:32px; grid-template-columns:1fr 1fr">
+    <div style="display:flex; flex-direction:column; gap:16px; padding:40px; background:#ffffff; border:1px solid #dde2e8; border-radius:16px">
+      <h3 style="font-family:'IBM Plex Sans', Arial, sans-serif; font-size:36px; font-weight:600; color:#14213d">Open questions</h3>
+      <ul style="font-family:'IBM Plex Sans', Arial, sans-serif; font-size:30px; line-height:1.5; color:#4a5568">
+        <li>Which data summaries are most useful?</li>
+        <li>Which scenarios are of most interest?</li>
+        <li>Modify coverage targets per county/region?</li>
+        <li>ED visits vs. hospital admissions data: are they the same?</li>
+      </ul>
+    </div>
+    <div style="display:flex; flex-direction:column; gap:16px; padding:40px; background:#ffffff; border:1px solid #dde2e8; border-radius:16px">
+      <h3 style="font-family:'IBM Plex Sans', Arial, sans-serif; font-size:36px; font-weight:600; color:#14213d">Possible next steps</h3>
+      <ul style="font-family:'IBM Plex Sans', Arial, sans-serif; font-size:30px; line-height:1.5; color:#4a5568">
+        <li>Metapopulation model with county groups</li>
+        <li>Vaccination timing scenarios</li>
+      </ul>
+    </div>
+  </div>
+  <aside>The data scripts already aggregate counties into groups through a mapping file, which is the input a metapopulation version would need. The calibration target is ed_admits_count; if it counts ED visits, the fitted hospitalization risks and attack rates mix ED-visit and hospitalization rates, differently by age (children use the ED relatively more).</aside>
+</section>

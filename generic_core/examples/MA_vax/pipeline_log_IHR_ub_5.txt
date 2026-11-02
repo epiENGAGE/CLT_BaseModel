@@ -1,0 +1,136 @@
+[1/7] Table S.A.1 (infection vs severity protection) ...
+[2/7] Table S.A.2 (age group vaccinated) ...
+[3/7] Table S.A.3 (50% coverage, single age group) ...
+[3/7] Table S.A.3 (55% coverage, single age group) ...
+[3/7] Table S.A.3 (60% coverage, single age group) ...
+[3/7] Table S.A.3 (65% coverage, single age group) ...
+[3/7] Table S.A.3 (70% coverage, single age group) ...
+[4/7] Table S.A.4 (VE sensitivity parameters) ...
+[4b/7] Dose accounting (scheduled vs. delivered) ...
+[5/7] Table S.A.5 (VE sensitivity, vs no vaccine) ...
+[6/7] Coverage decrease (5% fewer doses, single age group) ...
+[6/7] Coverage decrease (10% fewer doses, single age group) ...
+[6/7] Coverage decrease (15% fewer doses, single age group) ...
+[6/7] Coverage decrease (20% fewer doses, single age group) ...
+[6b/7] Coverage summary (all-ages coverage scenarios) ...
+[7/7] Vaccine-efficacy mechanism check (flow-level ratios) ...
+Tables saved to counterfactual_tables_from_db_MA_vax_IHR_ub_5/
+                        Measure Age group Hospitalizations Averted % Hospitalizations Averted
+      Infection protection only         0          150 [108 – 187]      63.4% [58.0% – 66.7%]
+      Infection protection only       1-4          578 [397 – 746]      64.5% [58.9% – 68.0%]
+      Infection protection only      5-12          598 [411 – 851]      62.8% [56.3% – 66.8%]
+      Infection protection only     13-17          199 [126 – 274]      61.8% [55.1% – 65.9%]
+      Infection protection only     18-49    1,396 [1,023 – 1,859]      58.4% [51.8% – 62.3%]
+      Infection protection only     50-64    1,672 [1,225 – 2,199]      59.5% [53.3% – 63.2%]
+      Infection protection only       65+   8,492 [6,508 – 10,274]      57.2% [51.1% – 60.9%]
+      Infection protection only       All 13,178 [10,271 – 15,701]      58.2% [52.1% – 62.0%]
+Hospitalization protection only         0                2 [1 – 2]         0.7% [0.6% – 0.8%]
+Hospitalization protection only       1-4                7 [5 – 9]         0.8% [0.7% – 1.0%]
+Hospitalization protection only      5-12                7 [5 – 8]         0.7% [0.6% – 0.8%]
+Hospitalization protection only     13-17                2 [1 – 3]         0.6% [0.6% – 0.8%]
+Hospitalization protection only     18-49             17 [14 – 21]         0.7% [0.6% – 0.8%]
+Hospitalization protection only     50-64             29 [24 – 35]         1.0% [0.9% – 1.2%]
+Hospitalization protection only       65+      1,098 [991 – 1,193]         7.4% [6.7% – 8.4%]
+Hospitalization protection only       All    1,161 [1,056 – 1,255]         5.1% [4.6% – 5.9%]
+                          Total         0          151 [109 – 189]      64.0% [58.8% – 67.3%]
+                          Total       1-4          585 [402 – 754]      65.3% [59.9% – 68.7%]
+                          Total      5-12          605 [417 – 859]      63.5% [57.1% – 67.4%]
+                          Total     13-17          201 [128 – 277]      62.5% [55.9% – 66.5%]
+                          Total     18-49    1,414 [1,039 – 1,879]      59.1% [52.6% – 63.0%]
+                          Total     50-64    1,700 [1,250 – 2,233]      60.5% [54.4% – 64.1%]
+                          Total       65+   9,585 [7,553 – 11,402]      64.5% [59.5% – 67.6%]
+                          Total       All 14,346 [11,362 – 16,901]      63.4% [58.0% – 66.7%] 
+
+                 Scenario Age Group         Hospitalizations
+                 baseline         0            85 [55 – 124]
+                 baseline       1-4          308 [222 – 387]
+                 baseline      5-12          354 [254 – 451]
+                 baseline     13-17           121 [81 – 156]
+                 baseline     18-49        987 [794 – 1,189]
+                 baseline     50-64      1,116 [928 – 1,361]
+                 baseline       65+    5,291 [4,776 – 5,751]
+                 baseline       All    8,268 [7,715 – 8,802]
+Infection protection only         0            87 [56 – 127]
+Infection protection only       1-4          316 [228 – 396]
+Infection protection only      5-12          360 [259 – 459]
+Infection protection only     13-17           123 [82 – 159]
+Infection protection only     18-49      1,004 [808 – 1,209]
+Infection protection only     50-64      1,145 [951 – 1,396]
+Infection protection only       65+    6,387 [5,765 – 6,937]
+Infection protection only       All   9,427 [8,773 – 10,047]
+                   no vax         0          237 [166 – 310]
+                   no vax       1-4        894 [636 – 1,130]
+                   no vax      5-12        958 [680 – 1,303]
+                   no vax     13-17          322 [210 – 429]
+                   no vax     18-49    2,398 [1,894 – 3,038]
+                   no vax     50-64    2,811 [2,214 – 3,560]
+                   no vax       65+ 14,877 [12,642 – 16,840]
+                   no vax       All 22,545 [19,359 – 25,445]
+
+Wrote tables to summary_tables_MA_vax_IHR_ub_5
+wrote baseline_new_H_MA_vax_IHR_ub_5.csv (726 replicates, 307 days)
+wrote fit_comparison_output_IHR_ub_5/fit_vs_actual.png
+wrote fit_comparison_output_IHR_ub_5/cumulative_comparison.csv
+age_group  simulated_median  simulated_ci_lower  simulated_ci_upper    observed  difference  pct_difference
+        0         85.094097           55.220623          124.428331  114.000000  -28.905903      -25.356055
+      1-4        308.340758          222.380504          387.107951  302.857143    5.483615        1.810628
+     5-12        353.510108          253.876365          450.589366  347.000000    6.510108        1.876112
+    13-17        120.764813           80.993816          155.887534  123.000000   -2.235187       -1.817225
+    18-49        986.683717          794.144334         1188.927589  984.714286    1.969431        0.200000
+    50-64       1116.051748          927.527207         1361.098406 1108.714286    7.337462        0.661799
+      65+       5290.790449         4776.056974         5750.568641 5388.857143  -98.066694       -1.819805
+    Total       8268.041998         7714.820340         8802.062421 8369.142857 -101.100859       -1.208019
+scenario time series ...
+attack rates ...
+vaccination coverage ...
+fit check ...
+m(t) ...
+coverage scenarios ...
+parameter tables ...
+R figures ...
+Rscript /Users/rfp437/Work/CityLevelTransmission/CLT_BaseModel/generic_core/examples/MA_vax/figures/plot_scenarios_ts.R figures/output_IHR_ub_5/scenario_timeseries.csv figures/output_IHR_ub_5/ts_baseline_infection_protection_no_vax.png baseline|Infection protection only|no vax 727 failed:
+Warning message:
+package ‘ggplot2’ was built under R version 4.4.3 
+
+Attaching package: ‘dplyr’
+
+The following objects are masked from ‘package:stats’:
+
+    filter, lag
+
+The following objects are masked from ‘package:base’:
+
+    intersect, setdiff, setequal, union
+
+Warning message:
+package ‘dplyr’ was built under R version 4.4.3 
+Warning message:
+package ‘readr’ was built under R version 4.4.3 
+
+Attaching package: ‘scales’
+
+The following object is masked from ‘package:readr’:
+
+    col_factor
+
+Error:
+! 
+  '/Users/rfp437/Work/CityLevelTransmission/CLT_BaseModel/generic_core/examples/MA_vax/figures/figures/output_IHR_ub_5/scenario_timeseries.csv'
+  does not exist.
+Backtrace:
+     ▆
+  1. ├─... %>% ...
+  2. ├─dplyr::mutate(...)
+  3. ├─dplyr::filter(., scenario %in% SELECTED_SCENARIOS)
+  4. ├─readr::read_csv(DATA_FILE, show_col_types = FALSE)
+  5. │ └─vroom::vroom(...)
+  6. │   └─vroom:::vroom_(...)
+  7. └─vroom (local) `<fn>`("/Users/rfp437/Work/CityLevelTransmission/CLT_BaseModel/generic_core/examples/MA_vax/figures/figures/output_IHR_ub_5/scenario_timeseries.csv")
+  8.   └─vroom:::check_path(path)
+  9.     └─cli::cli_abort(msg, call = call)
+ 10.       └─rlang::abort(...)
+Execution halted
+
+wrote /Users/rfp437/Work/CityLevelTransmission/CLT_BaseModel/generic_core/examples/MA_vax/report/report_MA_vax_IHR_ub_5.md
+wrote /Users/rfp437/Work/CityLevelTransmission/CLT_BaseModel/generic_core/examples/MA_vax/report/report_MA_vax_IHR_ub_5.html
+wrote /Users/rfp437/Work/CityLevelTransmission/CLT_BaseModel/generic_core/examples/MA_vax/report/report_MA_vax_IHR_ub_5.pdf
