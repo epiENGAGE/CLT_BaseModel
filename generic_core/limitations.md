@@ -6,7 +6,8 @@ surprising a user hits at run time should already be written down here, with
 the reason and the workaround.
 
 See `architecture.md` for design, `tasks.md` for the phased implementation
-plan, `plan.md` for overall goals.
+plan, `plan.md` for overall goals, and `performance_todo.md` for possible
+speed-ups (where simulation time goes, batching, JAX).
 
 **Adding an entry**: give it (1) what the limitation is, (2) why it exists —
 design decision vs. unbuilt, (3) what actually happens if you hit it, (4) the

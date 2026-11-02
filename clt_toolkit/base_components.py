@@ -53,6 +53,24 @@ def approx_binom_probability_from_rate(rate: np.ndarray,
     return 1 - np.exp(-rate * interval_length)
 
 
+def copy_history_val(val):
+    """
+    Returns an independent copy of `val` for appending to a
+    `history_vals_list`.
+
+    For a numeric `np.ndarray` (the usual case), `ndarray.copy()` gives
+    the same result as `copy.deepcopy` -- new memory, identical values --
+    but is roughly 5x faster, which matters because history is saved for
+    every state variable every day (and for transition variables every
+    timestep). Anything else (e.g. `None` before the first timestep)
+    falls back to `copy.deepcopy`.
+    """
+
+    if isinstance(val, np.ndarray):
+        return val.copy()
+    return copy.deepcopy(val)
+
+
 class StateVariable:
     """
     Parent class of `InteractionTerm`, `Compartment`, `EpiMetric`,
@@ -101,11 +119,12 @@ class StateVariable:
         Saves current value to history by appending `current_val` attribute
         to `history_vals_list` in-place..
 
-        Deep copying is CRUCIAL because `current_val` is a mutable
-        `np.ndarray` -- without deep copying, `history_vals_list` would
-        have the same value for all elements.
+        Copying is CRUCIAL because `current_val` is a mutable
+        `np.ndarray` (e.g. `EpiMetric.update_current_val` updates it
+        in-place) -- without copying, `history_vals_list` would
+        have the same value for all elements. See `copy_history_val`.
         """
-        self.history_vals_list.append(copy.deepcopy(self.current_val))
+        self.history_vals_list.append(copy_history_val(self.current_val))
 
     def reset(self) -> None:
         """
@@ -298,11 +317,11 @@ class TransitionVariable(ABC):
         Saves current value to history by appending `current_val`
         attribute to `history_vals_list` in-place..
 
-        Deep copying is CRUCIAL because `current_val` is a mutable
-        np.ndarray -- without deep copying, `history_vals_list` would
-        have the same value for all elements.
+        Copying is CRUCIAL because `current_val` is a mutable
+        np.ndarray -- without copying, `history_vals_list` would
+        have the same value for all elements. See `copy_history_val`.
         """
-        self.history_vals_list.append(copy.deepcopy(self.current_val))
+        self.history_vals_list.append(copy_history_val(self.current_val))
 
     def reset(self) -> None:
         """
