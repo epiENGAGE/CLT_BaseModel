@@ -4,11 +4,11 @@
 
 @app.cell
 def _shared_import_state(mo):
-    # {"model_config": {"name": str, "contents": bytes}, "fit_config": {...},
-    # "fitted_params": {...}, "scenario_config": {...}} -- one entry per
-    # config type, holding the bytes of the last file applied under that
-    # type. Read as a fallback source by _load_config_parse (Model Builder)
-    # when neither a direct browse nor a path is set; the other three types
+    # {"disease_config": {"name": str, "contents": bytes}, "population_config":
+    # {...}, "fit_config": {...}, "fitted_params": {...}, "scenario_config":
+    # {...}} -- one entry per config type, holding the bytes of the last file
+    # applied under that type. The disease/population types are read as a fallback source by _load_config_parse (Model
+    # Builder) when neither a direct browse nor a path is set; the other three types
     # are applied straight into their own tab's existing restore state at
     # click time in _shared_import_apply below, since those already need
     # one-shot "apply, don't keep re-applying on every unrelated rerun"
@@ -56,7 +56,7 @@ def _shared_import_upload_ui(
                 _new.append({
                     "name": _f.name,
                     "contents": _f.contents,
-                    "type": detect_config_type(_f.name),
+                    "type": detect_config_type(_f.name, _f.contents),
                 })
                 _seen.add(_key)
             return _new
@@ -69,8 +69,9 @@ def _shared_import_upload_ui(
         on_change=_on_upload,
     )
     shared_import_upload_note = mo.md(
-        "Drop any combination of a model config, fit config, fitted "
-        "params / fit result, and scenario config -- browsing again adds "
+        "Drop any combination of a disease config, population config, fit "
+        "config, fitted params / fit result, and scenario config -- browsing "
+        "again adds "
         "to the files below rather than replacing them, so files from "
         "separate folders can be picked one browse at a time. Once you "
         "confirm each file's type below, click Apply to import it."
@@ -102,14 +103,18 @@ def _shared_import_rows_ui(mo, shared_import_entries, set_shared_import_files):
     # removals instead of resetting to the guess every time this cell
     # rebuilds.
     _type_opts = {
-        "Model config": "model_config",
+        "Disease config": "disease_config",
+        "Population config": "population_config",
         "Fit config": "fit_config",
         "Fitted params / fit result": "fitted_params",
         "Scenario config": "scenario_config",
         "Skip (ignore this file)": "skip",
     }
     _label_by_value = {v: k for k, v in _type_opts.items()}
-    _singular_types = {"model_config", "fit_config", "fitted_params", "scenario_config"}
+    _singular_types = {
+        "disease_config", "population_config",
+        "fit_config", "fitted_params", "scenario_config",
+    }
 
     def _set_type(_idx):
         def _on_change(_val):
@@ -190,10 +195,11 @@ def _shared_import_apply(
     set_fit_result_state, fit_result_from_dict,
     set_scenario_controls_state, set_scenario_agescale_state,
     set_scenario_dose_state, set_scenario_subpop_state, set_scenario_restore_error,
-    set_config_path,
+    set_config_path, set_population_path,
 ):
     _TYPE_LABELS = {
-        "model_config": "Model config",
+        "disease_config": "Disease config",
+        "population_config": "Population config",
         "fit_config": "Fit config",
         "fitted_params": "Fitted params / fit result",
         "scenario_config": "Scenario config",
@@ -234,16 +240,19 @@ def _shared_import_apply(
                 _kept.append(_e)
                 continue
 
-            if _kind == "model_config":
+            if _kind in ("disease_config", "population_config"):
                 # Applied lazily by _load_config_parse (it re-reads this
                 # dict every time it reruns), not here -- no one-shot state
-                # to mutate for this type. But that cell only falls back to
+                # to mutate for these types. But that cell only falls back to
                 # the shared import when BOTH the browsed-file widget and the
-                # path text box are empty, and the path box defaults to the
-                # bundled example config (non-empty) -- so without clearing
-                # it here, the import would silently never take effect.
-                _bytes_by_type["model_config"] = {"name": _name, "contents": _e["contents"]}
-                set_config_path("")
+                # path text box are empty, and the path boxes default to the
+                # bundled example configs (non-empty) -- so without clearing
+                # them here, the import would silently never take effect.
+                _bytes_by_type[_kind] = {"name": _name, "contents": _e["contents"]}
+                if _kind == "population_config":
+                    set_population_path("")
+                else:
+                    set_config_path("")
             elif _kind == "fit_config":
                 try:
                     _new_slots, _new_data = parse_fit_config_targets(_raw)

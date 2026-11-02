@@ -3,10 +3,12 @@
 # Part of model_builder_notebook.py — assembled by build_notebook.py
 
 @app.cell
-def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitted_full, output_dir, json, mo, main_tab, num_age_groups, num_risk_groups, analysis_sim_days, analysis_stochastic, analysis_n_reps, analysis_timesteps, analysis_uncertainty_source, analysis_n_param_sets, analysis_n_param_sets_avail, rng_seed, start_date_input, analysis_scenarios, is_metapop, metapop_folder_input, metapop_travel_config, step_header, section_card, CLT_ACCENT, loaded_schedule_dfs):
+def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitted_full, output_dir, json, mo, main_tab, num_age_groups, num_risk_groups, analysis_sim_days, analysis_stochastic, analysis_n_reps, analysis_timesteps, analysis_uncertainty_source, analysis_n_param_sets, analysis_n_param_sets_avail, rng_seed, start_date_input, analysis_scenarios, is_metapop, metapop_folder_input, metapop_travel_config, step_header, section_card, CLT_ACCENT, loaded_schedule_dfs, config_split):
     mo.stop(main_tab.value != "Export", None)
     _ACC = CLT_ACCENT["export"]
-    _config_str = json.dumps(config_dict, indent=2)
+    # The same model as two swappable files (see generic_core/config_split.py);
+    # run_simulation.py loads these two files.
+    _disease_cfg, _population_cfg, _split_notes = config_split.split_model_config(config_dict)
     # Full (unexpanded) structure — best_params, scale_groups, num_days,
     # tv_knot_spacing_days — so run_simulation.py can reproduce seed_scale_*
     # and m(t) itself, not just the flattened scalar overrides used in-notebook.
@@ -34,8 +36,9 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
     Requirements: the CLT_BaseModel repo installed into the active Python
     environment (from the repo root: pip install -e .), which makes
     generic_core, clt_toolkit and flu_core importable from anywhere -- so
-    this file can live in any folder. model_config.json (and
-    fitted_params.json / schedules.json, if used) must sit alongside it.
+    this file can live in any folder. disease_config.json and
+    population_config.json (and fitted_params.json / schedules.json, if used)
+    must sit alongside it.
     \"\"\"
 
     import io
@@ -51,11 +54,17 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
     from concurrent.futures import ProcessPoolExecutor, FIRST_COMPLETED, wait
 
     # ---- Configurable ----
-    MODEL_CONFIG_FILE = "model_config.json"
+    # The model is a DISEASE config (pathogen: compartments, transitions,
+    # parameters, initial seeds as population fractions) plus a POPULATION
+    # config (place: age bands, population, contact/travel matrices, schedule
+    # CSVs), merged at load time. Swap either file to run the same disease in
+    # another place, or another disease in the same place.
+    DISEASE_CONFIG_FILE = "disease_config.json"
+    POPULATION_CONFIG_FILE = "population_config.json"
     FITTED_PARAMS_FILE = "fitted_params.json"  # set to None to skip
     # Schedule CSVs (humidity / school-work calendar / mobility / vaccination),
-    # single-population only. The files named in model_config.json's
-    # "input_files" are read fresh from disk each run (resolved against the
+    # single-population only. The files named in the population config's
+    # "data_files" are read fresh from disk each run (resolved against the
     # working directory, then this script's folder and its parents), so editing
     # a CSV takes effect without re-exporting. SCHEDULES_FILE is the Export
     # tab's snapshot of those same CSVs, used only for a file that can't be found
@@ -64,7 +73,7 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
     # back to flat constants (no seasonal forcing, NO vaccination).
     SCHEDULES_FILE = "schedules.json"
     # Transition variables (daily flows, e.g. I_to_H / IV_to_H) to record
-    # alongside the compartments. None = every transition in model_config.json;
+    # alongside the compartments. None = every transition in the disease config;
     # set to a list to record only some, or [] for compartments only.
     TRANSITION_VARS = None
     OUTPUT_DIR = Path("simulation_output")
@@ -73,6 +82,8 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
     STOCHASTIC = False
     TIMESTEPS_PER_DAY = 7
     START_DATE = "2024-01-01"
+    # Age/risk group counts are read from the population config at load time;
+    # these are only fallbacks for a config without an "age_risk" block.
     NUM_AGE_GROUPS = 1
     NUM_RISK_GROUPS = 1
     # Base RNG seed; each run uses default_rng(SEED_BASE + run_index), matching
@@ -153,9 +164,26 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
         _scale_compartment_init, _inject_tv_transmission, _tv_knot_days,
         build_transmission_multiplier_array, prepare_param_sets,
     )
+    from generic_core.config_split import load_merged_config
 
-    with open(_HERE / MODEL_CONFIG_FILE) as _f:
-        config_dict = json.load(_f)
+    config_dict = load_merged_config(
+        _HERE / DISEASE_CONFIG_FILE,
+        _HERE / POPULATION_CONFIG_FILE if POPULATION_CONFIG_FILE else None,
+    )
+    _age_risk = config_dict.get("age_risk", {}) or {}
+    NUM_AGE_GROUPS = int(_age_risk.get("num_age_groups", NUM_AGE_GROUPS))
+    NUM_RISK_GROUPS = int(_age_risk.get("num_risk_groups", NUM_RISK_GROUPS))
+    # Metapop-ness follows the population config (a travel matrix or a metapop
+    # data folder), so swapping in a single-population file just works.
+    _pop_files = config_dict.get("input_files", {}) or {}
+    if POPULATION_CONFIG_FILE:
+        IS_METAPOP = bool(config_dict.get("metapop") or _pop_files.get("metapop_folder"))
+        METAPOP_FOLDER = _pop_files.get("metapop_folder") or METAPOP_FOLDER
+    for _t in config_dict.get("transitions", []):
+        _tc = (_t.get("rate_config", {}) or {}).get("travel_config")
+        if _t.get("rate_template") == "force_of_infection_travel" and _tc:
+            METAPOP_TRAVEL_CONFIG = _tc
+            break
 
     if TRANSITION_VARS is None:
         TRANSITION_VARS = [
@@ -279,8 +307,8 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
 
     def _load_schedule_csvs():
         # {df_attribute: csv_text} of the base schedules, plus SCHEDULES_FILE's
-        # "__scenario_overrides__". The CSVs named in model_config.json's
-        # input_files win; SCHEDULES_FILE only fills in files that can't be found
+        # "__scenario_overrides__". The CSVs named in the population config's
+        # data_files win; SCHEDULES_FILE only fills in files that can't be found
         # (see load_schedule_csv_texts). Any attribute absent from both had no
         # CSV in the notebook and correctly falls back to a flat constant below.
         # Metapop reads its base schedules from METAPOP_FOLDER instead, so only
@@ -297,7 +325,7 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
             ):
                 print(
                     f"Warning: {SCHEDULES_FILE} not found next to this script and "
-                    "model_config.json names no schedule CSVs — falling back to flat constant "
+                    "the population config names no schedule CSVs — falling back to flat constant "
                     "schedules (no seasonal forcing, no vaccination). Results will NOT match "
                     "the notebook."
                 )
@@ -858,7 +886,7 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
             # Definition order, which SELECT DISTINCT would lose -- it decides
             # scenario colour assignment and which scenario reads as baseline.
             "scenarios": list(SCENARIOS.keys()),
-            # Order-bearing too: model_config.json's compartment order followed
+            # Order-bearing too: the disease config's compartment order followed
             # by its transition order, matching the metric lists the Model
             # Builder's own selectors show. SELECT DISTINCT would return these
             # alphabetically, scrambling a model's natural S -> E -> I -> H -> R
@@ -1159,9 +1187,13 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
         f"NUM_RISK_GROUPS = {num_risk_groups}\n",
     )
 
-    _config_dl = mo.download(
-        data=_config_str.encode(), filename="model_config.json",
-        label="Download model_config.json", mimetype="application/json",
+    _disease_dl = mo.download(
+        data=json.dumps(_disease_cfg, indent=2).encode(), filename="disease_config.json",
+        label="Download disease_config.json", mimetype="application/json",
+    )
+    _population_dl = mo.download(
+        data=json.dumps(_population_cfg, indent=2).encode(), filename="population_config.json",
+        label="Download population_config.json", mimetype="application/json",
     )
     _script_dl = mo.download(
         data=_script.encode(), filename="run_simulation.py",
@@ -1273,8 +1305,10 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
     _how_to = mo.callout(
         mo.md(
             "**How to run**\n\n"
-            "1. Download `run_simulation.py`, `model_config.json`, and "
-            "`fitted_params.json` below into one folder.\n"
+            "1. Download `run_simulation.py`, `disease_config.json`, "
+            "`population_config.json` and `fitted_params.json` below into one folder. "
+            "Swap `population_config.json` for another place's file (or "
+            "`disease_config.json` for another disease) to rerun with just that changed.\n"
             "2. (Optional) edit the `SCENARIOS` block and top constants in the script. "
             "`fitted_params.json` here is the full fit export (`best_params` + "
             "`scale_groups`/`num_days`/`tv_knot_spacing_days`) so the script can also "
@@ -1323,9 +1357,13 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
                         "Grab the script and its input files.", accent=_ACC),
             mo.vstack([
                 mo.hstack(
-                    [_config_dl, _script_dl, _fitted_dl]
+                    [_disease_dl, _population_dl, _script_dl, _fitted_dl]
                     + ([_schedules_dl] if _schedules_payload else []),
-                    justify="start",
+                    justify="start", wrap=True,
+                ),
+                (
+                    mo.callout(mo.md("\n".join(f"- {_n}" for _n in _split_notes)), kind="warn")
+                    if _split_notes else mo.md("")
                 ),
                 (
                     mo.md(
@@ -1334,8 +1372,8 @@ def _export_display(config_dict, fit_result, analysis_use_fitted, analysis_fitte
                             (
                                 "is a snapshot of "
                                 f"{', '.join(f'`{_k}`' for _k in sorted(_base_sched_keys))}. "
-                                "The script reads the CSV files named in `model_config.json`'s "
-                                "`input_files` when it can find them, so later edits to those "
+                                "The script reads the CSV files named in `population_config.json`'s "
+                                "`data_files` when it can find them, so later edits to those "
                                 "files take effect; this snapshot is only the fallback when they "
                                 "can't be found (e.g. on another machine), and without either the "
                                 "run falls back to flat constants (no seasonal forcing, no "

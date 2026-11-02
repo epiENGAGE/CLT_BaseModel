@@ -226,6 +226,56 @@ per-timestep would be far noisier than it is worth.
 
 ---
 
+## Disease / population config split
+
+The model is stored as a disease file plus a population file, merged into the
+legacy combined dict by `config_split.merge_configs` (see
+`generic_core/config_split.py`).
+
+### Age-band mismatches are not remapped
+
+**What.** Per-age disease values (`{"by_age_band": ...}` params, initial seed
+fractions, epi-metric starting values) must use exactly the population's age
+bands and risk-group count. **Why:** design decision — converting between band
+definitions (splitting/merging bands) needs epidemiological judgement, so it is
+left to the user. **What happens:** `merge_configs(strict=True)` (scripts) raises
+`ConfigCompatibilityError`; the notebook (`strict=False`) drops those values,
+lists them in Step 0 / the Population tab, and the fields fall back to defaults.
+**Workaround:** re-enter the values for the new bands in Model Builder Step 3 /
+Step 7 and export a new disease file. Same band labels in a different order are
+fine.
+
+### One seed pattern for every subpopulation
+
+**What.** `initial_seeds` are fractions of each age/risk cell's population and
+apply identically to every subpopulation. **Why:** seeds live in the disease
+file, which knows nothing of the place's subpopulations. **What happens:**
+splitting a legacy metapop config whose subpops were seeded with different
+fractions stores the pooled fraction and prints a note. **Workaround:** a
+metapop folder's `initial_conditions_<name>.json` files still set full
+per-subpop starting states; they are used when the population file has no
+population for that subpop.
+
+### Per-subpop CSVs still come from the metapop folder
+
+**What.** The population file holds the subpop names, populations and travel
+matrix, but per-subpop schedule CSVs (`school_work_calendar_<name>.csv`,
+`vaccines_<name>.csv`, ...) and `initial_conditions_<name>.json` are still read
+from `data_files.metapop_folder` by naming convention. **Why:** unbuilt — kept
+the existing folder conventions to limit the change. `metapop_layout` in
+`model_factory.py` prefers the population file's travel matrix over the
+folder's `metapop_config.json`.
+
+### Fit config still records the population structure
+
+**What.** `fit_config.json`'s `run_kwargs` (`metapop_folder`, `subpop_names`,
+...) are frozen at export time; `run_fitting.py` only takes the age/risk group
+counts from the population file. **Why:** a fit is tied to its observed data,
+which belongs to one place, so swapping the population under a fit config is
+not a supported workflow.
+
+---
+
 ## Metapopulation
 
 ### Torch recomputed mixing exposure per sub-timestep (no longer a limitation)

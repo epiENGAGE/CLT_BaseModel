@@ -30,20 +30,29 @@ def _fit_target_buttons(
     def _remove_target(_slot):
         def _remove(_):
             _cur = get_target_slots()
+            if _slot not in _cur:
+                return
             if len(_cur) > 1:
                 set_target_slots([s for s in _cur if s != _slot])
-                # Drop the removed slot's leftover bulk/restored data too —
-                # otherwise it's still sitting in these dicts under that slot
-                # id, and a later "+ Add target" reusing the same freed slot
-                # number silently inherits it instead of starting empty.
-                if _slot in get_bulk_file_data():
-                    _new_bulk = dict(get_bulk_file_data())
-                    del _new_bulk[_slot]
-                    set_bulk_file_data(_new_bulk)
-                if _slot in get_restored_target_data():
-                    _new_restored = dict(get_restored_target_data())
-                    del _new_restored[_slot]
-                    set_restored_target_data(_new_restored)
+            else:
+                # Last remaining target: there must always be one, so swap in
+                # a fresh slot instead (widget values can't be cleared from
+                # Python). Take the highest unused id — restore and
+                # "+ Add target" fill from the low end, so it's the slot
+                # least likely to hold values from an earlier target.
+                set_target_slots([max(_i for _i in range(20) if _i != _slot)])
+            # Drop the removed slot's leftover bulk/restored data too —
+            # otherwise it's still sitting in these dicts under that slot
+            # id, and a later "+ Add target" reusing the same freed slot
+            # number silently inherits it instead of starting empty.
+            if _slot in get_bulk_file_data():
+                _new_bulk = dict(get_bulk_file_data())
+                del _new_bulk[_slot]
+                set_bulk_file_data(_new_bulk)
+            if _slot in get_restored_target_data():
+                _new_restored = dict(get_restored_target_data())
+                del _new_restored[_slot]
+                set_restored_target_data(_new_restored)
         return _remove
 
     add_target_btn = mo.ui.button(label="+ Add target", on_click=_add_target)
@@ -108,7 +117,7 @@ def _fit_config_restore_state(mo):
 @app.cell
 def _fit_bulk_defaults_ui(
     mo, compartments, n_transitions, t_name,
-    is_metapop, metapop_folder_input, json, Path, num_risk_groups,
+    is_metapop, metapop_subpop_names, num_risk_groups,
 ):
     # Shared defaults applied to every target created by the next bulk-upload
     # batch (snapshotted into each target's bulk-data entry at upload time —
@@ -135,13 +144,7 @@ def _fit_bulk_defaults_ui(
         label="Weight λ for bulk-added targets",
     )
 
-    _subpop_names_bulk = []
-    if is_metapop and metapop_folder_input.value.strip():
-        try:
-            with open(Path(metapop_folder_input.value.strip()) / "metapop_config.json") as _f:
-                _subpop_names_bulk = json.load(_f).get("subpopulations", [])
-        except Exception:
-            _subpop_names_bulk = []
+    _subpop_names_bulk = list(metapop_subpop_names) if is_metapop else []
     _sp_opts = ["All (sum)"] + [f"{_i}: {_nm}" for _i, _nm in enumerate(_subpop_names_bulk)]
     _risk_opts = ["All (sum)"] + [str(_i) for _i in range(int(num_risk_groups))]
 
@@ -157,7 +160,7 @@ def _fit_bulk_defaults_ui(
 @app.cell
 def _fitting_ui(
     mo, compartments, n_transitions, t_name, param_names,
-    is_metapop, metapop_folder_input, json, Path,
+    is_metapop, metapop_subpop_names,
     num_age_groups, num_risk_groups, get_restored_config,
 ):
     _tvars = [
@@ -169,13 +172,7 @@ def _fitting_ui(
     _tgt_opts = _all_tgts if _all_tgts else ["S"]
 
     # Subpop names for slice dropdowns
-    _subpop_names_ui = []
-    if is_metapop and metapop_folder_input.value.strip():
-        try:
-            with open(Path(metapop_folder_input.value.strip()) / "metapop_config.json") as _f:
-                _subpop_names_ui = json.load(_f).get("subpopulations", [])
-        except Exception:
-            _subpop_names_ui = []
+    _subpop_names_ui = list(metapop_subpop_names) if is_metapop else []
 
     _sp_opts = ["All (sum)"] + [f"{_i}: {_nm}" for _i, _nm in enumerate(_subpop_names_ui)]
     _age_opts = ["All (sum)"] + [str(_i) for _i in range(int(num_age_groups))]
@@ -1542,7 +1539,7 @@ def _fitting_build_request(
     build_compartment_init,
     start_date_input, timesteps, rng_seed,
     num_age_groups, num_risk_groups,
-    metapop_folder_input, metapop_travel_config,
+    metapop_folder_input, metapop_travel_config, metapop_subpop_names,
     mobility_input, daily_vaccines_input, loaded_schedule_dfs,
     np, json, FitTarget, FitConfig, Path,
 ):
@@ -1738,13 +1735,7 @@ def _fitting_build_request(
         fit_compartment_init, _ = build_compartment_init(_seed_arrays, _pop_arr, compartments)
 
     # Subpop names (for resolving "subpopulation" columns in scalar/proportion rows)
-    _subpop_names_run = []
-    if is_metapop and metapop_folder_input.value.strip():
-        try:
-            with open(Path(metapop_folder_input.value.strip()) / "metapop_config.json") as _f:
-                _subpop_names_run = json.load(_f).get("subpopulations", [])
-        except Exception:
-            _subpop_names_run = []
+    _subpop_names_run = list(metapop_subpop_names) if is_metapop else []
 
     fit_run_kwargs = dict(
         start_date=start_date_input.value.strip() or "2024-01-01",
@@ -1883,13 +1874,13 @@ def _fitting_export_display(fit_run_config, mo, main_tab, json):
     \"\"\"
     Generated by CLT Model Builder Notebook (Fitting tab export).
     Usage: python run_fitting.py
-    Reads model_config.json + fit_config.json from this directory and writes
-    fitted_params.json.
+    Reads disease_config.json + population_config.json + fit_config.json from
+    this directory and writes fitted_params.json.
 
     Requirements: the CLT_BaseModel repo installed into the active Python
     environment (from the repo root: pip install -e .), which makes
     generic_core importable from anywhere -- so this file can live in any
-    folder. model_config.json and fit_config.json must sit alongside it.
+    folder. The config files must sit alongside it.
     \"\"\"
 
     import json
@@ -1897,7 +1888,9 @@ def _fitting_export_display(fit_run_config, mo, main_tab, json):
     from pathlib import Path
     from types import SimpleNamespace
 
-    MODEL_CONFIG_FILE = "model_config.json"
+    # Disease + population configs (Export tab), merged at load time.
+    DISEASE_CONFIG_FILE = "disease_config.json"
+    POPULATION_CONFIG_FILE = "population_config.json"
     FIT_CONFIG_FILE = "fit_config.json"
     OUTPUT_FILE = "fitted_params.json"
 
@@ -1907,11 +1900,14 @@ def _fitting_export_display(fit_run_config, mo, main_tab, json):
     import pandas as pd
     from generic_core.model_factory import build_compartment_init
     from generic_core.fitting import FitTarget, FitConfig, run_fit, fit_result_to_dict
+    from generic_core.config_split import load_merged_config
 
 
     def main():
-        with open(_HERE / MODEL_CONFIG_FILE) as _f:
-            config_dict = json.load(_f)
+        config_dict = load_merged_config(
+            _HERE / DISEASE_CONFIG_FILE,
+            _HERE / POPULATION_CONFIG_FILE if POPULATION_CONFIG_FILE else None,
+        )
         with open(_HERE / FIT_CONFIG_FILE) as _f:
             fit_cfg_raw = json.load(_f)
 
@@ -1954,8 +1950,9 @@ def _fitting_export_display(fit_run_config, mo, main_tab, json):
         )
 
         _rk = fit_cfg_raw["run_kwargs"]
-        num_age_groups = _rk["num_age_groups"]
-        num_risk_groups = _rk["num_risk_groups"]
+        _age_risk = config_dict.get("age_risk", {}) or {}
+        num_age_groups = int(_age_risk.get("num_age_groups", _rk["num_age_groups"]))
+        num_risk_groups = int(_age_risk.get("num_risk_groups", _rk["num_risk_groups"]))
 
         compartment_init = None
         if not is_metapop:
@@ -2026,8 +2023,8 @@ def _fitting_export_display(fit_run_config, mo, main_tab, json):
         mo.vstack([
             mo.md(
                 "**Run this fit on a server.** Download `run_fitting.py` and "
-                "`fit_config.json` here, plus `model_config.json` from the "
-                "**Export** tab, into one folder, then run "
+                "`fit_config.json` here, plus `disease_config.json` and "
+                "`population_config.json` from the **Export** tab, into one folder, then run "
                 "`python run_fitting.py` — it reruns this exact calibration "
                 "headlessly and writes `fitted_params.json`."
             ),

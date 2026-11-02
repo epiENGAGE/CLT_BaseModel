@@ -82,8 +82,11 @@ Scope note
 ----------
 This notebook supports single-population and metapopulation models, with
 configurable age and risk groups. Age groups can be a plain count or named
-bands (e.g. 0-4, 5-17, 65+). For multi-age/risk-group models, contact matrices
-are embedded inline in the config JSON; they can be entered as CSVs or, when
+bands (e.g. 0-4, 5-17, 65+). A model is saved as two swappable files:
+disease_config.json (the pathogen) and population_config.json (the place: age
+bands, population, contact/travel matrices, schedule CSVs). For
+multi-age/risk-group models, contact matrices are embedded inline in the
+population config; they can be entered as CSVs or, when
 named age bands are used, fetched for a US state or country in the
 Population & Geography tab (requires the optional ``epydemix`` package:
 ``pip install epydemix``). Vaccines and mobility can be supplied as CSV files
@@ -91,7 +94,7 @@ or as constant scalar values.
 
 Metapopulation folder conventions
 ----------------------------------
-Required files:
+Required files (unless the population config has a travel_matrix):
   metapop_config.json          keys: subpopulations (ordered list of names), travel_matrix (NxN list of lists)
 
 Optional shared files (all subpops):

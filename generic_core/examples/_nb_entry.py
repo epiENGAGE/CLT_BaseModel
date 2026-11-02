@@ -73,8 +73,9 @@ def _tab_header_display(
 
 
 @app.cell
-def _autosave_config(config_dict, output_dir, json):
-    _p = output_dir / "model_config.json"
-    _ = _p.write_text(json.dumps(config_dict, indent=2))
+def _autosave_config(config_dict, output_dir, json, config_split):
+    _disease, _population, _ = config_split.split_model_config(config_dict)
+    _ = (output_dir / "disease_config.json").write_text(json.dumps(_disease, indent=2))
+    _ = (output_dir / "population_config.json").write_text(json.dumps(_population, indent=2))
     return
 

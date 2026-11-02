@@ -1,0 +1,371 @@
+{
+  "config_type": "disease",
+  "schema_version": 1,
+  "compartments": [
+    "S",
+    "E",
+    "I",
+    "R",
+    "SV",
+    "EV",
+    "IV",
+    "H",
+    "D"
+  ],
+  "transitions": [
+    {
+      "name": "S_to_E",
+      "origin": "S",
+      "destination": "E",
+      "rate_template": "force_of_infection",
+      "rate_config": {
+        "beta_param": "beta_baseline",
+        "contact_matrix_schedule": "flu_contact_matrix",
+        "infectious_compartments": {
+          "I": "I_relative_infectiousness",
+          "IV": "IV_relative_infectiousness"
+        },
+        "relative_susceptibility_param": "relative_suscept",
+        "humidity_impact_param": "humidity_impact",
+        "humidity_schedule": "absolute_humidity"
+      }
+    },
+    {
+      "name": "E_to_I",
+      "origin": "E",
+      "destination": "I",
+      "rate_template": "constant_param",
+      "rate_config": {
+        "param": "E_to_I_rate"
+      }
+    },
+    {
+      "name": "I_to_R",
+      "origin": "I",
+      "destination": "R",
+      "rate_template": "param_product",
+      "rate_config": {
+        "factors": [
+          "I_out_rate"
+        ],
+        "complement_factors": [
+          "I_to_H_prop"
+        ]
+      },
+      "jointly_distributed_with": "I_to_H"
+    },
+    {
+      "name": "I_to_H",
+      "origin": "I",
+      "destination": "H",
+      "rate_template": "param_product",
+      "rate_config": {
+        "factors": [
+          "I_out_rate",
+          "I_to_H_prop"
+        ]
+      },
+      "jointly_distributed_with": "I_to_R"
+    },
+    {
+      "name": "S_to_SV",
+      "origin": "S",
+      "destination": "SV",
+      "rate_template": "scheduled_exact",
+      "rate_config": {
+        "schedule": "vaccinated_transfer_schedule",
+        "compartment_reset_date_mm_dd_param": "vaccinated_compartment_reset_date_mm_dd"
+      }
+    },
+    {
+      "name": "SV_to_EV",
+      "origin": "SV",
+      "destination": "EV",
+      "rate_template": "force_of_infection",
+      "rate_config": {
+        "beta_param": "beta_baseline",
+        "contact_matrix_schedule": "flu_contact_matrix",
+        "infectious_compartments": {
+          "I": "I_relative_infectiousness",
+          "IV": "IV_relative_infectiousness"
+        },
+        "relative_susceptibility_param": "vax_susceptibility",
+        "humidity_impact_param": "humidity_impact",
+        "humidity_schedule": "absolute_humidity"
+      }
+    },
+    {
+      "name": "EV_to_IV",
+      "origin": "EV",
+      "destination": "IV",
+      "rate_template": "constant_param",
+      "rate_config": {
+        "param": "EV_to_IV_rate"
+      }
+    },
+    {
+      "name": "IV_to_R",
+      "origin": "IV",
+      "destination": "R",
+      "rate_template": "param_product",
+      "rate_config": {
+        "factors": [
+          "I_out_rate"
+        ],
+        "complement_factors": [
+          "IV_to_H_prop"
+        ]
+      },
+      "jointly_distributed_with": "IV_to_H"
+    },
+    {
+      "name": "IV_to_H",
+      "origin": "IV",
+      "destination": "H",
+      "rate_template": "param_product",
+      "rate_config": {
+        "factors": [
+          "I_out_rate",
+          "IV_to_H_prop"
+        ]
+      },
+      "jointly_distributed_with": "IV_to_R"
+    },
+    {
+      "name": "H_to_R",
+      "origin": "H",
+      "destination": "R",
+      "rate_template": "param_product",
+      "rate_config": {
+        "factors": [
+          "H_out_rate"
+        ],
+        "complement_factors": [
+          "H_to_D_prop"
+        ]
+      },
+      "jointly_distributed_with": "H_to_D"
+    },
+    {
+      "name": "H_to_D",
+      "origin": "H",
+      "destination": "D",
+      "rate_template": "param_product",
+      "rate_config": {
+        "factors": [
+          "H_out_rate",
+          "H_to_D_prop"
+        ]
+      },
+      "jointly_distributed_with": "H_to_R"
+    }
+  ],
+  "transition_groups": [
+    {
+      "name": "I_out",
+      "transition_type": "multinom_deterministic",
+      "members": [
+        "I_to_R",
+        "I_to_H"
+      ]
+    },
+    {
+      "name": "IV_out",
+      "transition_type": "multinom_deterministic",
+      "members": [
+        "IV_to_R",
+        "IV_to_H"
+      ]
+    },
+    {
+      "name": "H_out",
+      "transition_type": "multinom_deterministic",
+      "members": [
+        "H_to_R",
+        "H_to_D"
+      ]
+    }
+  ],
+  "epi_metrics": [],
+  "schedules": [
+    {
+      "name": "absolute_humidity",
+      "schedule_template": "timeseries_lookup",
+      "schedule_config": {
+        "df_attribute": "absolute_humidity_df",
+        "value_column": "absolute_humidity"
+      }
+    },
+    {
+      "name": "flu_contact_matrix",
+      "schedule_template": "contact_matrix",
+      "schedule_config": {
+        "school_work_day_df_attribute": "school_work_calendar_df",
+        "total_contact_matrix_param": "total_contact_matrix",
+        "school_contact_matrix_param": "school_contact_matrix",
+        "work_contact_matrix_param": "work_contact_matrix"
+      }
+    },
+    {
+      "name": "vaccinated_transfer_schedule",
+      "schedule_template": "vaccine_schedule",
+      "schedule_config": {
+        "df_attribute": "daily_vaccines_df",
+        "vax_protection_delay_days_param": "vax_transfer_delay_days"
+      }
+    }
+  ],
+  "analysis_metrics": [
+    {
+      "name": "new_H",
+      "transition_variables": [
+        "IV_to_H",
+        "I_to_H"
+      ]
+    }
+  ],
+  "simulation_settings": {
+    "start_real_date": "2025-09-01",
+    "transition_variables_to_save": []
+  },
+  "params": {
+    "beta_baseline": 0.03,
+    "relative_suscept": 1.0,
+    "E_to_I_rate": 0.5,
+    "humidity_impact": 0.1,
+    "I_out_rate": 0.333,
+    "I_to_H_prop": {
+      "by_age_band": {
+        "0-0": [
+          0.006971411624
+        ],
+        "1-4": [
+          0.006971411624
+        ],
+        "5-12": [
+          0.002741943394
+        ],
+        "13-17": [
+          0.002741943394
+        ],
+        "18-49": [
+          0.005613008764
+        ],
+        "50-64": [
+          0.01060470654
+        ],
+        "65+": [
+          0.09090913146
+        ]
+      }
+    },
+    "vax_susceptibility": {
+      "by_age_band": {
+        "0-0": [
+          0.57
+        ],
+        "1-4": [
+          0.57
+        ],
+        "5-12": [
+          0.57
+        ],
+        "13-17": [
+          0.57
+        ],
+        "18-49": [
+          0.79
+        ],
+        "50-64": [
+          0.79
+        ],
+        "65+": [
+          1.0
+        ]
+      }
+    },
+    "EV_to_IV_rate": 0.5,
+    "IV_to_H_prop": {
+      "by_age_band": {
+        "0-0": [
+          0.006357927401
+        ],
+        "1-4": [
+          0.006357927401
+        ],
+        "5-12": [
+          0.002500652376
+        ],
+        "13-17": [
+          0.002500652376
+        ],
+        "18-49": [
+          0.005113450984
+        ],
+        "50-64": [
+          0.009660887656
+        ],
+        "65+": [
+          0.06272730071
+        ]
+      }
+    },
+    "H_out_rate": 0.17,
+    "H_to_D_prop": {
+      "by_age_band": {
+        "0-0": [
+          0.01741109215
+        ],
+        "1-4": [
+          0.01741109215
+        ],
+        "5-12": [
+          0.0117181651
+        ],
+        "13-17": [
+          0.0117181651
+        ],
+        "18-49": [
+          0.02633277317
+        ],
+        "50-64": [
+          0.06301864177
+        ],
+        "65+": [
+          0.07988898095
+        ]
+      }
+    },
+    "vax_transfer_delay_days": 14,
+    "I_relative_infectiousness": 1.0,
+    "IV_relative_infectiousness": 1.0
+  },
+  "num_risk_groups": 1,
+  "initial_seeds": {
+    "E": {
+      "by_age_band": {
+        "0-0": [
+          2.8544107782550988e-05
+        ],
+        "1-4": [
+          2.8544107782550988e-05
+        ],
+        "5-12": [
+          2.8039340844577935e-05
+        ],
+        "13-17": [
+          2.9141633194262984e-05
+        ],
+        "18-49": [
+          2.8540690966770577e-05
+        ],
+        "50-64": [
+          2.8783362374107892e-05
+        ],
+        "65+": [
+          2.8656837644276944e-05
+        ]
+      }
+    }
+  }
+}

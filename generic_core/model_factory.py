@@ -457,6 +457,26 @@ def make_single_pop_metapop(
     ), _mc, _sched
 
 
+def metapop_layout(config, folder_path=None):
+    """``(subpop_names, travel_matrix)`` for a metapop run.
+
+    Prefers the ``metapop`` block that ``config_split.merge_configs`` writes
+    from a population file; falls back to the metapop folder's
+    ``metapop_config.json`` (legacy combined configs). Raises
+    ``FileNotFoundError`` when neither is available."""
+    _mp = (config or {}).get("metapop") or {}
+    if _mp.get("subpopulations") and _mp.get("travel_matrix") is not None:
+        return list(_mp["subpopulations"]), np.array(_mp["travel_matrix"], dtype=float)
+    if folder_path is None or not str(folder_path).strip():
+        raise FileNotFoundError(
+            "No metapop layout: the population config has no travel_matrix and no "
+            "metapop folder was given."
+        )
+    with open(Path(str(folder_path).strip()) / "metapop_config.json") as _f:
+        _mc_cfg = json.load(_f)
+    return list(_mc_cfg["subpopulations"]), np.array(_mc_cfg["travel_matrix"], dtype=float)
+
+
 def make_metapop_from_folder(
     folder_path, config, start_date, num_days, compartments_list,
     seed_offset=0, seed_base=0, ts_per_day=7, stochastic=False,
@@ -506,10 +526,7 @@ def make_metapop_from_folder(
     subpop -- mirrors ``dose_mult_per_subpop``'s precedence."""
     _A, _R = num_age_groups, num_risk_groups
     _folder = Path(folder_path)
-    with open(_folder / "metapop_config.json") as _f:
-        _mc_cfg = json.load(_f)
-    _sp_names = list(_mc_cfg["subpopulations"])
-    _travel_arr = np.array(_mc_cfg["travel_matrix"], dtype=float)
+    _sp_names, _travel_arr = metapop_layout(config, _folder)
     _shared_ah = _shared_mob = None
     _ah_p = _folder / "absolute_humidity.csv"
     _mob_p = _folder / "mobility_modifier.csv"

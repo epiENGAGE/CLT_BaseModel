@@ -63,7 +63,7 @@ Model Builder tab and depends on the age/risk group counts set here.
 
 | Step | What you configure |
 |------|--------------------|
-| 0 — Load config | Optionally load a previously saved `model_config.json` to pre-fill all fields. |
+| 0 — Load disease config | Optionally load a saved `disease_config.json` to pre-fill all fields. The matching `population_config.json` is loaded at the top of the Population & Geography tab. |
 | 1 — Compartments | Name each compartment (e.g. `S`, `E`, `I`, `R`).  The first compartment receives the bulk of the initial population. |
 | 2 — Transitions | Define flows between compartments.  Each transition needs a name, a "from" compartment, a "to" compartment, and a rate template (`constant_param`, `param_product`, `immunity_modulated`, `force_of_infection`, `force_of_infection_travel`, or `scheduled_exact`). |
 | 3 — Parameters | Set numeric values for all parameters referenced by your rate templates (e.g. `beta_baseline`, `sigma`, `gamma`). |
@@ -71,18 +71,19 @@ Model Builder tab and depends on the age/risk group counts set here.
 | 5 — Diagram | Preview the compartment diagram generated from your transitions. |
 | 6 — Initial conditions | Set the total population and seed counts for compartments 2–N. |
 | 7 — Simulation settings | Choose deterministic vs stochastic, number of replicates, timesteps per day, start date, and which transition variables to save. |
-| 8 — Config preview & download | Review the full `model_config.json` and download it. |
+| 8 — Config preview & download | Review `disease_config.json` and `population_config.json` and download them. |
 | 9 — Run | Click **Run simulation** to see epidemic curves and a summary table. |
 
-**Metapopulation mode:** Enabled in the **Population & Geography** tab, which asks for a
-folder path containing:
-- `metapop_config.json` — subpopulation names and travel matrix
+**Metapopulation mode:** Enabled in the **Population & Geography** tab (automatically when
+the population config has a `travel_matrix`), which asks for a folder path containing:
+- `metapop_config.json` — subpopulation names and travel matrix (not needed when the
+  population config has a `travel_matrix`)
 - `initial_conditions_<SubpopName>.json` — per-subpop initial conditions
 - Optional per-subpop schedule CSVs (`school_work_calendar_<name>.csv`, `vaccines_<name>.csv`)
 - Optional shared schedule CSVs (`absolute_humidity.csv`, `mobility_modifier.csv`)
 
-**Auto-save:** The model config is written to `{output_dir}/model_config.json` every time
-any setting changes, so you never lose your work.
+**Auto-save:** The model is written to `{output_dir}/disease_config.json` +
+`{output_dir}/population_config.json` every time any setting changes, so you never lose your work.
 
 ---
 
@@ -165,15 +166,16 @@ or in a batch job, and download all configuration files.
 
 ### What is generated
 
-- **`run_simulation.py`** — A self-contained script that loads `model_config.json` and
-  optionally `fitted_params.json`, builds the model, runs each entry in a `SCENARIOS`
+- **`run_simulation.py`** — A self-contained script that loads `disease_config.json` +
+  `population_config.json` and optionally `fitted_params.json`, builds the model, runs each entry in a `SCENARIOS`
   dict, and saves results as partitioned Parquet (`simulation_output/results_parquet/`).
 
   Edit the top of the script to configure:
   - `NUM_DAYS`, `NUM_REPS`, `STOCHASTIC`, `TIMESTEPS_PER_DAY`, `START_DATE`
   - `SCENARIOS` — a dict mapping scenario name to a `{param: value}` override dict
 
-- **`model_config.json`** — The current model configuration.
+- **`disease_config.json`** / **`population_config.json`** — The current model
+  configuration, as two swappable files.
 - **`fitted_params.json`** — The best-fit parameter values (empty `{}` if fitting has
   not been run).
 
@@ -326,9 +328,35 @@ Population & Geography  →  Model Builder  →  Fitting  →  Forecast  →  Ex
 
 ## File formats
 
-### `model_config.json`
-The master configuration file.  It is read/written by Steps 0 and 9 of Model Builder
-and auto-saved whenever any setting changes.
+### `disease_config.json` and `population_config.json`
+A model is two files, so either can be swapped on its own: the same disease in another
+place (change only the population file), or another disease in the same place (change
+only the disease file).
+
+**Disease config** (`"config_type": "disease"`) — the pathogen: `compartments`,
+`transitions`, `transition_groups`, `epi_metrics`, `schedules` (which time series are used
+and how — not the data), `ve_derivation`, `simulation_settings`, `analysis_metrics`,
+`params`, and `initial_seeds`. Per-age values are keyed by age band and must match the
+population's bands exactly (`num_risk_groups` values each); seeds are **fractions** of
+each age/risk cell's population, so they carry over to any place (the same fractions
+apply to every subpopulation):
+```json
+"params": {"beta_baseline": 0.03,
+           "I_to_H_prop": {"by_age_band": {"0-17": [0.003], "18-64": [0.006], "65+": [0.09]}}},
+"num_risk_groups": 1,
+"initial_seeds": {"E": {"by_age_band": {"0-17": [2.9e-5], "18-64": [2.9e-5], "65+": [2.9e-5]}}}
+```
+
+**Population config** (`"config_type": "population"`) — the place: `age_risk` (age bands,
+risk groups, `risk_group_fractions` = high-risk proportion), `subpopulations` (population
+A×R per subpopulation — `aggregate_pop` for a single population — plus optional per-subpop
+`contact_matrices` / `params` overrides), `contact_matrices` (`total` / `school` / `work`,
+A×A), `travel_matrix` (metapopulations, N×N in `subpopulations` order, rows sum to 1), and
+`data_files` (the schedule CSVs: humidity, school/work calendar, mobility, vaccine doses,
+and the metapop folder of per-subpop CSVs).
+
+If the age bands or risk groups don't match, the mismatched values are listed in Step 0 and
+in the Population tab and fall back to defaults so you can re-enter them.
 
 ### Observed data CSV (Fitting tab)
 Any CSV with at least two columns.  The first column whose name is not

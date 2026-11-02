@@ -8,6 +8,129 @@
 # pop_subpop_names, which the Model Builder tab consumes.
 
 @app.cell
+def _population_config_state(mo, Path):
+    # Default to the example population file that ships alongside this
+    # notebook (paired with the example disease file in Model Builder Step 0).
+    try:
+        _default_population_path = str(
+            Path(__file__).parent / "example_metapop_inputs" / "population_config.json"
+        )
+    except NameError:
+        _default_population_path = ""
+
+    get_population_path, set_population_path = mo.state(_default_population_path)
+    return get_population_path, set_population_path
+
+
+@app.cell
+def _population_config_upload_ui(mo):
+    # Own cell so clearing the path box doesn't recreate the widget and wipe
+    # the browsed file (same as the disease loader in Model Builder Step 0).
+    population_config_upload = mo.ui.file(
+        filetypes=[".json"],
+        label="Browse for population config JSON",
+    )
+    return (population_config_upload,)
+
+
+@app.cell
+def _population_config_path_ui(mo, get_population_path, set_population_path):
+    population_config_path_input = mo.ui.text(
+        value=get_population_path(),
+        on_change=set_population_path,
+        placeholder="/path/to/population_config.json  (or use Browse above)",
+        label="Or enter population config JSON path directly",
+        full_width=True,
+    )
+    clear_population_button = mo.ui.button(
+        label="Clear population config",
+        on_click=lambda _: set_population_path(""),
+    )
+    return population_config_path_input, clear_population_button
+
+
+@app.cell
+def _clear_population_path_on_browse(population_config_upload, set_population_path):
+    if population_config_upload.value:
+        set_population_path("")
+    return
+
+
+@app.cell
+def _population_config_display(
+    mo, main_tab,
+    population_config_upload, population_config_path_input, clear_population_button,
+    loaded_population, pop_cfg_source, pop_cfg_load_error, config_merge_report,
+    config_split_notes,
+    step_header, section_card, CLT_ACCENT,
+):
+    mo.stop(main_tab.value != "Population & Geography", None)
+    _ACC = CLT_ACCENT["population"]
+    _browse_row = mo.hstack([population_config_upload] + (
+        [mo.md(f"Selected: `{population_config_upload.value[0].name}`")]
+        if population_config_upload.value else []
+    ), align="center", gap=1)
+    _parts = [
+        mo.md(
+            "The **population config** describes the place: age bands, risk groups and "
+            "high-risk proportion, population sizes, contact matrices, travel matrix "
+            "(metapopulations) and the location's schedule CSVs. Pair it with any "
+            "**disease config** (Model Builder → Step 0) to model a different disease "
+            "in the same place."
+        ),
+        _browse_row,
+        population_config_path_input,
+        clear_population_button,
+    ]
+    if pop_cfg_load_error:
+        _parts.append(mo.callout(mo.md(f"**Load error:** {pop_cfg_load_error}"), kind="danger"))
+    elif pop_cfg_source:
+        _ar = loaded_population.get("age_risk", {}) or {}
+        _sps = list((loaded_population.get("subpopulations", {}) or {}).keys())
+        _bands = _ar.get("age_groups") or []
+        _parts.append(mo.callout(
+            mo.md(
+                f"{pop_cfg_source} — **{_ar.get('num_age_groups', 1)}** age group(s)"
+                + (f" ({', '.join(_bands)})" if _bands else "")
+                + f", **{_ar.get('num_risk_groups', 1)}** risk group(s)"
+                + (f", subpopulations: {', '.join(_sps)}" if _sps else "")
+                + ("; travel matrix included." if "travel_matrix" in loaded_population else ".")
+            ),
+            kind="success",
+        ))
+    else:
+        _parts.append(mo.callout(
+            mo.md("No population config loaded — set up the population below by hand."),
+            kind="info",
+        ))
+    if config_split_notes:
+        _parts.append(mo.callout(
+            mo.md("\n".join(f"- {_n}" for _n in config_split_notes)), kind="info",
+        ))
+    if config_merge_report is not None and config_merge_report.errors:
+        _parts.append(mo.callout(
+            mo.md(
+                "**The disease and population configs don't fully match.** These items "
+                "were not applied — re-enter them in the Model Builder:\n\n"
+                + "\n".join(f"- {_e}" for _e in config_merge_report.errors)
+            ),
+            kind="warn",
+        ))
+    if config_merge_report is not None and config_merge_report.warnings:
+        _parts.append(mo.callout(
+            mo.md("\n".join(f"- {_w}" for _w in config_merge_report.warnings)), kind="info",
+        ))
+    section_card(
+        step_header("⓪", "Load Population Config",
+                    "Optional — pre-fill this tab from a saved population file.",
+                    accent=_ACC),
+        mo.vstack(_parts),
+        accent=_ACC,
+    )
+    return
+
+
+@app.cell
 def _population_structure_ui(mo, loaded_config):
     _ar = loaded_config.get("age_risk", {})
     _inf = loaded_config.get("input_files", {})
@@ -37,7 +160,10 @@ def _population_structure_ui(mo, loaded_config):
     _metapop_folder_saved = _inf.get("metapop_folder", "")
     pop_mode_radio = mo.ui.radio(
         options=["Single population", "Metapopulation"],
-        value="Metapopulation" if _metapop_folder_saved else "Single population",
+        value=(
+            "Metapopulation" if _metapop_folder_saved or loaded_config.get("metapop")
+            else "Single population"
+        ),
         label="Population mode",
     )
     metapop_folder_input = mo.ui.text(
@@ -97,6 +223,7 @@ def _population_structure_show(
     pop_mode_radio,
     metapop_folder_input,
     validate_metapop_folder,
+    loaded_config,
     cmf,
     step_header, section_card, CLT_ACCENT,
 ):
@@ -142,7 +269,9 @@ def _population_structure_show(
 
     if is_metapop:
         _parts.append(metapop_folder_input)
-        _folder_valid, _folder_status = validate_metapop_folder(metapop_folder_input.value)
+        _folder_valid, _folder_status = validate_metapop_folder(
+            metapop_folder_input.value, loaded_config.get("metapop"),
+        )
         if metapop_folder_input.value.strip():
             _lines = [f"- **{_fname}**: {_msg}" for _fname, _msg in _folder_status.items()]
             _overall_kind = "success" if _folder_valid else "danger"
@@ -183,20 +312,24 @@ def _geo_fetch_state(mo):
 
 
 @app.cell
-def _geo_subpop_names(is_metapop, metapop_folder_input, Path, json):
-    # Subpop names for per-subpop geography, read from metapop_config.json.
-    geo_subpop_names = []
-    if is_metapop and metapop_folder_input.value.strip():
-        _cfg_path = Path(metapop_folder_input.value.strip()) / "metapop_config.json"
-        if _cfg_path.exists():
-            try:
-                with open(_cfg_path) as _f:
-                    _mc = json.load(_f)
-                _sp = _mc.get("subpopulations")
-                if isinstance(_sp, list):
-                    geo_subpop_names = [str(_s) for _s in _sp]
-            except Exception:
-                geo_subpop_names = []
+def _metapop_subpop_names(is_metapop, metapop_folder_input, loaded_config, metapop_layout):
+    # Ordered subpop names for every metapop UI (geography, fitting slices,
+    # analysis selectors): from the population config's travel-matrix layout
+    # when it has one, else the metapop folder's metapop_config.json.
+    metapop_subpop_names = []
+    if is_metapop:
+        try:
+            metapop_subpop_names = [
+                str(_s) for _s in metapop_layout(loaded_config, metapop_folder_input.value)[0]
+            ]
+        except Exception:
+            metapop_subpop_names = []
+    return (metapop_subpop_names,)
+
+
+@app.cell
+def _geo_subpop_names(metapop_subpop_names):
+    geo_subpop_names = list(metapop_subpop_names)
     return (geo_subpop_names,)
 
 

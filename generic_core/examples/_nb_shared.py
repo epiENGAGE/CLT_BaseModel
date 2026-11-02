@@ -27,6 +27,7 @@ def _imports():
 
     import generic_core as gc
     from generic_core import contact_matrix_fetch as cmf
+    from generic_core import config_split
     from generic_core import results_io
     from generic_core.config_parser import parse_model_config_from_dict
     from generic_core.generic_model import (
@@ -68,7 +69,7 @@ def _imports():
 
     return (
         Path, SimpleNamespace, namedtuple, copy, re, sqlite3, datetime,
-        clt, flu, gc, cmf, io, json, mo, np, pd, plt, duckdb, results_io,
+        clt, flu, gc, cmf, config_split, io, json, mo, np, pd, plt, duckdb, results_io,
         ConfigDrivenMetapopModel, ConfigDrivenSubpopModel,
         build_state_from_config, build_params_from_config,
         parse_model_config_from_dict,
@@ -252,16 +253,18 @@ def _helpers(Path, SimpleNamespace, json, np, pd, io):
             return name_str.strip()
         return str(Path(folder_str.strip()) / name_str.strip())
 
-    def validate_metapop_folder(folder_path_str: str) -> tuple:
+    def validate_metapop_folder(folder_path_str: str, layout: dict | None = None) -> tuple:
         """Check that a metapop folder has the required files and a coherent
         metapop_config.json (travel matrix shape / row sums, per-subpop files).
-        Returns (is_valid, status_dict)."""
+        ``layout`` (the merged config's ``metapop`` block, from a population
+        file) replaces metapop_config.json when given, so the folder then only
+        has to hold the per-subpop CSVs. Returns (is_valid, status_dict)."""
         if not folder_path_str or not folder_path_str.strip():
             return False, {}
         _folder = Path(folder_path_str.strip())
         if not _folder.exists() or not _folder.is_dir():
             return False, {"folder": f"Not found or not a directory: {_folder}"}
-        _required = ["metapop_config.json"]
+        _required = [] if layout else ["metapop_config.json"]
         _optional_shared = [
             "absolute_humidity.csv",
             "mobility_modifier.csv",
@@ -280,15 +283,19 @@ def _helpers(Path, SimpleNamespace, json, np, pd, io):
             else:
                 _status[_fname] = "absent (will use constant value)"
 
-        # Deeper validation of metapop_config.json contents.
+        # Deeper validation of the layout (population file, else metapop_config.json).
         _cfg_path = _folder / "metapop_config.json"
-        if _cfg_path.exists():
-            try:
-                with open(_cfg_path) as _f:
-                    _cfg = json.load(_f)
-            except Exception as _exc:
-                _status["metapop_config.json"] = f"INVALID JSON: {_exc}"
-                return False, _status
+        if layout or _cfg_path.exists():
+            if layout:
+                _cfg = layout
+                _status["layout"] = "from population config (metapop_config.json not needed)"
+            else:
+                try:
+                    with open(_cfg_path) as _f:
+                        _cfg = json.load(_f)
+                except Exception as _exc:
+                    _status["metapop_config.json"] = f"INVALID JSON: {_exc}"
+                    return False, _status
 
             _subpops = _cfg.get("subpopulations")
             _travel = _cfg.get("travel_matrix")
@@ -337,14 +344,33 @@ def _helpers(Path, SimpleNamespace, json, np, pd, io):
             _parts.append(f"{_k}:{_v}" if _v else _k)
         return ", ".join(_parts)
 
-    def detect_config_type(filename: str) -> str:
-        """Best-effort classification of an uploaded JSON config by filename,
-        for the shared multi-file importer (see _nb_import.py). Returns one
-        of "model_config", "fit_config", "fitted_params", "scenario_config",
-        or "unknown" -- shown as the pre-selected type in a per-file dropdown
+    def detect_config_type(filename: str, contents: bytes | None = None) -> str:
+        """Best-effort classification of an uploaded JSON config, for the
+        shared multi-file importer (see _nb_import.py). Returns one of
+        "disease_config", "population_config", "fit_config",
+        "fitted_params", "scenario_config", or
+        "unknown" -- shown as the pre-selected type in a per-file dropdown
         the user confirms/overrides before applying, so a wrong guess here is
-        just an extra click, not a silent misfile."""
+        just an extra click, not a silent misfile. A ``config_type`` header
+        in ``contents`` wins over the filename; a model config without one
+        (older single-file format, which also carries the population) is
+        a disease config -- the disease slot reads its population part too."""
+        if contents:
+            try:
+                _raw = json.loads(contents.decode("utf-8"))
+                if isinstance(_raw, dict):
+                    _ct = _raw.get("config_type")
+                    if _ct in ("disease", "population"):
+                        return f"{_ct}_config"
+                    if _ct is None and "compartments" in _raw:
+                        return "disease_config"
+            except Exception:
+                pass
         _n = (filename or "").lower()
+        if "disease" in _n:
+            return "disease_config"
+        if "population" in _n:
+            return "population_config"
         if "scenario" in _n:
             return "scenario_config"
         if "fit_config" in _n:
@@ -352,7 +378,7 @@ def _helpers(Path, SimpleNamespace, json, np, pd, io):
         if "fitted" in _n or "fit_result" in _n or "params" in _n:
             return "fitted_params"
         if "config" in _n:
-            return "model_config"
+            return "disease_config"
         return "unknown"
 
     def parse_fit_config_targets(raw: dict) -> tuple:
@@ -560,6 +586,7 @@ def _helpers(Path, SimpleNamespace, json, np, pd, io):
     from generic_core.model_factory import (
         build_compartment_init,
         read_initial_conditions,
+        metapop_layout,
     )
 
     return (
@@ -588,6 +615,7 @@ def _helpers(Path, SimpleNamespace, json, np, pd, io):
         load_population_csv,
         build_compartment_init,
         read_initial_conditions,
+        metapop_layout,
     )
 
 

@@ -36,10 +36,16 @@ CELL_TO_SECTION: dict[str, str] = {
     "_autosave_config": "_nb_entry",
     # _nb_population.py — Population & Geography tab (structure, contact-matrix
     # geography, and per-age/risk/subpop population fetch/CSV)
+    "_population_config_state": "_nb_population",
+    "_population_config_upload_ui": "_nb_population",
+    "_population_config_path_ui": "_nb_population",
+    "_clear_population_path_on_browse": "_nb_population",
+    "_population_config_display": "_nb_population",
     "_population_structure_ui": "_nb_population",
     "_population_structure_compute": "_nb_population",
     "_population_structure_show": "_nb_population",
     "_geo_fetch_state": "_nb_population",
+    "_metapop_subpop_names": "_nb_population",
     "_geo_subpop_names": "_nb_population",
     "_geo_ui": "_nb_population",
     "_pop_source_ui": "_nb_population",

@@ -1,0 +1,81 @@
+{
+  "config_type": "population",
+  "schema_version": 1,
+  "age_risk": {
+    "num_age_groups": 3,
+    "num_risk_groups": 2
+  },
+  "contact_matrices": {
+    "total": [
+      [
+        7.0,
+        3.0,
+        0.5
+      ],
+      [
+        3.0,
+        9.0,
+        1.5
+      ],
+      [
+        0.5,
+        1.5,
+        4.0
+      ]
+    ],
+    "school": [
+      [
+        3.0,
+        0.5,
+        0.0
+      ],
+      [
+        0.5,
+        0.2,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0
+      ]
+    ],
+    "work": [
+      [
+        0.0,
+        0.2,
+        0.0
+      ],
+      [
+        0.2,
+        4.0,
+        0.3
+      ],
+      [
+        0.0,
+        0.3,
+        0.5
+      ]
+    ]
+  },
+  "data_files": {
+    "input_folder": "generic_core/examples/example_metapop_inputs",
+    "mobility_csv": "mobility_modifier.csv",
+    "metapop_folder": "generic_core/examples/example_metapop_inputs"
+  },
+  "travel_matrix": [
+    [
+      0.95,
+      0.05
+    ],
+    [
+      0.03,
+      0.97
+    ]
+  ],
+  "subpopulations": {
+    "SubpopA": {},
+    "SubpopB": {}
+  },
+  "total_population": 250000
+}

@@ -34,12 +34,13 @@ def _builder_overview(mo, main_tab, CLT_ACCENT):
 
 @app.cell
 def _load_config_state(mo, Path):
-    # Default to the example config that ships alongside this notebook, resolved
-    # relative to the notebook file so it works on any machine. Falls back to an
-    # empty string if the bundled example cannot be located.
+    # Default to the example disease config that ships alongside this
+    # notebook, resolved relative to the notebook file so it works on any
+    # machine (paired with the example population config in the Population &
+    # Geography tab). Falls back to an empty string if it cannot be located.
     try:
         _default_config_path = str(
-            Path(__file__).parent / "example_metapop_inputs" / "model_config.json"
+            Path(__file__).parent / "example_metapop_inputs" / "disease_config.json"
         )
     except NameError:
         _default_config_path = ""
@@ -54,7 +55,7 @@ def _config_file_upload_ui(mo):
     # path text box does not recreate this widget and wipe the browsed file.
     config_file_upload = mo.ui.file(
         filetypes=[".json"],
-        label="Browse for config JSON",
+        label="Browse for disease config JSON",
     )
     return (config_file_upload,)
 
@@ -64,8 +65,8 @@ def _load_config_ui(mo, get_config_path, set_config_path):
     config_path_input = mo.ui.text(
         value=get_config_path(),
         on_change=set_config_path,
-        placeholder="/path/to/model_config.json  (or use Browse above)",
-        label="Or enter config JSON path directly",
+        placeholder="/path/to/disease_config.json  (or use Browse above)",
+        label="Or enter disease config JSON path directly",
         full_width=True,
     )
     return (config_path_input,)
@@ -85,7 +86,7 @@ def _clear_path_on_browse(config_file_upload, set_config_path):
 @app.cell
 def _clear_config_button_ui(mo, set_config_path):
     clear_config_button = mo.ui.button(
-        label="Clear config",
+        label="Clear disease config",
         on_click=lambda _: set_config_path(""),
     )
     return (clear_config_button,)
@@ -93,44 +94,97 @@ def _clear_config_button_ui(mo, set_config_path):
 
 @app.cell
 def _load_config_parse(
-    config_file_upload, config_path_input, load_config_json, json,
+    config_file_upload, config_path_input,
+    population_config_upload, population_config_path_input,
+    load_config_json, json, config_split,
     get_shared_imports,
 ):
-    _loaded_config = {}
-    _cfg_err = None
-    _source = None
-    _shared = get_shared_imports().get("model_config")
+    # Two independent sources -- the disease config (Step 0 here) and the
+    # population config (Population & Geography tab) -- merged into the one
+    # combined dict, loaded_config, that every downstream cell reads (same
+    # shape model_config.json has always had). A legacy combined config is
+    # still accepted in either slot and split on load.
+    _shared = get_shared_imports()
 
-    if config_file_upload.value:
-        _file = config_file_upload.value[0]
-        try:
-            _loaded_config = json.loads(_file.contents.decode("utf-8"))
-        except Exception as _exc:
-            _cfg_err = f"JSON parse error: {_exc}"
-        _source = f"Browsed: **{_file.name}**"
-    elif config_path_input.value.strip():
-        _loaded_config, _cfg_err = load_config_json(config_path_input.value)
-        _source = "path"
-    elif _shared:
-        # Fed by the shared multi-file importer (_nb_import.py) when a file
-        # there was classified/confirmed as "Model config" -- checked last so
-        # a config browsed or path-loaded directly in this tab always wins.
-        try:
-            _loaded_config = json.loads(_shared["contents"].decode("utf-8"))
-        except Exception as _exc:
-            _cfg_err = f"JSON parse error: {_exc}"
-        _source = f"Imported: **{_shared['name']}**"
+    def _read(_upload, _path_input, _shared_keys):
+        """(raw dict, source label, error): a browsed file wins over a typed
+        path, which wins over the shared multi-file importer (_nb_import.py),
+        so a config loaded directly in its own tab always takes priority."""
+        if _upload.value:
+            _f = _upload.value[0]
+            try:
+                return json.loads(_f.contents.decode("utf-8")), f"Browsed: **{_f.name}**", None
+            except Exception as _exc:
+                return {}, f"Browsed: **{_f.name}**", f"JSON parse error: {_exc}"
+        if _path_input.value.strip():
+            _raw, _err = load_config_json(_path_input.value)
+            return _raw, f"Loaded from `{_path_input.value.strip()}`", _err
+        for _key in _shared_keys:
+            _entry = _shared.get(_key)
+            if _entry:
+                try:
+                    return json.loads(_entry["contents"].decode("utf-8")), f"Imported: **{_entry['name']}**", None
+                except Exception as _exc:
+                    return {}, f"Imported: **{_entry['name']}**", f"JSON parse error: {_exc}"
+        return {}, None, None
 
-    loaded_config = _loaded_config
-    cfg_source = _source
-    cfg_load_error = _cfg_err
-    return (loaded_config, cfg_source, cfg_load_error)
+    _dis_raw, _dis_src, _dis_err = _read(
+        config_file_upload, config_path_input, ("disease_config",),
+    )
+    _pop_raw, _pop_src, _pop_err = _read(
+        population_config_upload, population_config_path_input, ("population_config",),
+    )
+
+    def _kind(_raw):
+        try:
+            return config_split.config_kind(_raw) if _raw else None
+        except ValueError:
+            return None
+
+    if _kind(_dis_raw) == config_split.POPULATION_TYPE:
+        _dis_err = "This is a population config — load it in the Population & Geography tab."
+        _dis_raw = {}
+    if _kind(_pop_raw) == config_split.DISEASE_TYPE:
+        _pop_err = "This is a disease config — load it in Model Builder → Step 0."
+        _pop_raw = {}
+
+    if _kind(_dis_raw) == config_split.COMBINED_TYPE:
+        # A combined file describes one specific disease-in-a-place, so it
+        # supplies both halves; the population slot is ignored rather than
+        # silently mixing the file with whatever population path is set.
+        _disease, _population, _notes = config_split.resolve_disease_population(_dis_raw, None)
+        config_split_notes = [
+            "The loaded disease config also contains population settings, which are used "
+            "here in place of a separate population config."
+        ] + _notes[1:]
+        _pop_src, _pop_err = (f"{_dis_src} (population settings)" if _dis_src else None), None
+    else:
+        _disease, _population, config_split_notes = config_split.resolve_disease_population(
+            _dis_raw, _pop_raw,
+        )
+
+    if _disease or _population:
+        loaded_config, config_merge_report = config_split.merge_configs(
+            _disease, _population, strict=False,
+        )
+    else:
+        loaded_config, config_merge_report = {}, None
+    loaded_disease = _disease
+    loaded_population = _population
+    cfg_source, cfg_load_error = _dis_src, _dis_err
+    pop_cfg_source, pop_cfg_load_error = _pop_src, _pop_err
+    return (
+        loaded_config, loaded_disease, loaded_population,
+        cfg_source, cfg_load_error, pop_cfg_source, pop_cfg_load_error,
+        config_merge_report, config_split_notes,
+    )
 
 
 @app.cell
 def _load_config_display(
     config_file_upload, config_path_input, clear_config_button,
-    loaded_config, cfg_source, cfg_load_error, mo, main_tab,
+    loaded_disease, cfg_source, cfg_load_error, config_merge_report,
+    mo, main_tab,
     step_header, section_card, CLT_ACCENT,
 ):
     mo.stop(main_tab.value != "Model Builder", None)
@@ -151,6 +205,13 @@ def _load_config_display(
     ), align="center", gap=1)
 
     _parts = [
+        mo.md(
+            "The **disease config** describes the pathogen: compartments, transitions, "
+            "parameters, vaccine effects, which schedules are used, and initial seeds "
+            "(as fractions of the population). The place — age bands, population, "
+            "contact/travel matrices, schedule CSVs — comes from the **population "
+            "config** in the Population & Geography tab."
+        ),
         _browse_row,
         config_path_input,
         clear_config_button,
@@ -159,30 +220,37 @@ def _load_config_display(
         if _cfg_err:
             _parts.append(mo.callout(mo.md(f"**Load error:** {_cfg_err}"), kind="danger"))
         else:
-            _n_comp = len(loaded_config.get("compartments", []))
-            _n_tr = len(loaded_config.get("transitions", []))
-            _ar = loaded_config.get("age_risk", {})
-            _A = _ar.get("num_age_groups", 1)
-            _R = _ar.get("num_risk_groups", 1)
-            if _source == "path":
-                _label = f"Loaded from `{config_path_input.value.strip()}`"
-            else:
-                _label = _source
+            _n_comp = len(loaded_disease.get("compartments", []))
+            _n_tr = len(loaded_disease.get("transitions", []))
             _parts.append(mo.callout(
-                mo.md(
-                    f"{_label} — **{_n_comp}** compartments, **{_n_tr}** transitions, "
-                    f"**{_A}** age group(s), **{_R}** risk group(s)."
-                ),
+                mo.md(f"{_source} — **{_n_comp}** compartments, **{_n_tr}** transitions."),
                 kind="success",
             ))
+    elif _cfg_err:
+        _parts.append(mo.callout(mo.md(f"**Load error:** {_cfg_err}"), kind="danger"))
     else:
         _parts.append(mo.callout(
-            mo.md("No config loaded — all fields below use their defaults. Enter a path or browse for a JSON file to pre-populate the form, or fill it in manually."),
+            mo.md("No disease config loaded — all fields below use their defaults. Enter a path or browse for a JSON file to pre-populate the form, or fill it in manually."),
             kind="info",
         ))
+    if config_merge_report is not None and config_merge_report.errors:
+        _dropped = (
+            config_merge_report.dropped_params
+            + [f"initial seed {_c}" for _c in config_merge_report.dropped_seeds]
+            + [f"starting value of {_m}" for _m in config_merge_report.dropped_epi_metrics]
+        )
+        _parts.append(mo.callout(
+            mo.md(
+                "**This disease config doesn't match the population's age/risk groups.** "
+                "Not applied (fields below fall back to defaults — re-enter them in Step 3 / "
+                "Step 7): " + ", ".join(f"`{_x}`" for _x in _dropped) + "\n\n"
+                + "\n".join(f"- {_e}" for _e in config_merge_report.errors)
+            ),
+            kind="warn",
+        ))
     section_card(
-        step_header(0, "Load Existing Config",
-                    "Optional — pre-fill the form from a saved config JSON.",
+        step_header(0, "Load Disease Config",
+                    "Optional — pre-fill the form from a saved disease config.",
                     accent=_ACC),
         mo.vstack(_parts),
         accent=_ACC,
@@ -225,9 +293,9 @@ metapopulation mode, and (when using named age bands) fetch contact matrices for
 chosen geography. For metapop, enter the path to a folder containing the required input
 files (see the *Metapopulation folder conventions* section below).
 
-**Step 0 — Load existing config** *(optional)*
-Enter the path to a `model_config.json` file to pre-populate all fields below.
-Leave blank to start fresh.
+**Step 0 — Load disease config** *(optional)*
+Enter the path to a `disease_config.json` to pre-populate all fields below. The matching `population_config.json` is loaded at
+the top of the Population & Geography tab. Leave blank to start fresh.
 
 **Step 1 — Compartments**
 Enter compartment names as a comma-separated list, e.g. `S, E, I, R`.
@@ -352,20 +420,22 @@ The folder path is entered in the **Population & Geography** tab and saved in th
 | `vaccines_{name}.csv` | `date`, `daily_vaccines` (JSON A×R) |
 | `initial_conditions_{name}.json` | `compartments` and `epi_metrics` keys, each mapping name → A×R list |
 
-**Per-subpopulation parameter overrides** (`subpop_params` in `model_config.json`):
+**Per-subpopulation parameter overrides** (in `population_config.json`):
 
-Any parameter in the `params` block can be overridden on a per-subpop basis by adding a
-`subpop_params` section to `model_config.json`. Each key is a subpopulation name
-(matching `metapop_config.json → subpopulations`); each value is a dict of parameter
-overrides applied only to that subpopulation. Scalar and A×R array values are both supported.
-Parameters not listed under a subpop continue to use the shared value from `params`.
+Any disease parameter can be overridden for one subpopulation by adding a `params` block
+under that subpopulation in `population_config.json`'s `subpopulations` section. Scalar
+and A×R array values are both supported. Parameters not listed under a subpop keep the
+value from the disease config.
 
 ```json
-"subpop_params": {
-  "East": { "beta_baseline": 0.050 },
+"subpopulations": {
+  "East": { "population": [[...]], "params": { "beta_baseline": 0.050 } },
   "West": {
-    "beta_baseline": 0.038,
-    "IP_to_ISH_prop": [[0.008], [0.003], [0.007], [0.012], [0.100]]
+    "population": [[...]],
+    "params": {
+      "beta_baseline": 0.038,
+      "IP_to_ISH_prop": [[0.008], [0.003], [0.007], [0.012], [0.100]]
+    }
   }
 }
 ```
@@ -397,26 +467,28 @@ SEIR model). Re-generate it with::
         """),
 
         "💾 Config save / load round-trip": mo.md("""
-The downloaded `model_config.json` contains everything needed to restore the session:
+The two downloaded files (Step 9 or the Export tab) contain everything needed to
+restore the session:
 
-- Compartment names, transition definitions, parameter values
-- Age/risk group counts (`age_risk` section)
-- CSV schedule files (`input_files` section): a shared `input_folder` plus the
-  filename of each CSV used (humidity, calendar, mobility, vaccines, contact matrices)
-- Initial conditions (`initial_conditions` section): per-subpopulation population (A×R)
-  and per-compartment seed counts, plus the derived `total_population`
-- Per-subpopulation parameter overrides (`subpop_params` section, if present)
+- `disease_config.json` — compartment names, transition definitions, parameter values
+  (per-age values keyed by age band), immunity settings, schedules used, and initial
+  seeds as fractions of the population
+- `population_config.json` — age bands and risk groups (`age_risk`), population per
+  subpopulation, contact matrices, travel matrix (metapopulations), per-subpop
+  parameter overrides, and the schedule CSV files (`data_files`: a shared
+  `input_folder` plus the filename of each CSV used)
 
-**To reload:** paste the path into the Step 0 text field. All UI fields (compartments,
-transitions, parameters, immunity toggles, file paths, metapop folder) will be
-pre-populated automatically.
+**To reload:** paste the disease config path into the Step 0 text field and the population
+config path into the card at the top of the Population & Geography tab. All UI fields
+(compartments, transitions, parameters, immunity toggles, file paths, metapop folder,
+population and seeds) will be pre-populated automatically. Swap either file to model the
+same disease elsewhere, or another disease in the same place.
 
 **Note on contact matrices:** When A > 1, matrix values *are* embedded inline in the
-config JSON under `params` (as nested lists). CSV file paths are optional — if provided
-in Step 4, they override the inline values at load time. If no CSV paths are set, the
-inline param arrays are used as-is.
+population config under `contact_matrices`. CSV file paths are optional — if provided
+in Step 4, they override the inline values at load time.
 
-**Note on `subpop_params`:** These overrides are written directly in `model_config.json`
+**Note on per-subpop overrides:** These are written directly in `population_config.json`
 and are not editable via the UI sliders — edit the JSON file directly to add or change
 per-subpop values. They are preserved across save/load cycles.
         """),
@@ -502,17 +574,32 @@ def _transition_count_ui(mo, loaded_config):
     _n_loaded = len(loaded_config.get("transitions", []))
     n_transitions = mo.ui.number(
         start=1,
-        stop=12,
         step=1,
-        value=min(max(_n_loaded, 1), 12) if _n_loaded else 3,
+        value=_n_loaded or 3,
         label="Number of transitions",
     )
     return (n_transitions,)
 
 
 @app.cell
-def _transition_forms_ui(compartments, loaded_config, mo, slugify_schedule_name):
-    _max_t = 12
+def _transition_form_cache(loaded_config):
+    # Edited transition-widget values, keyed by widget-array name. The forms
+    # are sized to n_transitions (building a large fixed pool of widgets up
+    # front is far too slow), so they are rebuilt whenever the count changes;
+    # this cache carries entered values across that rebuild. A plain dict, not
+    # mo.state, so typing doesn't trigger re-runs. Depends on loaded_config so
+    # importing a config starts from a clean slate.
+    _ = loaded_config
+    transition_form_cache = {}
+    return (transition_form_cache,)
+
+
+@app.cell
+def _transition_forms_ui(
+    compartments, loaded_config, mo, n_transitions, slugify_schedule_name,
+    transition_form_cache,
+):
+    _max_t = max(int(n_transitions.value or 1), 1)
     _comps = compartments if compartments else ["?"]
     _templates = [
         "constant_param",
@@ -546,42 +633,56 @@ def _transition_forms_ui(compartments, loaded_config, mo, slugify_schedule_name)
             return _v
         return _comps[i + 1] if i < len(_comps) - 1 else _comps[-1]
 
-    t_name = mo.ui.array([
+    def _cached(key, i, default, options=None):
+        """Previously entered value for row i of array `key`, else `default`."""
+        _vals = transition_form_cache.get(key)
+        if _vals is None or i >= len(_vals):
+            return default
+        if options is not None and _vals[i] not in options:
+            return default
+        return _vals[i]
+
+    def _array(key, elements):
+        def _remember(_new_value):
+            transition_form_cache[key] = list(_new_value)
+        return mo.ui.array(elements, on_change=_remember)
+
+    t_name = _array("t_name", [
         mo.ui.text(
-            value=_tget(_i, "name", f"{_origin_default(_i)}_to_{_dest_default(_i)}"),
+            value=_cached("t_name", _i, _tget(_i, "name", f"{_origin_default(_i)}_to_{_dest_default(_i)}")),
             label="Name",
         )
         for _i in range(_max_t)
     ])
-    t_origin = mo.ui.array([
-        mo.ui.dropdown(options=_comps, value=_origin_default(_i), label="Origin")
+    t_origin = _array("t_origin", [
+        mo.ui.dropdown(options=_comps, value=_cached("t_origin", _i, _origin_default(_i), options=_comps), label="Origin")
         for _i in range(_max_t)
     ])
-    t_dest = mo.ui.array([
-        mo.ui.dropdown(options=_comps, value=_dest_default(_i), label="Destination")
+    t_dest = _array("t_dest", [
+        mo.ui.dropdown(options=_comps, value=_cached("t_dest", _i, _dest_default(_i), options=_comps), label="Destination")
         for _i in range(_max_t)
     ])
-    t_template = mo.ui.array([
+    t_template = _array("t_template", [
         mo.ui.dropdown(
             options=_templates,
-            value=_tget(_i, "rate_template", "constant_param"),
+            value=_cached("t_template", _i, _tget(_i, "rate_template", "constant_param"), options=_templates),
             label="",
         )
         for _i in range(_max_t)
     ])
 
-    t_param = mo.ui.array([
+    t_param = _array("t_param", [
         mo.ui.text(
-            value=_rcget(
+            value=_cached("t_param", _i, _rcget(
                 _i, "param", f"{_origin_default(_i)}_to_{_dest_default(_i)}_rate"
-            ),
+            )),
             label="Param name",
         )
         for _i in range(_max_t)
     ])
-    t_schedule_name = mo.ui.array([
+    t_schedule_name = _array("t_schedule_name", [
         mo.ui.text(
-            value=_rcget(_i, "schedule", "vaccinated_transfer_schedule"),
+            value=_cached("t_schedule_name", _i, _rcget(_i, "schedule", "vaccinated_transfer_schedule")),
             label="Schedule name",
         )
         for _i in range(_max_t)
@@ -600,9 +701,9 @@ def _transition_forms_ui(compartments, loaded_config, mo, slugify_schedule_name)
             return ""
         return str(loaded_config.get("params", {}).get(_param_name, "") or "")
 
-    t_reset_date = mo.ui.array([
+    t_reset_date = _array("t_reset_date", [
         mo.ui.text(
-            value=_reset_date_default(_i),
+            value=_cached("t_reset_date", _i, _reset_date_default(_i)),
             placeholder="07_30",
             label="Compartment reset date MM_DD (blank to use all history)",
         )
@@ -627,60 +728,60 @@ def _transition_forms_ui(compartments, loaded_config, mo, slugify_schedule_name)
             f"{_slug}_schedule_csv", ""
         )
 
-    t_extra_schedule_csv_path = mo.ui.array([
+    t_extra_schedule_csv_path = _array("t_extra_schedule_csv_path", [
         mo.ui.text(
-            value=_extra_schedule_csv_default(_i),
+            value=_cached("t_extra_schedule_csv_path", _i, _extra_schedule_csv_default(_i)),
             placeholder="antiviral_schedule.csv",
             label="Schedule CSV (filename)",
         )
         for _i in range(_max_t)
     ])
-    t_factors = mo.ui.array([
-        mo.ui.text(value=", ".join(_rcget(_i, "factors", [])), label="")
+    t_factors = _array("t_factors", [
+        mo.ui.text(value=_cached("t_factors", _i, ", ".join(_rcget(_i, "factors", []))), label="")
         for _i in range(_max_t)
     ])
-    t_complements = mo.ui.array([
-        mo.ui.text(value=", ".join(_rcget(_i, "complement_factors", [])), label="")
+    t_complements = _array("t_complements", [
+        mo.ui.text(value=_cached("t_complements", _i, ", ".join(_rcget(_i, "complement_factors", []))), label="")
         for _i in range(_max_t)
     ])
 
-    t_base_rate = mo.ui.array([
-        mo.ui.text(value=_rcget(_i, "base_rate", "base_rate"), label="Base rate param")
+    t_base_rate = _array("t_base_rate", [
+        mo.ui.text(value=_cached("t_base_rate", _i, _rcget(_i, "base_rate", "base_rate")), label="Base rate param")
         for _i in range(_max_t)
     ])
-    t_proportion = mo.ui.array([
-        mo.ui.text(value=_rcget(_i, "proportion", "split_prop"), label="Proportion param")
+    t_proportion = _array("t_proportion", [
+        mo.ui.text(value=_cached("t_proportion", _i, _rcget(_i, "proportion", "split_prop")), label="Proportion param")
         for _i in range(_max_t)
     ])
-    t_is_complement = mo.ui.array([
+    t_is_complement = _array("t_is_complement", [
         mo.ui.checkbox(
             label="Use complement branch",
-            value=bool(_rcget(_i, "is_complement", False)),
+            value=_cached("t_is_complement", _i, bool(_rcget(_i, "is_complement", False))),
         )
         for _i in range(_max_t)
     ])
-    t_inf_reduce = mo.ui.array([
+    t_inf_reduce = _array("t_inf_reduce", [
         mo.ui.text(
-            value=_rcget(_i, "inf_reduce_param", "inf_risk_reduce"),
+            value=_cached("t_inf_reduce", _i, _rcget(_i, "inf_reduce_param", "inf_risk_reduce")),
             label="Infection reduction param",
         )
         for _i in range(_max_t)
     ])
-    t_vax_reduce = mo.ui.array([
+    t_vax_reduce = _array("t_vax_reduce", [
         mo.ui.text(
-            value=_rcget(_i, "vax_reduce_param", "vax_risk_reduce"),
+            value=_cached("t_vax_reduce", _i, _rcget(_i, "vax_reduce_param", "vax_risk_reduce")),
             label="Vaccine reduction param (season-average)",
         )
         for _i in range(_max_t)
     ])
 
-    t_beta = mo.ui.array([
-        mo.ui.text(value=_rcget(_i, "beta_param", "beta_baseline"), label="Beta param")
+    t_beta = _array("t_beta", [
+        mo.ui.text(value=_cached("t_beta", _i, _rcget(_i, "beta_param", "beta_baseline")), label="Beta param")
         for _i in range(_max_t)
     ])
-    t_rel_sus = mo.ui.array([
+    t_rel_sus = _array("t_rel_sus", [
         mo.ui.text(
-            value=_rcget(_i, "relative_susceptibility_param", "relative_suscept"),
+            value=_cached("t_rel_sus", _i, _rcget(_i, "relative_susceptibility_param", "relative_suscept")),
             label="Relative susceptibility param",
         )
         for _i in range(_max_t)
@@ -701,41 +802,41 @@ def _transition_forms_ui(compartments, loaded_config, mo, slugify_schedule_name)
             return ", ".join(_raw.keys())
         return "I"
 
-    t_infectious = mo.ui.array([
+    t_infectious = _array("t_infectious", [
         mo.ui.text(
-            value=_infectious_default(_i),
+            value=_cached("t_infectious", _i, _infectious_default(_i)),
             label="",
             placeholder="IP, IA, ISR, ISH",
         )
         for _i in range(_max_t)
     ])
-    t_use_humidity = mo.ui.array([
+    t_use_humidity = _array("t_use_humidity", [
         mo.ui.checkbox(
             label="Include humidity modifier",
-            value=bool(_rcget(_i, "humidity_impact_param", None)),
+            value=_cached("t_use_humidity", _i, bool(_rcget(_i, "humidity_impact_param", None))),
         )
         for _i in range(_max_t)
     ])
-    t_humidity_impact = mo.ui.array([
+    t_humidity_impact = _array("t_humidity_impact", [
         mo.ui.text(
-            value=_rcget(_i, "humidity_impact_param", "humidity_impact"),
+            value=_cached("t_humidity_impact", _i, _rcget(_i, "humidity_impact_param", "humidity_impact")),
             label="Humidity impact param",
         )
         for _i in range(_max_t)
     ])
-    t_use_foi_immunity = mo.ui.array([
+    t_use_foi_immunity = _array("t_use_foi_immunity", [
         mo.ui.checkbox(
             label="Include immunity modifier",
-            value=bool(_rcget(_i, "inf_reduce_param", None)),
+            value=_cached("t_use_foi_immunity", _i, bool(_rcget(_i, "inf_reduce_param", None))),
         )
         for _i in range(_max_t)
     ])
-    t_immobile = mo.ui.array([
+    t_immobile = _array("t_immobile", [
         mo.ui.text(
-            value=", ".join(
+            value=_cached("t_immobile", _i, ", ".join(
                 _travel_config_get(_i, "immobile_compartments", None)
                 or _rcget(_i, "immobile_compartments", [])
-            ),
+            )),
             label="",
         )
         for _i in range(_max_t)
@@ -1101,8 +1202,23 @@ def _collect_param_names(
 
 
 @app.cell
+def _param_value_cache(loaded_config):
+    # Edited Step 3 values, keyed by widget kind then param name. The param
+    # widgets are rebuilt whenever param_names changes (i.e. on almost any
+    # Step 2 edit), so — like transition_form_cache — this carries entered
+    # values across that rebuild, including for params that temporarily drop
+    # out of param_names while transitions are being edited. A plain dict,
+    # not mo.state, so typing doesn't trigger re-runs. Depends on
+    # loaded_config so importing a config starts from a clean slate.
+    _ = loaded_config
+    param_value_cache = {"vary": {}, "scalar": {}, "grid": {}}
+    return (param_value_cache,)
+
+
+@app.cell
 def _params_ui(param_names, reduce_param_names, rel_inf_param_names, loaded_config, mo,
-               is_array_param, param_grid_columns, num_age_groups, num_risk_groups, age_groups):
+               is_array_param, param_grid_columns, num_age_groups, num_risk_groups, age_groups,
+               param_value_cache):
     _saved_params = loaded_config.get("params", {})
     _rel_inf_set = set(rel_inf_param_names)
     _A = num_age_groups
@@ -1111,6 +1227,8 @@ def _params_ui(param_names, reduce_param_names, rel_inf_param_names, loaded_conf
     _risk_labels = [f"risk{_r}" for _r in range(_R)]
 
     def _scalar_seed(_name):
+        if _name in param_value_cache["scalar"]:
+            return param_value_cache["scalar"][_name]
         _v = _saved_params.get(_name, 0.5 if _name in reduce_param_names else 1.0)
         # A param saved as an A×R array still needs a single number to seed the
         # scalar input — use its first entry.
@@ -1121,11 +1239,33 @@ def _params_ui(param_names, reduce_param_names, rel_inf_param_names, loaded_conf
     def _grid_seed(_name, _a, _r):
         # Saved A×R params are nested [age][risk] lists (see _build_config); pull
         # each cell's own value instead of collapsing the whole array to one number.
-        _v = _saved_params.get(_name)
-        if (isinstance(_v, list) and len(_v) == _A
-                and all(isinstance(_row, list) and len(_row) == _R for _row in _v)):
-            return float(_v[_a][_r])
+        # An edited grid (cached in the same shape) wins over the saved one.
+        for _v in (param_value_cache["grid"].get(_name), _saved_params.get(_name)):
+            if (isinstance(_v, list) and len(_v) == _A
+                    and all(isinstance(_row, list) and len(_row) == _R for _row in _v)):
+                return float(_v[_a][_r])
         return _scalar_seed(_name)
+
+    def _remember_vary(_new_value):
+        param_value_cache["vary"].update(_new_value)
+
+    def _remember_scalar(_new_value):
+        param_value_cache["scalar"].update(
+            {_k: float(_v) for _k, _v in _new_value.items() if _v is not None}
+        )
+
+    def _remember_grid(_new_value):
+        # data_editor rows are risk groups × age columns; cache them transposed
+        # into the A×R nested-list shape _grid_seed expects.
+        for _name, _rows in _new_value.items():
+            try:
+                _rows = list(_rows)
+                param_value_cache["grid"][_name] = [
+                    [float(_rows[_r][_age_cols[_a]]) for _r in range(_R)]
+                    for _a in range(_A)
+                ]
+            except (KeyError, IndexError, TypeError, ValueError):
+                pass
 
     # One toggle / scalar input / A×R data_editor per param, all built every run
     # so that flipping one param's toggle doesn't shift the others' widget
@@ -1135,11 +1275,11 @@ def _params_ui(param_names, reduce_param_names, rel_inf_param_names, loaded_conf
     # a plain dict of UI elements does not propagate value-change reactivity.
     param_vary_toggles = mo.ui.dictionary({
         _name: mo.ui.checkbox(
-            value=is_array_param(loaded_config, _name),
+            value=param_value_cache["vary"].get(_name, is_array_param(loaded_config, _name)),
             label="Vary by age/risk group",
         )
         for _name in param_names
-    })
+    }, on_change=_remember_vary)
     param_scalar_inputs = mo.ui.dictionary({
         _name: mo.ui.number(
             start=0.0, stop=10.0, step=None,
@@ -1147,7 +1287,7 @@ def _params_ui(param_names, reduce_param_names, rel_inf_param_names, loaded_conf
             label="" if _name in _rel_inf_set else _name,
         )
         for _name in param_names
-    })
+    }, on_change=_remember_scalar)
     # Rows are risk groups, columns are age groups (named from the Population &
     # Geography tab's age bands when available); "risk_group" is a read-only
     # row-label column.
@@ -1162,7 +1302,7 @@ def _params_ui(param_names, reduce_param_names, rel_inf_param_names, loaded_conf
             editable_columns=list(_age_cols),
         )
         for _name in param_names
-    })
+    }, on_change=_remember_grid)
     return param_vary_toggles, param_scalar_inputs, param_grid_inputs
 
 
@@ -3134,6 +3274,10 @@ def _build_config(
     }
     if _input_files:
         config_dict["input_files"] = _input_files
+    # Metapop layout (subpop names + travel matrix) from a population config;
+    # legacy setups read it from the folder's metapop_config.json instead.
+    if is_metapop and loaded_config.get("metapop"):
+        config_dict["metapop"] = loaded_config["metapop"]
 
     # Per-subpopulation parameter overrides. Start from any loaded overrides
     # (authored directly in model_config.json) so the load -> rebuild -> run
@@ -3188,12 +3332,14 @@ def _build_config(
 
 @app.cell
 def _config_preview(
-    config_dict, config_warnings, json, mo, main_tab,
+    config_dict, config_warnings, json, mo, main_tab, config_split,
     step_header, section_card, CLT_ACCENT,
 ):
     mo.stop(main_tab.value != "Model Builder", None)
     _ACC = CLT_ACCENT["builder"]
-    json_str = json.dumps(config_dict, indent=2)
+    _disease_cfg, _population_cfg, _ = config_split.split_model_config(config_dict)
+    _disease_str = json.dumps(_disease_cfg, indent=2)
+    _population_str = json.dumps(_population_cfg, indent=2)
     _warn_block = []
     if config_warnings:
         _warn_block.append(mo.callout(
@@ -3205,24 +3351,36 @@ def _config_preview(
         ))
     section_card(
         step_header(9, "Config Preview",
-                    "The assembled model config JSON — review or download it.",
+                    "The disease and population configs — review or download them.",
                     accent=_ACC),
         mo.vstack([
             *_warn_block,
             mo.accordion({
-                "View / download config JSON": mo.vstack([
+                "View / download disease config": mo.vstack([
                     mo.ui.code_editor(
-                        value=json_str, language="json",
+                        value=_disease_str, language="json",
                         disabled=True, min_height=300, max_height=600,
                     ),
                     mo.download(
-                        data=json_str.encode(),
-                        filename="model_config.json",
+                        data=_disease_str.encode(),
+                        filename="disease_config.json",
                         mimetype="application/json",
-                        label="Download config JSON",
+                        label="Download disease_config.json",
                     ),
-                ])
-            }),
+                ]),
+                "View / download population config": mo.vstack([
+                    mo.ui.code_editor(
+                        value=_population_str, language="json",
+                        disabled=True, min_height=300, max_height=600,
+                    ),
+                    mo.download(
+                        data=_population_str.encode(),
+                        filename="population_config.json",
+                        mimetype="application/json",
+                        label="Download population_config.json",
+                    ),
+                ]),
+            }, multiple=True),
         ]),
         accent=_ACC,
     )
@@ -3278,6 +3436,7 @@ def _run_sim(
     build_scalar_array,
     build_compartment_init,
     read_initial_conditions,
+    metapop_layout,
     parse_model_config_from_dict,
     ConfigDrivenSubpopModel,
     ConfigDrivenMetapopModel,
@@ -3525,19 +3684,22 @@ def _run_sim(
             not _folder.exists() or not _folder.is_dir(),
             mo.callout(mo.md(f"**Metapop folder not found:** {_folder}"), kind="danger"),
         )
-        _metapop_cfg_path = _folder / "metapop_config.json"
-        mo.stop(
-            not _metapop_cfg_path.exists(),
-            mo.callout(mo.md("**Missing:** `metapop_config.json` in metapop folder."), kind="danger"),
-        )
-        with open(_metapop_cfg_path) as _f:
-            _metapop_cfg = json.load(_f)
-        mo.stop(
-            "subpopulations" not in _metapop_cfg or "travel_matrix" not in _metapop_cfg,
-            mo.callout(mo.md("**Invalid `metapop_config.json`:** must have `subpopulations` and `travel_matrix` keys."), kind="danger"),
-        )
-        _sp_names = list(_metapop_cfg["subpopulations"])
-        _travel_arr = np.array(_metapop_cfg["travel_matrix"], dtype=float)
+        # Layout from the population config's travel matrix, else the
+        # folder's metapop_config.json (legacy).
+        try:
+            _sp_names, _travel_arr = metapop_layout(config_dict, _folder)
+            _layout_err = None
+        except FileNotFoundError:
+            _layout_err = (
+                "**Missing travel matrix:** load a population config with a "
+                "`travel_matrix`, or put `metapop_config.json` in the metapop folder."
+            )
+        except (KeyError, ValueError, json.JSONDecodeError) as _exc:
+            _layout_err = (
+                "**Invalid `metapop_config.json`:** must have `subpopulations` and "
+                f"`travel_matrix` keys ({_exc})."
+            )
+        mo.stop(_layout_err is not None, mo.callout(mo.md(_layout_err or ""), kind="danger"))
         _n_subpops = len(_sp_names)
 
         # Shared optional schedule files

@@ -267,18 +267,8 @@ def _analysis_param_catalog(
 
 
 @app.cell
-def _analysis_subpop_names(is_metapop, metapop_folder_input, Path, json):
-    _sp_names = []
-    if is_metapop and metapop_folder_input.value.strip():
-        _mc_path = Path(metapop_folder_input.value.strip()) / "metapop_config.json"
-        if _mc_path.exists():
-            try:
-                with open(_mc_path) as _f:
-                    _mc_cfg = json.load(_f)
-                _sp_names = list(_mc_cfg.get("subpopulations", []))
-            except Exception:
-                pass
-    analysis_sp_names = _sp_names
+def _analysis_subpop_names(is_metapop, metapop_subpop_names):
+    analysis_sp_names = list(metapop_subpop_names) if is_metapop else []
     return (analysis_sp_names,)
 
 
@@ -1098,17 +1088,8 @@ def _analysis_scenario_delete_ui(
 
 
 @app.cell
-def _analysis_shared_controls(mo, num_age_groups, is_metapop, metapop_folder_input, Path, json):
-    _sp_opts = ["all subpops"]
-    if is_metapop and metapop_folder_input.value.strip():
-        _mc_path = Path(metapop_folder_input.value.strip()) / "metapop_config.json"
-        if _mc_path.exists():
-            try:
-                with open(_mc_path) as _f:
-                    _mc_cfg = json.load(_f)
-                _sp_opts = ["all subpops"] + list(_mc_cfg.get("subpopulations", []))
-            except Exception:
-                pass
+def _analysis_shared_controls(mo, num_age_groups, is_metapop, metapop_subpop_names):
+    _sp_opts = ["all subpops"] + (list(metapop_subpop_names) if is_metapop else [])
 
     analysis_subpop_selector = mo.ui.multiselect(
         options=_sp_opts, value=["all subpops"], label="Subpopulation(s)",
