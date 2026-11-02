@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -66,8 +67,8 @@ def md_table(df: pd.DataFrame, bold_last: bool = False, index: bool = True, alig
     return "\n".join(lines)
 
 
-def fig(name: str, caption: str, folder: str = FIG) -> str:
-    return f"![{caption}]({folder}/{name})\n\n*{caption}*"
+def fig(name: str, caption: str, folder: str | None = None) -> str:
+    return f"![{caption}]({folder or FIG}/{name})\n\n*{caption}*"
 
 
 def fitted_risk(a: pd.DataFrame, col: str) -> list[str]:
@@ -83,10 +84,11 @@ def pct(x: float, nd: int = 1) -> str:
 
 # ── report ───────────────────────────────────────────────────────────────────
 
-def build(tables: Path, figs: Path, fit_cmp: Path) -> str:
-    cfg = json.loads((MA_VAX / "model_config_MA_vax.json").read_text())
-    fitc = json.loads((MA_VAX / "fit_config_MA_vax.json").read_text())
-    fitp = json.loads((MA_VAX / "fitted_params_MA_vax.json").read_text())
+def build(tables: Path, figs: Path, fit_cmp: Path, model_config: Path, fit_config: Path,
+          fitted_params: Path) -> str:
+    cfg = json.loads(model_config.read_text())
+    fitc = json.loads(fit_config.read_text())
+    fitp = json.loads(fitted_params.read_text())
     p = cfg["params"]
     n_fit_draws = len(fitp["accepted_params"])
     _meta = tables / "meta.json"
@@ -496,17 +498,25 @@ def main() -> None:
     ap.add_argument("--figures", type=Path, default=MA_VAX / "figures" / "output")
     ap.add_argument("--fit-comparison", type=Path,
                     default=MA_VAX / "fit_comparison_output_baseline" / "cumulative_comparison.csv")
+    ap.add_argument("--model-config", type=Path, default=MA_VAX / "model_config_MA_vax.json")
+    ap.add_argument("--fit-config", type=Path, default=MA_VAX / "fit_config_MA_vax.json")
+    ap.add_argument("--fitted-params", type=Path, default=MA_VAX / "fitted_params_MA_vax.json")
+    ap.add_argument("--name", default="report_MA_vax", help="output file name, without extension")
     ap.add_argument("--no-pdf", action="store_true")
     args = ap.parse_args()
+    # figure links in the HTML are relative to the report folder
+    global FIG
+    FIG = os.path.relpath(args.figures.resolve(), REPORT_DIR)
 
-    md_text = build(args.tables, args.figures, args.fit_comparison)
-    md_path = REPORT_DIR / "report_MA_vax.md"
+    md_text = build(args.tables, args.figures, args.fit_comparison,
+                    args.model_config, args.fit_config, args.fitted_params)
+    md_path = REPORT_DIR / f"{args.name}.md"
     md_path.write_text(md_text)
-    html_path = REPORT_DIR / "report_MA_vax.html"
+    html_path = REPORT_DIR / f"{args.name}.html"
     html_path.write_text(to_html(md_text))
     print(f"wrote {md_path}\nwrote {html_path}")
     if not args.no_pdf:
-        pdf_path = REPORT_DIR / "report_MA_vax.pdf"
+        pdf_path = REPORT_DIR / f"{args.name}.pdf"
         subprocess.run([CHROME, "--headless", "--disable-gpu", "--no-pdf-header-footer",
                         "--allow-file-access-from-files", f"--print-to-pdf={pdf_path}",
                         html_path.as_uri()], check=True, capture_output=True)

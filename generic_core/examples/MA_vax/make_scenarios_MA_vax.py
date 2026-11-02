@@ -15,7 +15,8 @@ in sync:
         --only baseline "no vax" "50% coverage (all ages)"
 
 Inputs (all in this folder):
-  model_config_MA_vax.json   pre-fit params (baselines the fit's IHR_scale multiplies)
+  model_config_MA_vax.json   pre-fit params (baselines the fit's IHR_scale multiplies);
+                             the sim script's MODEL_CONFIG_FILE
   fitted_params_MA_vax.json  best_params -> literal param values in SCENARIOS
   the vaccination schedule   daily_vaccines_df via the model config's input_files
                              (counterfactual_generic.scheduled_coverage)
@@ -68,10 +69,14 @@ COVERAGE_DECREASES = [5, 10, 15, 20]      # % relative decrease of the baseline 
 
 # Params written into each SCENARIOS literal (the scalar/age-array model
 # params; contact matrices and vax_transfer_delay_days are left to the config).
+# Params the model config doesn't have are skipped, so the same list covers
+# the asymptomatic variant (E_out_rate ... AV_relative_infectiousness).
 LITERAL_PARAMS = [
     "beta_baseline", "relative_suscept", "humidity_impact", "E_to_I_rate", "I_out_rate",
     "EV_to_IV_rate", "H_out_rate", "I_relative_infectiousness", "IV_relative_infectiousness",
     "I_to_H_prop", "vax_susceptibility", "IV_to_H_prop", "H_to_D_prop",
+    "E_out_rate", "EV_out_rate", "prop_symptomatic", "A_to_R_rate", "AV_to_R_rate",
+    "A_relative_infectiousness", "AV_relative_infectiousness",
 ]
 
 VE_PRESETS = {  # scenario name -> counterfactual_generic.ve_scenarios key
@@ -105,7 +110,7 @@ def build(num_days: int, start_date: str):
     cg.NUM_DAYS, cg.START_DATE = num_days, start_date
     cov = np.asarray(cg.scheduled_coverage(), dtype=float)
     params = fitted_params()
-    lit = {k: params[k] for k in LITERAL_PARAMS}
+    lit = {k: params[k] for k in LITERAL_PARAMS if k in params}
     n = len(AGE_GROUPS)
 
     # VE presets: the multipliers counterfactual_generic.ve_scenarios applies.
@@ -199,7 +204,7 @@ def replace_block(src: str, name: str, new: str) -> str:
 
 
 def main() -> None:
-    global RUN_SIM_FILE, FITTED_PARAMS_FILE
+    global RUN_SIM_FILE, FITTED_PARAMS_FILE, MODEL_CONFIG_FILE
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--dry-run", action="store_true", help="print the multipliers, don't rewrite")
     ap.add_argument("--run-sim-file", default=RUN_SIM_FILE.name,
@@ -213,6 +218,8 @@ def main() -> None:
     FITTED_PARAMS_FILE = _HERE / args.fitted_params
 
     src = RUN_SIM_FILE.read_text()
+    # the pre-fit params come from the model config the simulation script uses
+    MODEL_CONFIG_FILE = _HERE / json.loads(_sim_setting(src, "MODEL_CONFIG_FILE").replace("'", '"'))
     num_days = int(_sim_setting(src, "NUM_DAYS"))
     start_date = json.loads(_sim_setting(src, "START_DATE").replace("'", '"'))
     scenarios, designed, ratios, dose, cov, cov_mult = build(num_days, start_date)

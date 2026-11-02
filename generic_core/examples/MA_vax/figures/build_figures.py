@@ -445,14 +445,18 @@ def run_r(out: Path, tables: Path, ts_csv: Path, norm_csv: Path) -> None:
 
 
 def main() -> None:
+    global MODEL_CONFIG, FITTED_PARAMS
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--db", type=Path,
                     default=MA_VAX / "simulation_output_MA_vax_param_set_stochastic" / "results_parquet")
     ap.add_argument("--tables", type=Path, default=MA_VAX / "counterfactual_tables_from_db_MA_vax")
     ap.add_argument("--fit-csv", type=Path, default=MA_VAX / "baseline_new_H_MA_vax.csv")
     ap.add_argument("--out", type=Path, default=FIG_DIR / "output")
+    ap.add_argument("--model-config", type=Path, default=MODEL_CONFIG)
+    ap.add_argument("--fitted-params", type=Path, default=FITTED_PARAMS)
     ap.add_argument("--no-r", action="store_true", help="skip the R (ggplot) figures")
     args = ap.parse_args()
+    MODEL_CONFIG, FITTED_PARAMS = args.model_config, args.fitted_params
     args.out.mkdir(parents=True, exist_ok=True)
 
     print("scenario time series ...")
