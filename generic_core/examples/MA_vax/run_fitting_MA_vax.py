@@ -70,6 +70,8 @@ def main():
         tv_transmission=_fc.get("tv_transmission", False),
         tv_knot_spacing_days=_fc.get("tv_knot_spacing_days", 30),
         tv_tau=_fc.get("tv_tau", 0.25),
+        # fitted with the tempered (averaged) likelihood, the default before 2026-11-02
+        loglike_combine=_fc.get("loglike_combine", "mean"),
     )
 
     _rk = fit_cfg_raw["run_kwargs"]

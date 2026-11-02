@@ -168,6 +168,24 @@ class FitConfig:
     # automatically when it can't apply (fit_start_offset, or metapopulation).
     # Set False to force the always-rebuild path.
     reuse_model: bool = True
+    # MCMC only: how per-target log-likelihoods are combined. "sum" (default)
+    # weights each by its raw weight, so a weight-1 target counts as one full
+    # likelihood — the standard posterior for independent data. "mean" weights
+    # each by weight / Σweights, so the weights sum to 1 — this tempers the
+    # likelihood (the posterior is as wide as if there were Σweights times
+    # less data); it was the only behavior before 2026-11-02, so set it to
+    # reproduce older fits. Relative emphasis is the same in both.
+    loglike_combine: str = "sum"
+    # MCMC only: start the walkers from a previous fit result (path to its
+    # fitted_params JSON) instead of uniformly within the bounds. Its saved
+    # final walker positions (mcmc_diagnostics.final_state) are reused when
+    # they match this fit's sampler dimensions — a continuation of that chain,
+    # so a run that was too short can be resumed with mcmc_burnin = 0.
+    # Otherwise walkers start at draws from its accepted_params.
+    mcmc_init_from: str | None = None
+    # MCMC only: also save the full chain (float32) and per-step log-prob to
+    # this .npz path, so burn-in and thinning can be re-chosen after the run.
+    mcmc_chain_file: str | None = None
 
 
 @dataclass
@@ -208,6 +226,10 @@ class FitResult:
     # aligned with fit_targets/target_labels/target_weights/target_modes.
     # Not derivable from `observed` alone, so recorded alongside it.
     target_slices: list = field(default_factory=list)
+    # MCMC only (empty otherwise): autocorrelation times, the convergence
+    # verdict and suggested settings (see _mcmc_convergence_report), plus the
+    # final walker positions a later fit can resume from (mcmc_init_from).
+    mcmc_diagnostics: dict = field(default_factory=dict)
 
 
 def fit_result_to_dict(result: "FitResult") -> dict:
@@ -249,6 +271,7 @@ def fit_result_to_dict(result: "FitResult") -> dict:
         "tv_knot_spacing_days": result.tv_knot_spacing_days,
         "fit_config": result.fit_config,
         "target_slices": result.target_slices,
+        "mcmc_diagnostics": result.mcmc_diagnostics,
     }
 
 
@@ -284,6 +307,7 @@ def fit_result_from_dict(d: dict) -> "FitResult":
         tv_knot_spacing_days=d.get("tv_knot_spacing_days", 30),
         fit_config=d.get("fit_config", {}),
         target_slices=d.get("target_slices", []),
+        mcmc_diagnostics=d.get("mcmc_diagnostics", {}),
     )
 
 
@@ -701,6 +725,7 @@ def run_fit(
                     f"age/risk/subpopulation granularity."
                 )
 
+    _mcmc_diag: dict = {}
     if fit_config.method in ("adam", "lbfgs"):
         _run = _run_gradient_fit(
             config_dict, compartments, is_metapop, targets, fit_config,
@@ -737,7 +762,8 @@ def run_fit(
             _selected_params, _lo_vals, _hi_vals, _dim_vals, _seed_scale_comps,
             progress_callback=progress_callback,
         )
-        _best_params, _loss_curve, _accepted_params_list, _accepted_trajectories, _best_trajs = _run
+        _best_params, _loss_curve, _accepted_params_list, _accepted_trajectories, _best_trajs = _run[:5]
+        _mcmc_diag = _run[5] if len(_run) > 5 else {}
     else:
         raise ValueError(f"Unknown fitting method: {fit_config.method!r}")
 
@@ -765,6 +791,7 @@ def run_fit(
             {"subpop_idx": t.subpop_idx, "age_idx": t.age_idx, "risk_idx": t.risk_idx}
             for t in targets
         ],
+        mcmc_diagnostics=_mcmc_diag,
     )
 
 
@@ -2102,6 +2129,10 @@ def _bayesian_setup(
         incr_names = _tv_increment_names(len(knot_days) - 1)
     n_incr = len(incr_names)
     tv_tau = float(getattr(fit_config, "tv_tau", 0.25))
+    loglike_combine = getattr(fit_config, "loglike_combine", "sum")
+    if loglike_combine not in ("mean", "sum"):
+        raise ValueError(f"loglike_combine must be 'mean' or 'sum', got {loglike_combine!r}")
+    ll_norm = weight_sum if loglike_combine == "mean" else 1.0
 
     has_offset = bool(fit_config.fit_start_offset)
     off_lo, off_hi = fit_config.start_offset_bounds
@@ -2399,7 +2430,10 @@ def _bayesian_setup(
     def _loglike(trajs, phi) -> float:
         """Total log-likelihood of one simulation (``_simulate`` output)
         under the emcee (MCMC) likelihood model, combined across targets by
-        the same ``weight / weight_sum`` convex combination used elsewhere.
+        their raw weights (an untempered likelihood) — or, with
+        ``fit_config.loglike_combine == "mean"``, by the same
+        ``weight / weight_sum`` convex combination used elsewhere (tempered;
+        see FitConfig.loglike_combine).
 
         - "ts" targets: Negative-Binomial (NB2) log-likelihood per day via
           ``_nb2_loglike``, with dispersion ``phi`` itself a fitted parameter
@@ -2416,7 +2450,7 @@ def _bayesian_setup(
         """
         total = 0.0
         for k in range(n):
-            w_k = target_weights[k] / weight_sum
+            w_k = target_weights[k] / ll_norm
             nd = num_fit_days_per_target[k]
             sim = np.asarray(trajs[f"target_{k}"], dtype=float)
             if target_modes[k] == "ts":
@@ -2636,8 +2670,9 @@ def _run_bayesian_fit(
     Supports scalar, array (per-age/risk) and per-subpopulation parameters: each
     element is expanded into its own scalar sampler dimension and reconstructed
     before simulating (see ``_build_param_slots`` / ``_bayesian_setup``). Returns
-    the same 5-tuple as the other methods; the posterior ensemble is delivered
-    through ``accepted_params`` / ``accepted_trajectories``.
+    the same 5-tuple as the other methods, plus the convergence diagnostics as
+    a 6th element for MCMC; the posterior ensemble is delivered through
+    ``accepted_params`` / ``accepted_trajectories``.
     """
     # `payload` is the picklable set of kwargs `_bayesian_setup` needs; it is
     # both built once in-process (for walker init / post-processing) and shipped
@@ -2673,7 +2708,9 @@ def _emcee_run(ctx, payload, progress_callback=None):
     - Initializes ``nwalkers = max(2·ndim, fit_config.n_walkers)`` walkers
       uniformly within each bounded dimension (pulled in 20% from the edges
       to avoid starting exactly on a hard boundary); m(t) increment
-      dimensions (unbounded, Gaussian-prior) start near 0 instead.
+      dimensions (unbounded, Gaussian-prior) start near 0 instead. With
+      ``fit_config.mcmc_init_from`` they start from a previous fit instead
+      (see ``_mcmc_warm_start``).
     - Runs ``fit_config.n_iter`` ensemble steps, optionally across a process
       pool (see ``_init_bayes_worker``/``_bayes_log_prob_worker`` — emcee
       pickles the log-prob to each worker, so a picklable ``payload``
@@ -2688,6 +2725,9 @@ def _emcee_run(ctx, payload, progress_callback=None):
       ensemble (capped at ``MAX_DRAWS`` for downstream plotting), each
       re-simulated to populate ``accepted_trajectories`` (capped at
       ``MAX_TRAJS``), and the highest-log-prob draw becomes ``best_params``.
+    - Convergence: autocorrelation times and a finished / not-finished
+      verdict (``_mcmc_convergence_report``), printed and returned as a 6th
+      element with the final walker positions, so a later fit can resume.
     """
     try:
         import emcee
@@ -2711,6 +2751,11 @@ def _emcee_run(ctx, payload, progress_callback=None):
             p0[:, j] = rng.uniform(b[0] + pad, b[1] - pad, size=nwalkers)
         else:
             p0[:, j] = rng.normal(0.0, 0.05, size=nwalkers)  # increments near 0
+    init_note, continued = "uniform within the bounds", False
+    if getattr(fit_config, "mcmc_init_from", None):
+        p0, init_note, continued = _mcmc_warm_start(
+            fit_config.mcmc_init_from, ctx, nwalkers, p0, rng)
+    print(f"[fitting] MCMC start: {init_note}", flush=True)
 
     # True multiprocessing: the simulation is pure-Python and holds the GIL, so
     # a thread pool gives no speed-up. Each worker rebuilds its own eval context
@@ -2762,6 +2807,23 @@ def _emcee_run(ctx, payload, progress_callback=None):
     if good.sum() < 0.75 * nwalkers:
         good = mean_lp >= np.percentile(mean_lp, 25)
 
+    full_chain = sampler.get_chain()                            # (nsteps, nwalkers, ndim)
+    diagnostics = _mcmc_convergence_report(
+        full_chain[:, good, :], lp_chain[:, good], theta_names, burn, thin, continued)
+    diagnostics["init"] = init_note
+    diagnostics["loglike_combine"] = getattr(fit_config, "loglike_combine", "sum")
+    diagnostics["n_walkers_dropped"] = int(nwalkers - good.sum())
+    diagnostics["final_state"] = {
+        "theta_names": list(theta_names),
+        "positions": full_chain[-1].tolist(),
+        "log_prob": [float(v) for v in lp_chain[-1]],
+    }
+    if getattr(fit_config, "mcmc_chain_file", None):
+        np.savez_compressed(fit_config.mcmc_chain_file, chain=full_chain.astype(np.float32),
+                            log_prob=lp_chain.astype(np.float32), theta_names=np.array(theta_names),
+                            good_walkers=good)
+        print(f"[fitting] MCMC chain saved to {fit_config.mcmc_chain_file}", flush=True)
+
     chain = sampler.get_chain(discard=burn, thin=thin)          # (kept, nwalkers, ndim)
     lp_kept = sampler.get_log_prob(discard=burn, thin=thin)
     flat = chain[:, good, :].reshape(-1, ndim)
@@ -2797,7 +2859,169 @@ def _emcee_run(ctx, payload, progress_callback=None):
 
     print(f"[fitting] MCMC done — {len(accepted_params_list)} posterior draws "
           f"(dropped {int(nwalkers - good.sum())}/{nwalkers} walkers)", flush=True)
-    return best_params, loss_curve, accepted_params_list, accepted_trajectories, best_trajs
+    for line in diagnostics["verdict"]:
+        print(f"[fitting] MCMC convergence: {line}", flush=True)
+    return best_params, loss_curve, accepted_params_list, accepted_trajectories, best_trajs, diagnostics
+
+
+def _mcmc_warm_start(path, ctx, nwalkers, p0, rng):
+    """Initial walker positions from a previous fit result (``path`` to its
+    fitted_params JSON), for ``FitConfig.mcmc_init_from``.
+
+    - If the file holds the final walker positions of an MCMC fit with the
+      same sampler dimensions (``mcmc_diagnostics.final_state.theta_names``)
+      and walker count, those are used as-is: the new run continues that
+      chain, so it needs no burn-in.
+    - Otherwise walkers start at randomly chosen ``accepted_params`` draws,
+      mapped into sampler space (log10 for log params and phi). A dimension
+      the file does not have keeps its uniform start from ``p0``.
+
+    Positions are clipped just inside the current bounds (they may have
+    changed since that fit), and duplicated draws get a tiny jitter so the
+    ensemble is not degenerate. Returns ``(p0, description, continued)``.
+    """
+    theta_names = ctx.theta_names
+    with open(path) as f:
+        prev = json.load(f)
+    p0 = p0.copy()
+    state = (prev.get("mcmc_diagnostics") or {}).get("final_state") or {}
+    continued = False
+    if state.get("theta_names") == list(theta_names):
+        pos = np.asarray(state["positions"], dtype=float)
+        if len(pos) == nwalkers:
+            p0, continued = pos.copy(), True
+            note = f"continued from the final walker positions of {path}"
+        else:
+            idx = rng.choice(len(pos), size=nwalkers, replace=len(pos) < nwalkers)
+            p0 = pos[idx].copy()
+            note = (f"{nwalkers} walkers drawn from the {len(pos)} final positions of {path} "
+                    f"(walker count changed, so not a continuation)")
+    else:
+        draws = prev.get("accepted_params") or []
+        if not draws:
+            raise ValueError(f"mcmc_init_from: {path} has neither MCMC final positions nor accepted_params")
+        is_log = {s["name"]: s["is_log"] for s in ctx.param_slots}
+        idx = rng.choice(len(draws), size=nwalkers, replace=len(draws) < nwalkers)
+        missing = []
+        for j, nm in enumerate(theta_names):
+            key = {"log10phi": "phi", "offset": "epidemic_start_offset_days"}.get(nm, nm)
+            if key not in draws[0]:
+                missing.append(nm)
+                continue
+            vals = np.array([float(draws[i][key]) for i in idx])
+            p0[:, j] = np.log10(vals) if (nm == "log10phi" or is_log.get(nm, False)) else vals
+        note = f"{nwalkers} posterior draws of {path}"
+        if missing:
+            note += f"; {len(missing)} dimension(s) not in that file start uniformly: {', '.join(missing)}"
+    for j, nm in enumerate(theta_names):
+        b = ctx.bounds_for(nm)
+        if b is not None:
+            eps = 1e-6 * (b[1] - b[0])
+            p0[:, j] = np.clip(p0[:, j], b[0] + eps, b[1] - eps)
+    _, first = np.unique(p0, axis=0, return_index=True)
+    dup = np.setdiff1d(np.arange(nwalkers), first)
+    if len(dup):
+        scale = np.std(p0, axis=0) + 1e-12
+        p0[dup] += rng.normal(0.0, 1e-3, size=(len(dup), p0.shape[1])) * scale
+        continued = False
+    return p0, note, continued
+
+
+# A chain shorter than this many autocorrelation times gives an unreliable τ
+# estimate and too few independent draws (emcee documentation's guidance).
+MCMC_MIN_TAU_LENGTH = 50
+
+
+def _mcmc_convergence_report(chain, lp_chain, theta_names, burn, thin, continued):
+    """Autocorrelation-time diagnostics for an emcee run, with a plain-language
+    verdict on whether it finished.
+
+    ``chain`` is (n_steps, n_walkers, n_dim) and ``lp_chain`` (n_steps,
+    n_walkers), both for the walkers kept in the posterior. τ is computed per
+    dimension on the post-burn-in chain (emcee.autocorr.integrated_time). The
+    run counts as finished when all three hold:
+
+    - the post-burn-in chain is at least MCMC_MIN_TAU_LENGTH × τ_max steps;
+    - the burn-in is at least 3 × τ_max (or the run continued a previous
+      chain, so it started already converged);
+    - the walker-average log-posterior is not still rising: its last quarter
+      after burn-in is within max(1, 2 × its spread) of its first quarter.
+
+    Suggested settings follow the notebook's guidance: burn-in 3 × τ_max,
+    thinning 0.5 × τ_min. While the chain is too short, τ is underestimated,
+    so the suggestions are lower bounds.
+    """
+    from emcee.autocorr import integrated_time
+
+    n_steps, n_walkers, _ = chain.shape
+    post = chain[burn:]
+    n_post = post.shape[0]
+    if n_post < 2:
+        return {"finished": False, "verdict": ["no steps after burn-in: cannot estimate τ"]}
+    # Per dimension, over the walkers that moved: a walker whose every
+    # proposal was rejected has zero variance, which makes emcee's
+    # normalized autocorrelation NaN. A dimension where no walker moved is
+    # stuck: τ = ∞.
+    tau = np.full(post.shape[2], np.inf)
+    for j in range(post.shape[2]):
+        moved = np.ptp(post[:, :, j], axis=0) > 0
+        if moved.any():
+            tau[j] = float(integrated_time(post[:, moved, j:j + 1], c=5, tol=0, quiet=True)[0])
+    tau_max, tau_min = float(np.max(tau)), float(np.min(tau))
+    length_in_tau = n_post / tau_max
+    long_enough = length_in_tau >= MCMC_MIN_TAU_LENGTH
+    burn_ok = continued or burn >= 3 * tau_max
+
+    lp_mean = lp_chain[burn:].mean(axis=1)
+    q = max(1, len(lp_mean) // 4)
+    drift = float(lp_mean[-q:].mean() - lp_mean[:q].mean())
+    drifting = drift > max(1.0, 2.0 * float(lp_mean[-q:].std()))
+
+    sugg_burn = 0 if continued else int(np.ceil(3 * tau_max))
+    sugg_thin = max(1, int(0.5 * tau_min))
+    sugg_steps = sugg_burn + int(np.ceil(MCMC_MIN_TAU_LENGTH * tau_max))
+    eff_draws = n_walkers * n_post / tau_max
+    finished = bool(long_enough and burn_ok and not drifting)
+
+    order = np.argsort(tau)[::-1]
+    slowest = [(theta_names[i], round(float(tau[i]), 1)) for i in order[:5]]
+    verdict = [
+        (f"FINISHED — chain is {length_in_tau:.0f} τ long, burn-in covers start-up, log-posterior stable"
+         if finished else "NOT FINISHED — see below"),
+        f"τ (steps): max {tau_max:.0f}, min {tau_min:.0f}; slowest: "
+        + ", ".join(f"{nm} {t}" for nm, t in slowest),
+        f"chain after burn-in: {n_post} steps = {length_in_tau:.1f} τ (need ≥ {MCMC_MIN_TAU_LENGTH})"
+        + ("" if long_enough else " — too short; τ is likely underestimated"),
+        f"≈ {eff_draws:,.0f} effective independent draws across {n_walkers} walkers",
+    ]
+    if not burn_ok:
+        verdict.append(f"burn-in {burn} < 3 τ = {int(np.ceil(3 * tau_max))}: early, unconverged steps are in the posterior")
+    if drifting:
+        verdict.append(f"walker-average log-posterior still rising (+{drift:.1f} over the kept steps)")
+    if thin > tau_min:
+        verdict.append(f"thinning {thin} > τ_min {tau_min:.0f}: draws are discarded that would add information")
+    if not finished:
+        # A resumed run is diagnosed on its own steps, so it needs the full
+        # MCMC_MIN_TAU_LENGTH × τ itself (no burn-in: it starts converged).
+        verdict.append(
+            f"to finish: resume with mcmc_init_from = this result, mcmc_burnin = 0, "
+            f"n_iter ≥ {int(np.ceil(MCMC_MIN_TAU_LENGTH * tau_max)):,}")
+    verdict.append(f"suggested settings for this fit: burn-in {sugg_burn:,}, thinning {sugg_thin:,}, "
+                   f"total steps ≥ {sugg_steps:,}"
+                   + ("" if long_enough else " (lower bounds: τ is underestimated on a short chain)"))
+
+    return {
+        "tau": {nm: float(t) for nm, t in zip(theta_names, tau)},
+        "tau_max": tau_max, "tau_min": tau_min,
+        "n_steps": int(n_steps), "n_walkers": int(n_walkers), "burnin": int(burn), "thin": int(thin),
+        "continued": bool(continued),
+        "chain_length_in_tau": float(length_in_tau),
+        "effective_draws": float(eff_draws),
+        "logprob_drift": drift,
+        "finished": finished,
+        "suggested_burnin": sugg_burn, "suggested_thin": sugg_thin, "suggested_total_steps": sugg_steps,
+        "verdict": verdict,
+    }
 
 
 def _abc_smc_run(ctx, payload, progress_callback=None):
