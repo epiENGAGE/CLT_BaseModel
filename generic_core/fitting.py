@@ -186,6 +186,18 @@ class FitConfig:
     # MCMC only: also save the full chain (float32) and per-step log-prob to
     # this .npz path, so burn-in and thinning can be re-chosen after the run.
     mcmc_chain_file: str | None = None
+    # MCMC only: emcee proposal. "mix" (default) chooses per step 80% DEMove
+    # (differential evolution), 20% stretch — every move preserves the
+    # posterior, so a mixture does too. DE has 3.5-5x lower autocorrelation
+    # times than stretch on Gaussian-like posteriors at 5-33 dims; stretch is
+    # better on strongly curved ones, and the 20% share keeps the mix close to
+    # it there. "stretch" is emcee's affine-invariant stretch move (the only
+    # behavior before 2026-11-05, so set it to reproduce older fits); "de" is
+    # DEMove alone. emcee's DESnookerMove is deliberately not offered: in
+    # emcee <= 3.1.6 it does not preserve the target (on a 33-dim Gaussian it
+    # shrinks the variances by ~half; fixed upstream by dfm/emcee#531, not yet
+    # released), so any share of it biases the posterior narrower.
+    mcmc_moves: str = "mix"
 
 
 @dataclass
@@ -2112,6 +2124,9 @@ def _bayesian_setup(
 
     _scale_groups = _active_scale_groups(fit_config, selected_params)
     _scale_baselines = _resolve_scale_baselines(config_dict, _scale_groups)
+    _prop_scale_groups = {m: [b for b in bases if b.endswith("_prop")]
+                          for m, bases in _scale_groups.items()}
+    _prop_scale_groups = {m: bases for m, bases in _prop_scale_groups.items() if bases}
     _log_params = _active_log_params(fit_config, selected_params)
 
     # ── time-varying m(t) setup ───────────────────────────────────────────────
@@ -2585,6 +2600,13 @@ def _bayesian_setup(
             if b is not None and not (b[0] <= named[nm] <= b[1]):
                 return -np.inf
         sampled, scales, incr, offset, phi, per_sub = _named_to_components(named)
+        # a linked-scale multiplier must not push a probability ("*_prop")
+        # base parameter above 1 in any age/risk cell
+        for _b, _v in _expand_scale_overrides(
+                {m: sampled[m] for m in _prop_scale_groups if m in sampled},
+                _prop_scale_groups, _scale_baselines).items():
+            if np.max(_v) > 1.0:
+                return -np.inf
         lp = -0.5 * float(np.sum((incr / tv_tau) ** 2)) if len(incr) else 0.0
         try:
             trajs = _simulate(sampled, scales, incr, offset, per_sub)
@@ -2778,12 +2800,25 @@ def _emcee_run(ctx, payload, progress_callback=None):
             pool = None
             log_prob_fn = ctx.log_prob
     par_label = f"{n_workers} processes" if pool is not None else "single-process"
-    print(f"[fitting] MCMC (emcee): {nwalkers} walkers x {nsteps} steps, ndim={ndim}, {par_label}", flush=True)
+    print(f"[fitting] MCMC (emcee, {getattr(fit_config, 'mcmc_moves', 'mix')} moves): {nwalkers} walkers x {nsteps} steps, ndim={ndim}, {par_label}", flush=True)
 
-    sampler = emcee.EnsembleSampler(nwalkers, ndim, log_prob_fn, pool=pool)
+    moves_name = getattr(fit_config, "mcmc_moves", "mix")
+    if moves_name == "stretch":
+        moves = None
+    elif moves_name == "de":
+        moves = [(emcee.moves.DEMove(), 1.0)]
+    elif moves_name == "mix":
+        moves = [(emcee.moves.DEMove(), 0.8), (emcee.moves.StretchMove(), 0.2)]
+    else:
+        raise ValueError(f"mcmc_moves must be 'stretch', 'de' or 'mix', got {moves_name!r}")
+    sampler = emcee.EnsembleSampler(nwalkers, ndim, log_prob_fn, pool=pool, moves=moves)
     _mcmc_report_every = max(1, nsteps // 20)
     try:
         for _step_i, _state in enumerate(sampler.sample(p0, iterations=nsteps, progress=False)):
+            if (_step_i + 1) % _mcmc_report_every == 0:
+                print(f"[fitting] MCMC step {_step_i + 1}/{nsteps}: walker-average log-posterior "
+                      f"{float(np.mean(_state.log_prob)):.1f}, acceptance "
+                      f"{float(np.mean(sampler.acceptance_fraction)):.2f}", flush=True)
             if progress_callback and (_step_i + 1) % _mcmc_report_every == 0:
                 progress_callback({
                     "method": "mcmc",
@@ -2812,6 +2847,8 @@ def _emcee_run(ctx, payload, progress_callback=None):
         full_chain[:, good, :], lp_chain[:, good], theta_names, burn, thin, continued)
     diagnostics["init"] = init_note
     diagnostics["loglike_combine"] = getattr(fit_config, "loglike_combine", "sum")
+    diagnostics["moves"] = moves_name
+    diagnostics["acceptance_fraction"] = float(np.mean(sampler.acceptance_fraction))
     diagnostics["n_walkers_dropped"] = int(nwalkers - good.sum())
     diagnostics["final_state"] = {
         "theta_names": list(theta_names),

@@ -72,6 +72,8 @@ def main():
         tv_tau=_fc.get("tv_tau", 0.25),
         # fitted with the tempered (averaged) likelihood, the default before 2026-11-02
         loglike_combine=_fc.get("loglike_combine", "mean"),
+        # fitted with the stretch move, the default before 2026-11-05
+        mcmc_moves=_fc.get("mcmc_moves", "stretch"),
     )
 
     _rk = fit_cfg_raw["run_kwargs"]

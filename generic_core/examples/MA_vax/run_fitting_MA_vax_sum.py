@@ -84,6 +84,7 @@ def main():
         loglike_combine=_fc.get("loglike_combine", "mean"),
         mcmc_init_from=_here_path(_fc.get("mcmc_init_from")),
         mcmc_chain_file=_here_path(_fc.get("mcmc_chain_file")),
+        mcmc_moves=_fc.get("mcmc_moves", "stretch"),
     )
 
     _rk = fit_cfg_raw["run_kwargs"]
