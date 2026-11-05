@@ -1,0 +1,15 @@
+start Mon Nov  2 16:30:13 MST 2026
+[fitting] MCMC start: 66 posterior draws of /Users/rfp437/Work/CityLevelTransmission/CLT_BaseModel/generic_core/examples/MA_vax/fitted_params_MA_vax_IHR_ub_5.json
+[fitting] MCMC (emcee): 66 walkers x 12000 steps, ndim=33, 10 processes
+[fitting] MCMC chain saved to /Users/rfp437/Work/CityLevelTransmission/CLT_BaseModel/generic_core/examples/MA_vax/mcmc_chain_MA_vax_sum.npz
+[fitting] MCMC done — 4000 posterior draws (dropped 0/66 walkers)
+[fitting] MCMC convergence: NOT FINISHED — see below
+[fitting] MCMC convergence: τ (steps): max 986, min 716; slowest: humidity_impact 985.9, beta_baseline 934.6, m_dlog_22 916.0, IHR_scale|a3 899.8, IHR_scale|a2 867.8
+[fitting] MCMC convergence: chain after burn-in: 10000 steps = 10.1 τ (need ≥ 50) — too short; τ is likely underestimated
+[fitting] MCMC convergence: ≈ 669 effective independent draws across 66 walkers
+[fitting] MCMC convergence: burn-in 2000 < 3 τ = 2958: early, unconverged steps are in the posterior
+[fitting] MCMC convergence: walker-average log-posterior still rising (+1.0 over the kept steps)
+[fitting] MCMC convergence: to finish: resume with mcmc_init_from = this result, mcmc_burnin = 0, n_iter ≥ 49,298
+[fitting] MCMC convergence: suggested settings for this fit: burn-in 2,958, thinning 358, total steps ≥ 52,256 (lower bounds: τ is underestimated on a short chain)
+Wrote /Users/rfp437/Work/CityLevelTransmission/CLT_BaseModel/generic_core/examples/MA_vax/fitted_params_MA_vax_sum.json
+end Mon Nov  2 22:54:37 MST 2026 exit 0

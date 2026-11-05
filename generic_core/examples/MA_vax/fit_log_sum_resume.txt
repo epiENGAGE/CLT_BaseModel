@@ -1,0 +1,13 @@
+start Mon Nov  2 22:55:26 MST 2026
+[fitting] MCMC start: continued from the final walker positions of /Users/rfp437/Work/CityLevelTransmission/CLT_BaseModel/generic_core/examples/MA_vax/fitted_params_MA_vax_sum.json
+[fitting] MCMC (emcee): 66 walkers x 20000 steps, ndim=33, 10 processes
+[fitting] MCMC chain saved to /Users/rfp437/Work/CityLevelTransmission/CLT_BaseModel/generic_core/examples/MA_vax/mcmc_chain_MA_vax_sum_resume.npz
+[fitting] MCMC done — 4000 posterior draws (dropped 0/66 walkers)
+[fitting] MCMC convergence: NOT FINISHED — see below
+[fitting] MCMC convergence: τ (steps): max 1891, min 1388; slowest: beta_baseline 1890.6, humidity_impact 1849.5, m_dlog_1 1770.6, m_dlog_11 1619.2, IHR_scale|a5 1608.0
+[fitting] MCMC convergence: chain after burn-in: 20000 steps = 10.6 τ (need ≥ 50) — too short; τ is likely underestimated
+[fitting] MCMC convergence: ≈ 698 effective independent draws across 66 walkers
+[fitting] MCMC convergence: to finish: resume with mcmc_init_from = this result, mcmc_burnin = 0, n_iter ≥ 94,530
+[fitting] MCMC convergence: suggested settings for this fit: burn-in 0, thinning 693, total steps ≥ 94,530 (lower bounds: τ is underestimated on a short chain)
+Wrote /Users/rfp437/Work/CityLevelTransmission/CLT_BaseModel/generic_core/examples/MA_vax/fitted_params_MA_vax_sum_resume.json
+end Tue Nov  3 10:13:05 MST 2026 exit 0
