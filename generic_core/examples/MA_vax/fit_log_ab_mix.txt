@@ -1,0 +1,33 @@
+start Wed Nov  4 16:30:14 MST 2026
+[fitting] MCMC start: continued from the final walker positions of /Users/rfp437/Work/CityLevelTransmission/CLT_BaseModel/generic_core/examples/MA_vax/fitted_params_MA_vax_sum_resume.json
+[fitting] MCMC (emcee, mix moves): 66 walkers x 12000 steps, ndim=33, 5 processes
+[fitting] MCMC step 600/12000: walker-average log-posterior -5812.0, acceptance 0.06
+[fitting] MCMC step 1200/12000: walker-average log-posterior -5812.2, acceptance 0.07
+[fitting] MCMC step 1800/12000: walker-average log-posterior -5812.0, acceptance 0.07
+[fitting] MCMC step 2400/12000: walker-average log-posterior -5811.3, acceptance 0.07
+[fitting] MCMC step 3000/12000: walker-average log-posterior -5812.0, acceptance 0.07
+[fitting] MCMC step 3600/12000: walker-average log-posterior -5811.4, acceptance 0.06
+[fitting] MCMC step 4200/12000: walker-average log-posterior -5812.4, acceptance 0.06
+[fitting] MCMC step 4800/12000: walker-average log-posterior -5812.1, acceptance 0.06
+[fitting] MCMC step 5400/12000: walker-average log-posterior -5812.6, acceptance 0.06
+[fitting] MCMC step 6000/12000: walker-average log-posterior -5812.9, acceptance 0.06
+[fitting] MCMC step 6600/12000: walker-average log-posterior -5811.9, acceptance 0.06
+[fitting] MCMC step 7200/12000: walker-average log-posterior -5811.9, acceptance 0.06
+[fitting] MCMC step 7800/12000: walker-average log-posterior -5813.3, acceptance 0.06
+[fitting] MCMC step 8400/12000: walker-average log-posterior -5811.5, acceptance 0.06
+[fitting] MCMC step 9000/12000: walker-average log-posterior -5812.2, acceptance 0.06
+[fitting] MCMC step 9600/12000: walker-average log-posterior -5811.7, acceptance 0.06
+[fitting] MCMC step 10200/12000: walker-average log-posterior -5811.0, acceptance 0.06
+[fitting] MCMC step 10800/12000: walker-average log-posterior -5811.4, acceptance 0.06
+[fitting] MCMC step 11400/12000: walker-average log-posterior -5812.5, acceptance 0.06
+[fitting] MCMC step 12000/12000: walker-average log-posterior -5811.3, acceptance 0.06
+[fitting] MCMC chain saved to /Users/rfp437/Work/CityLevelTransmission/CLT_BaseModel/generic_core/examples/MA_vax/mcmc_chain_MA_vax_ab_mix.npz
+[fitting] MCMC done — 4000 posterior draws (dropped 0/66 walkers)
+[fitting] MCMC convergence: NOT FINISHED — see below
+[fitting] MCMC convergence: τ (steps): max 893, min 492; slowest: beta_baseline 892.8, humidity_impact 884.1, m_dlog_1 818.8, seed_scale_E 671.2, m_dlog_11 668.1
+[fitting] MCMC convergence: chain after burn-in: 12000 steps = 13.4 τ (need ≥ 50) — too short; τ is likely underestimated
+[fitting] MCMC convergence: ≈ 887 effective independent draws across 66 walkers
+[fitting] MCMC convergence: to finish: resume with mcmc_init_from = this result, mcmc_burnin = 0, n_iter ≥ 44,640
+[fitting] MCMC convergence: suggested settings for this fit: burn-in 0, thinning 246, total steps ≥ 44,640 (lower bounds: τ is underestimated on a short chain)
+Wrote /Users/rfp437/Work/CityLevelTransmission/CLT_BaseModel/generic_core/examples/MA_vax/fitted_params_MA_vax_ab_mix.json
+end Thu Nov  5 05:38:07 MST 2026 exit 0
