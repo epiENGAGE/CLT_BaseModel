@@ -1,3 +1,6 @@
+11/9/26
+Added El Paso 2023-2024 and El Paso 2024-2025 and updated flu_example_utils_23_24.py and flu_example_utils_24_25.py accordingly.
+
 11/5/26
 Updating vaccine schedules:
 Both seasons processed the same (except modification to predictor PCI for subpop estimates which is only for 24-25)

@@ -74,6 +74,17 @@ HOUSTON_L11_SHARED_FILES_CONFIG = {
     "mobility_file":      "mobility_modifier.csv",
 }
 
+ELPASO_L6_SHARED_FILES_CONFIG = {
+    "base_path":          None,
+    "common_params_file": "common_subpop_params.json",
+    "subpop_specific_params_file": "subpop_specific_params.json",
+    "mixing_params_file": "mixing_params.json",
+    "settings_file":      "simulation_settings.json",
+    "humidity_file":      "absolute_humidity_elPaso.csv",
+    "mobility_file":      "mobility_modifier.csv",
+}
+
+
 
 # ---------------------------------------------------------------------------
 # Subpopulation config lists
@@ -194,6 +205,44 @@ HOUSTON_L11_SUBPOP_CONFIG = [
     },
 ]
 
+ELPASO_L6_SUBPOP_CONFIG = [
+    {
+        "name":            "Central",
+        "init_vals_file":  "init_vals_Central.json",
+        "vaccines_file":   "daily_vaccines_Central.csv",
+        "calendar_file":   "school_work_calendar_Central.csv",
+    },
+    {
+        "name":            "East",
+        "init_vals_file":  "init_vals_East.json",
+        "vaccines_file":   "daily_vaccines_East.csv",
+        "calendar_file":   "school_work_calendar_East.csv",
+    },
+    {
+        "name":            "FarEast",
+        "init_vals_file":  "init_vals_FarEast.json",
+        "vaccines_file":   "daily_vaccines_FarEast.csv",
+        "calendar_file":   "school_work_calendar_FarEast.csv",
+    },
+     {
+        "name":            "LV",
+        "init_vals_file":  "init_vals_LV.json",
+        "vaccines_file":   "daily_vaccines_LV.csv",
+        "calendar_file":   "school_work_calendar_LV.csv",
+    },
+    {
+        "name":            "NE",
+        "init_vals_file":  "init_vals_NE.json",
+        "vaccines_file":   "daily_vaccines_NE.csv",
+        "calendar_file":   "school_work_calendar_NE.csv",
+    },
+    {
+        "name":            "West",
+        "init_vals_file":  "init_vals_West.json",
+        "vaccines_file":   "daily_vaccines_West.csv",
+        "calendar_file":   "school_work_calendar_West.csv",
+    },
+]
 
 # ---------------------------------------------------------------------------
 # Master location registry — add new cities/models here
@@ -278,6 +327,26 @@ ALL_LOCATION_CONFIGS = {
             "pop":     "Houston_L11_E0_pop",
         },
     },
+     "ElPaso_L6": {
+        "shared":          ELPASO_L6_SHARED_FILES_CONFIG,
+        "subpops":         ELPASO_L6_SUBPOP_CONFIG,
+        "input_prefix":    "elPaso_input_files",
+        "report_dir":      "ElPaso_L6",
+        "param_tag":       "ElPaso6",
+        "high_risk_fractions": {
+            "Central": np.array([0.056, 0.128, 0.232, 0.433, 0.666], dtype=float),
+            "East":  np.array([0.051, 0.120, 0.194, 0.383, 0.602], dtype=float),
+            "FarEast": np.array([0.058, 0.134, 0.240, 0.451, 0.689], dtype=float),
+            "LV": np.array([0.062, 0.143, 0.257, 0.482, 0.729], dtype=float),
+            "NE":  np.array([0.051, 0.117, 0.200, 0.378, 0.594], dtype=float),
+            "West": np.array([0.061, 0.139, 0.243, 0.459, 0.701], dtype=float),
+        },
+        "calibration_mode_dirs": {
+            "normal":  "ElPaso_L6",
+            "rescale": "ElPaso_L6_updated",
+            "pop":     "ElPaso_L6_E0_pop",
+        },
+    },
 }
 
 
@@ -285,7 +354,7 @@ ALL_LOCATION_CONFIGS = {
 # Active location — change only this variable to switch cities/models
 # ---------------------------------------------------------------------------
 
-CURRENT_LOCATION = "Houston_L11"
+CURRENT_LOCATION = "ElPaso_L6"
 
 SHARED_FILES_CONFIG = {
     **ALL_LOCATION_CONFIGS[CURRENT_LOCATION]["shared"],
